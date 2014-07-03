@@ -24,12 +24,12 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import GoogleMapsEngine
+import mapsEngineUpload
 
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
-    print >>sys.stderr, ''' Script for grabbing HiRISE data files'''
+    print >>sys.stderr, ''' Script for grabbing HRSC data files'''
 
     sys.exit()
 
@@ -41,72 +41,51 @@ class Usage(Exception):
 #--------------------------------------------------------------------------------
 
 # fileType is the file name after the prefix
-def generatePdsPath(filePrefix, fileType):
-    """Generate the full PDS path for a given HiRISE data file"""
+def generatePdsPath(filePrefix):
+    """Generate the full PDS path for a given HRSC data file"""
+       
+    # File prefix looks like this: hHXXX_DDDD_SSS
+    fileType = '.img'
     
-    # File prefix looks like this: PSP_009716_1755 or ESP_011984_1755
-    
-    # Extract the mission code (only a few possibilities)
-    missionCode = filePrefix[0:3]
-    
-    # Determine which ORB folder this will be in (each contains 100 files)
-    # - Looks like this: ORB_001300_001399
-    frameNumber = filePrefix[4:9]
-    orbDir = 'ORB_'+ frameNumber[0:4] +'00_'+ frameNumber[0:4] +'99'
-    
+    # Extract the run number --> HXXX
+    runNum = filePrefix[1:5]
+       
     filename = filePrefix + fileType
-    baseUrl  = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"
-    fullUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ filename
+    baseUrl  = "http://pds-geosciences.wustl.edu/mex/mex-m-hrsc-5-refdr-mapprojected-v2/mexhrsc_1001/data/"
+    fullUrl  = baseUrl + runNum +"/"+ filename
 
     #print filePrefix + fileType + ' -> ' + fullUrl
     return fullUrl
 
-# missionCode should be ESP or PSP
-def getDataList(outputFilePath, missionCode):
-    """Populates a text file list of all available HiRISE RDR data"""
+
+def getDataList(outputFilePath):
+    """Populates a text file list of all available HRSC RDR data"""
        
-    print 'Updating HiRISE PDS data list...'
-       
-    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/<PSP or ESP>/<ORB_PATH>/<PSP or ESP PATH>/<FILE_NAME.JP2>
-    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/ESP/ORB_011900_011999/ESP_011984_1755/
-    #http://hirise-pds.lpl.arizona.edu/download/PDS/RDR/PSP/ORB_001400_001499/PSP_001430_1815/PSP_001430_1815_RED.JP2
-    
-   
-    # TODO: Do another loop for ESP!
-    baseUrl = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"+missionCode+"/"
+    print 'Updating HRSC PDS data list...'
+          
+    baseUrl = "http://pds-geosciences.wustl.edu/mex/mex-m-hrsc-5-refdr-mapprojected-v2/mexhrsc_1001/data/"
 
     # Parse the top PDS level
     parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
-
+    
     outputFile = open(outputFilePath, 'w')
-
+    
     # Loop through outermost directory
     for line in parsedIndexPage.findAll('a'):
-        orbName = line.string
-        if not 'ORB' in orbName: # Skip link up a directory
-            continue
-        orbPath = baseUrl + orbName
         
-        #print 'Scanning directory ' + orbPath
+        dataPrefix = 'h' + line.string
         
-        # Parse next directory level
-        orbPage = BeautifulSoup(urllib2.urlopen((orbPath)).read())
+        subFolderUrl = baseUrl + line.string + '/'
+        parsedDataPage = BeautifulSoup(urllib2.urlopen((subFolderUrl)).read())
         
-        #print orbPage.prettify()
+        # Loop through the data files
+        # - There is a core set of files on each page but there can be
+        #   more with incremented image numbers.
+        for d in parsedDataPage.findAll('a'):
+            dataFileName = d.string[:-4] # Lop off the .img portion
         
-        # Loop through inner directory
-        for line in orbPage.findAll('a'):
-            pspName = line.string
-            if not 'PSP' in pspName: # Skip link up a directory
-                continue
-            
-            ## No need to loop through the next level; the file names are fixed.
-            #pspPath = orbPath + pspName + pspName[:-1]
-            
-            # TODO: Don't store paths, just store the name.
-            #outputFile.write(pspPath + '\n')
-            outputFile.write(pspName[:-1] + '\n')
-            
+            outputFile.write(dataFileName + '\n')
+
     outputFile.close()
     
     print 'Wrote updated data list to ' + outputFilePath
@@ -118,17 +97,25 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
     print 'Uploading file ' + remoteFilePath
     
     
-    localFilePath = os.path.join(tempDir, os.path.basename(remoteFilePath))
+    localFileName = os.path.splitext(os.path.basename(remoteFilePath))[0]+'.tif'
+    localFilePath = os.path.join(tempDir, localFileName)
+    downloadPath  = os.path.join(tempDir, os.path.basename(remoteFilePath))
+    
     if not os.path.exists(localFilePath):
         # Download the file
-        cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
+        cmd = 'wget ' + remoteFilePath + ' -O ' + downloadPath
         print cmd
         os.system(cmd)
     
+    # Convert to GTiff format
+    cmd = 'gdal_translate -of GTiff ' + downloadPath + ' ' + localFilePath
+    print cmd
+    os.system(cmd)
+    
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', 0]
+    cmdArgs = [localFilePath, '--sensor', '1']
     #print cmdArgs
-    assetId = GoogleMapsEngine.main(cmdArgs)
+    assetId = mapsEngineUpload.main(cmdArgs)
     #assetId = 12345
     
     #TODO: Check to make sure the file made it up!
@@ -143,7 +130,7 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
     print 'rm ' + localFilePath
     #os.remove(localFilePath)
     
-    print 'Finished uploading HiRISE data file'
+    print 'Finished uploading HRSC data file'
     return assetId
 
 
@@ -162,22 +149,14 @@ def logWriter(logQueue, logPath):
     print 'Writer stopped'
 
 
-# TODO: Select from different file types
-def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numThreads=1):
+# TODO: Select from different file types?
+def uploadNextFile(dataListPath, outputFolder, numFiles=1, numThreads=1):
     """Determines the next file to upload, uploads it, and logs it"""
     
     print 'Searching for next file to upload...'
     
     # Set up the output paths    
-    #uploadedColorPath   = os.path.join(outputFolder, 'uploadedPatchFilesTest.txt')
-    uploadedRedPath   = os.path.join(outputFolder, 'uploadedRed.csv')
-    uploadedColorPath = os.path.join(outputFolder, 'uploadedColor.csv')
-    
-    logPath   = uploadedRedPath
-    targetEnd = '_RED.JP2'
-    if getColor:
-        logPath   = uploadedColorPath
-        targetEnd = '_COLOR.JP2'
+    logPath = os.path.join(outputFolder, 'uploadedPatchFilesTest.txt')
     
     inFile = open(dataListPath,    'r')
 
@@ -231,7 +210,7 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
     # For each line generate the full download path
     jobResults = []
     for line in linesToProcess:
-        fullPath = generatePdsPath(line, targetEnd)
+        fullPath = generatePdsPath(line.lower())
         jobResults.append(pool.apply_async(uploadFile, args=(line, fullPath, queue, outputFolder)))
     
     
@@ -260,23 +239,15 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
 
 def main():
 
-    print "Started hiriseDataLoader.py"
+    print "Started hrscDataLoader.py"
 
     try:
         try:
-            usage = "usage: hiriseDataLoader.py <output folder> [--help][--manual]\n  "
+            usage = "usage: hrscDataLoader.py <output folder> [--help][--manual]\n  "
             parser = optparse.OptionParser(usage=usage)
             parser.add_option("-u", "--upload", dest="upload", type=int,
                               help="Upload this many files instead of fetching the list.")
-            #parser.add_option("-o", "--output-folder", dest="outputFolder",
-            #                  help="Specifies the folder to copy the data to.",
-            #                  default='./')
-            #parser.add_option("-n", "--name", dest="name",
-            #                  help="Only get the data for the DTM with this name.",
-            #                  default='')
-            
-            parser.add_option("--color", action="store_true", dest="getColor",
-                              help="Retrieve COLOR image instead of RED images.")
+
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -303,18 +274,12 @@ def main():
 
         # These are input lists that just show the available images
         pspListPath = os.path.join(options.outputFolder, 'pspList.csv')
-        espListPath = os.path.join(options.outputFolder, 'espList.csv')
-        fullListFile = os.path.join(options.outputFolder, 'fullList.csv')
 
         # If we are not uploading data, update the data list
         if not options.upload:
-            getDataList(pspListPath, 'PSP')
-            getDataList(espListPath, 'ESP')
-            # TODO: Concatenate files!!!
-            #cmd = 'cat'
-            #os.system(cmd)
+            getDataList(pspListPath)
         else:
-            uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
+            uploadNextFile('hrscImageList_smallPatch.csv', options.outputFolder, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
 
 

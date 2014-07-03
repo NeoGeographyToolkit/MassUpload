@@ -24,12 +24,12 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import GoogleMapsEngine
+import mapsEngineUpload
 
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
-    print >>sys.stderr, ''' Script for grabbing HiRISE data files'''
+    print >>sys.stderr, ''' Script for grabbing CTX data files'''
 
     sys.exit()
 
@@ -41,36 +41,38 @@ class Usage(Exception):
 #--------------------------------------------------------------------------------
 
 # fileType is the file name after the prefix
-def generatePdsPath(filePrefix, fileType):
-    """Generate the full PDS path for a given HiRISE data file"""
+def generatePdsPath(filePrefix, volume):
+    """Generate the full PDS path for a given CTX data file"""
     
-    # File prefix looks like this: PSP_009716_1755 or ESP_011984_1755
+    # File prefix looks something like this: B08_012841_1751_XN_04S222W
+    # Volume ID looks like this: mrox_0738
     
-    # Extract the mission code (only a few possibilities)
-    missionCode = filePrefix[0:3]
-    
-    # Determine which ORB folder this will be in (each contains 100 files)
-    # - Looks like this: ORB_001300_001399
-    frameNumber = filePrefix[4:9]
-    orbDir = 'ORB_'+ frameNumber[0:4] +'00_'+ frameNumber[0:4] +'99'
-    
-    filename = filePrefix + fileType
-    baseUrl  = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"
-    fullUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ filename
 
-    #print filePrefix + fileType + ' -> ' + fullUrl
-    return fullUrl
+    #baseUrl = 'http://viewer.mars.asu.edu/planetview/inst/ctx/' #<>#start'
+    ##baseUrl = "http://viewer.mars.asu.edu/planetview/inst/ctx#/planetview/inst/ctx/"
+    ##http://viewer.mars.asu.edu/planetview/inst/ctx#/planetview/inst/ctx/B08_012841_1751_XN_04S222W
+    #pageUrl = baseUrl + filePrefix + '#start'
+    #
+    ## Need to retrieve the URL from a web site
+    #parsedPage = BeautifulSoup(urllib2.urlopen((pageUrl)).read())
+    #print parsedPage.prettify()
+    
+    # Grab the file directly from the ASU map projected database.
+    imageUrl = ("http://image.mars.asu.edu/stream/"+filePrefix+
+               ".jp2?image=/mars/images/ctx/"+volume+"/prj_full/"+filePrefix+".jp2")
+
+    labelUrl = ("http://image.mars.asu.edu/stream/"+filePrefix+
+                ".scyl.isis.hdr?image=/mars/images/ctx/"+volume+"/stage/"
+                +filePrefix+".scyl.isis.hdr")
+
+    return (imageUrl, labelUrl)
 
 # missionCode should be ESP or PSP
 def getDataList(outputFilePath, missionCode):
     """Populates a text file list of all available HiRISE RDR data"""
        
-    print 'Updating HiRISE PDS data list...'
+    print 'Updating CTX PDS data list...'
        
-    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/<PSP or ESP>/<ORB_PATH>/<PSP or ESP PATH>/<FILE_NAME.JP2>
-    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/ESP/ORB_011900_011999/ESP_011984_1755/
-    #http://hirise-pds.lpl.arizona.edu/download/PDS/RDR/PSP/ORB_001400_001499/PSP_001430_1815/PSP_001430_1815_RED.JP2
-    
    
     # TODO: Do another loop for ESP!
     baseUrl = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"+missionCode+"/"
@@ -112,23 +114,40 @@ def getDataList(outputFilePath, missionCode):
     print 'Wrote updated data list to ' + outputFilePath
 
 
-def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
+def uploadFile(filePrefix, imageUrl, labelUrl, logQueue, tempDir):
     """Uploads a remote file to maps engine"""
     
-    print 'Uploading file ' + remoteFilePath
+    print 'Uploading file ' + filePrefix
     
+    localFilePath  = os.path.join(tempDir, filePrefix + '.jp2')
+    localImagePath = os.path.join(tempDir, filePrefix + '_noGeo.jp2')
+    localLabelPath = os.path.join(tempDir, filePrefix + '_noGeo.lbl')  
     
-    localFilePath = os.path.join(tempDir, os.path.basename(remoteFilePath))
-    if not os.path.exists(localFilePath):
-        # Download the file
-        cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
+    if not os.path.exists(localImagePath):
+        # Download the image file
+        cmd = 'wget ' + imageUrl + ' -O ' + localImagePath
         print cmd
         os.system(cmd)
+
+    if not os.path.exists(localLabelPath):
+        # Download the label file
+        cmd = 'wget ' + labelUrl + ' -O ' + localLabelPath
+        print cmd
+        os.system(cmd)
+
+    if not os.path.exists(localFilePath):    
+        # Correct the file - The JP2 file from ASU needs the geo data from the label file!
+        cmd = 'addGeoToAsuCtxJp2.py --label '+ localLabelPath +' '+ localImagePath +' '+ localFilePath
+        print cmd
+        os.system(cmd)
+        
+        if not os.path.exists(localFilePath):
+            raise Exception('Script to add geo data to JP2 file failed!')
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', 0]
+    cmdArgs = [localFilePath, '--sensor', '2']
     #print cmdArgs
-    assetId = GoogleMapsEngine.main(cmdArgs)
+    assetId = mapsEngineUpload.main(cmdArgs)
     #assetId = 12345
     
     #TODO: Check to make sure the file made it up!
@@ -143,7 +162,7 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
     print 'rm ' + localFilePath
     #os.remove(localFilePath)
     
-    print 'Finished uploading HiRISE data file'
+    print 'Finished uploading CTX data file'
     return assetId
 
 
@@ -163,21 +182,13 @@ def logWriter(logQueue, logPath):
 
 
 # TODO: Select from different file types
-def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numThreads=1):
+def uploadNextFile(dataListPath, outputFolder, numFiles=1, numThreads=1):
     """Determines the next file to upload, uploads it, and logs it"""
     
     print 'Searching for next file to upload...'
     
     # Set up the output paths    
-    #uploadedColorPath   = os.path.join(outputFolder, 'uploadedPatchFilesTest.txt')
-    uploadedRedPath   = os.path.join(outputFolder, 'uploadedRed.csv')
-    uploadedColorPath = os.path.join(outputFolder, 'uploadedColor.csv')
-    
-    logPath   = uploadedRedPath
-    targetEnd = '_RED.JP2'
-    if getColor:
-        logPath   = uploadedColorPath
-        targetEnd = '_COLOR.JP2'
+    logPath = os.path.join(outputFolder, 'uploadedPatchFiles.txt')
     
     inFile = open(dataListPath,    'r')
 
@@ -189,15 +200,17 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
             lastUploadedLine = line
         outFile.close()
     lastUploadedLine = lastUploadedLine.split(',')[0].strip() # Remove the asset ID from the string
-    #print '#' + lastUploadedLine + '#'
+    print '#' + lastUploadedLine + '#'
     
     # Now find that line in the input file list
     linesToProcess = []
     breakNext = -1
     for line in inFile:
-        line = line.strip() # Remove \n from the line
+        # Remove /n
+        line = line.strip()
+        prefix = line.split(',')[0].strip() # Strip off the volume label
         #print '#' + line + '#'
-        
+
         if breakNext > 0:
             linesToProcess.append(line) # Record this line and move on to the next
             breakNext = breakNext - 1
@@ -209,7 +222,7 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
             linesToProcess.append(line)
             breakNext = numFiles - 1 # Still get the next N-1 files
             continue
-        if (line == lastUploadedLine): # Found the last one downloaded
+        if (prefix == lastUploadedLine): # Found the last one downloaded
             breakNext = numFiles # Get the next N-1 files
             continue
     
@@ -231,8 +244,12 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
     # For each line generate the full download path
     jobResults = []
     for line in linesToProcess:
-        fullPath = generatePdsPath(line, targetEnd)
-        jobResults.append(pool.apply_async(uploadFile, args=(line, fullPath, queue, outputFolder)))
+        # Each line contains a prefix and a volume label seperated by a comma
+        prefix, volume = line.split(',')
+        prefix = prefix.strip()
+        volume = volume.strip()
+        imageUrl, labelUrl = generatePdsPath(prefix, volume)
+        jobResults.append(pool.apply_async(uploadFile, args=(prefix, imageUrl, labelUrl, queue, outputFolder)))
     
     
     # Wait until all threads have finished
@@ -260,23 +277,15 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
 
 def main():
 
-    print "Started hiriseDataLoader.py"
+    print "Started ctxDataLoader.py"
 
     try:
         try:
-            usage = "usage: hiriseDataLoader.py <output folder> [--help][--manual]\n  "
+            usage = "usage: ctxDataLoader.py <output folder> [--help][--manual]\n  "
             parser = optparse.OptionParser(usage=usage)
             parser.add_option("-u", "--upload", dest="upload", type=int,
                               help="Upload this many files instead of fetching the list.")
-            #parser.add_option("-o", "--output-folder", dest="outputFolder",
-            #                  help="Specifies the folder to copy the data to.",
-            #                  default='./')
-            #parser.add_option("-n", "--name", dest="name",
-            #                  help="Only get the data for the DTM with this name.",
-            #                  default='')
-            
-            parser.add_option("--color", action="store_true", dest="getColor",
-                              help="Retrieve COLOR image instead of RED images.")
+
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -309,12 +318,12 @@ def main():
         # If we are not uploading data, update the data list
         if not options.upload:
             getDataList(pspListPath, 'PSP')
-            getDataList(espListPath, 'ESP')
+            #getDataList(espListPath, 'ESP')
             # TODO: Concatenate files!!!
             #cmd = 'cat'
             #os.system(cmd)
         else:
-            uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
+            uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
 
 

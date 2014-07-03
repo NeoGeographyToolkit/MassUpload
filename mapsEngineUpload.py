@@ -30,6 +30,15 @@ from oauth2client import tools
 
 # Authorization codes
 # TODO: Load these!
+API_KEY       = 'AIzaSyAM1ytSqkzubDMzjVWBjM19uawCkIBVvLY'
+CLIENT_ID     = '298099604529-69gprkqj67qkm5ncfik32uenug8qgagn.apps.googleusercontent.com'
+CLIENT_SECRET = 'kNDmMQi_BH2ttN3XRIY2GA-7'
+PROJECT_ID    = '04070367133797133737'
+
+SENSOR_TYPE_HiRISE = 0
+SENSOR_TYPE_HRSC   = 1
+SENSOR_TYPE_CTX    = 2
+
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
@@ -158,29 +167,72 @@ def authorize(redo=False):
 #  # Is there an additional page of features to load?
 #  request = features.list_next(request, resource)
 
-def createRasterAsset(bearerToken, inputFile):
+def createRasterAsset(bearerToken, inputFile, sensorType):
     
     url = 'https://www.googleapis.com/mapsengine/v1/rasters/upload'
     
     justFilename = os.path.basename(inputFile)
-    data = ( 
-    {
-      "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
-      "name": 'HiRISE_'+justFilename,  # REQUIRED
-      "description": "HiRISE map projected RDR data",
-      "files": [ # REQUIRED
-        { "filename": justFilename }
-      ],
-      #"acquisitionTime": {
-      #  "start": "2010-01-01T12:00:00Z",
-      #  "end": "2010-12-01T12:00:00Z",
-      #  "precision": "second"
-      #},
-      "draftAccessList": "Map Editors", # REQUIRED
-      "attribution": "NASA Public Domain", # REQUIRED
-      "tags": ["Mars", "MRO", "HiRISE"],
-      "maskType": "autoMask"
-    } )
+    
+    if sensorType == SENSOR_TYPE_HiRISE:
+        data = ( 
+        {
+          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
+          "name": 'HiRISE_'+justFilename,  # REQUIRED
+          "description": "HiRISE map projected RDR data",
+          "files": [ # REQUIRED
+            { "filename": justFilename }
+          ],
+          #"acquisitionTime": {
+          #  "start": "2010-01-01T12:00:00Z",
+          #  "end": "2010-12-01T12:00:00Z",
+          #  "precision": "second"
+          #},
+          "draftAccessList": "Map Editors", # REQUIRED
+          "attribution": "NASA Public Domain", # REQUIRED
+          "tags": ["Mars", "MRO", "HiRISE"],
+          "maskType": "autoMask"
+        } )
+    elif sensorType == SENSOR_TYPE_HRSC:
+        data = ( 
+        {
+          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
+          "name": 'HRSC_'+justFilename,  # REQUIRED
+          "description": "HRSC map projected RDR data",
+          "files": [ # REQUIRED
+            { "filename": justFilename }
+          ],
+          #"acquisitionTime": {
+          #  "start": "2010-01-01T12:00:00Z",
+          #  "end": "2010-12-01T12:00:00Z",
+          #  "precision": "second"
+          #},
+          "draftAccessList": "Map Editors", # REQUIRED
+          "attribution": "NASA Public Domain", # REQUIRED
+          "tags": ["Mars", "MEX", "HRSC"],
+          "maskType": "autoMask"
+        } )
+    elif sensorType == SENSOR_TYPE_CTX:
+        data = ( 
+        {
+          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
+          "name": 'CTX_'+justFilename,  # REQUIRED
+          "description": "CTX map projected RDR data",
+          "files": [ # REQUIRED
+            { "filename": justFilename }
+          ],
+          #"acquisitionTime": {
+          #  "start": "2010-01-01T12:00:00Z",
+          #  "end": "2010-12-01T12:00:00Z",
+          #  "precision": "second"
+          #},
+          "draftAccessList": "Map Editors", # REQUIRED
+          "attribution": "NASA Public Domain", # REQUIRED
+          "tags": ["Mars", "MRO", "CTX"],
+          "maskType": "autoMask"
+        } )
+    else:
+        raise Exception('Unrecognized sensor type!')
+        
     print(data)
     tokenString = 'Bearer '+bearerToken
     headers = {'Authorization': tokenString,
@@ -267,6 +319,9 @@ def main(argsIn):
     usage = "usage: mapsEngineUpload.py <input image> [--manual]\n  "
     parser = optparse.OptionParser(usage=usage)
 
+    parser.add_option("--sensor", type="int", dest="sensor", default=0,
+                              help="Which sensor? (HiRISE=0, HRSC=1, CTX=2).")
+
     parser.add_option("--manual", action="callback", callback=man,
                       help="Read the manual.")
     (options, args) = parser.parse_args(argsIn)
@@ -296,11 +351,11 @@ def main(argsIn):
     
     
     # Create empty raster asset request
-    (success, assetId) = createRasterAsset(bearerToken, options.inputPath)
+    (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor)
     #if not success:
     #    print 'Refreshing access token...'
     #    bearerToken = authorize(True)
-    #    (success, assetId) = createRasterAsset(bearerToken, options.inputPath)
+    #    (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor)
     if not success:
         raise Exception('Could not get access token!')
     

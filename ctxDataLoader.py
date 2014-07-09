@@ -40,6 +40,30 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+def extractPvlSection(inputPath, outputPath, sectionName):
+    """Copies a section of a PVL file to another file"""
+    
+    startLine = "Group = " + sectionName
+
+    inputFile  = open(inputPath, 'r')
+    outputFile = open(outputPath, 'w')
+    copyingLines = False
+    numLines = 0
+    for line in inputFile:
+        if startLine in line:
+            copyingLines = True # Start copying this section
+            
+        if copyingLines: # Copy this line to the output file
+            outputFile.write(line)
+            numLines = numLines + 1
+            
+        if copyingLines and ("End_Group" in line):
+            break # Quit parsing the file
+    inputFile.close()
+    outputFile.close()
+    
+    return numLines # Return the number of lines copied
+
 # fileType is the file name after the prefix
 def generatePdsPath(filePrefix, volume):
     """Generate the full PDS path for a given CTX data file"""
@@ -65,7 +89,10 @@ def generatePdsPath(filePrefix, volume):
                 ".scyl.isis.hdr?image=/mars/images/ctx/"+volume+"/stage/"
                 +filePrefix+".scyl.isis.hdr")
 
-    return (imageUrl, labelUrl)
+    edrUrl   = ("http://pds-imaging.jpl.nasa.gov/data/mro/mars_reconnaissance_orbiter/ctx/"
+                +volume+"/data/"+filePrefix+".IMG")
+
+    return (imageUrl, labelUrl, edrUrl)
 
 # missionCode should be ESP or PSP
 def getDataList(outputFilePath, missionCode):
@@ -114,35 +141,74 @@ def getDataList(outputFilePath, missionCode):
     print 'Wrote updated data list to ' + outputFilePath
 
 
-def uploadFile(filePrefix, imageUrl, labelUrl, logQueue, tempDir):
+def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, tempDir):
     """Uploads a remote file to maps engine"""
     
     print 'Uploading file ' + filePrefix
     
-    localFilePath  = os.path.join(tempDir, filePrefix + '.jp2')
-    localImagePath = os.path.join(tempDir, filePrefix + '_noGeo.jp2')
-    localLabelPath = os.path.join(tempDir, filePrefix + '_noGeo.lbl')  
+    asuImagePath  = os.path.join(tempDir, filePrefix + '_noGeo.jp2') # Map projected image from ASU
+    asuLabelPath  = os.path.join(tempDir, filePrefix + '_noGeo.lbl') # Label from ASU
+    edrPath       = os.path.join(tempDir, filePrefix + '.IMG')       # Raw image from PDS
+    #cubPath     = os.path.join(tempDir, filePrefix + '.cub')        # Output of mroctx2isis
+    #calPath     = os.path.join(tempDir, filePrefix + '.cal.cub')    # Output of ctxcal
+    mapPath       = os.path.join(tempDir, filePrefix + '.map.cub')   # Output of cam2map
+    mapLabelPath  = os.path.join(tempDir, filePrefix + '.map.pvl')   # Specify projection to cam2map
     
-    if not os.path.exists(localImagePath):
-        # Download the image file
-        cmd = 'wget ' + imageUrl + ' -O ' + localImagePath
-        print cmd
-        os.system(cmd)
-
-    if not os.path.exists(localLabelPath):
+    # We are using the label path in both projection cases
+    if not os.path.exists(asuLabelPath):
         # Download the label file
-        cmd = 'wget ' + labelUrl + ' -O ' + localLabelPath
+        cmd = 'wget ' + labelUrl + ' -O ' + asuLabelPath
         print cmd
         os.system(cmd)
 
-    if not os.path.exists(localFilePath):    
-        # Correct the file - The JP2 file from ASU needs the geo data from the label file!
-        cmd = 'addGeoToAsuCtxJp2.py --label '+ localLabelPath +' '+ localImagePath +' '+ localFilePath
-        print cmd
-        os.system(cmd)
+
+    if reproject: # Map project the EDR ourselves
         
+        if not os.path.exists(mapLabelPath):
+            # Generate the map label file
+            numLinesCopied = extractPvlSection(asuLabelPath, mapLabelPath, "Mapping")
+            if numLinesCopied < 10:
+                raise Exception('Failed to copy map data from file ' + asuLabelPath)
+        
+        if not os.path.exists(edrPath):
+            # Download the EDR file
+            cmd = 'wget ' + edrUrl + ' -O ' + edrPath
+            print cmd
+            os.system(cmd)
+      
+        # Convert and apply calibration to the CTX file
+        calPath = IrgIsisFunctions.prepareCtxImage(edrPath, tempDir, True)
+        
+        if not os.path.exists(mapPath):
+            # Generate the map projected file
+            cmd = 'cam2map matchmap=True from=' + calPath + ' to=' + mapPath + ' map='+mapLabelPath
+            print cmd
+            os.system(cmd)
+        
+        localFilePath = os.path.join(tempDir, filePrefix + '.tif') # The output file we will upload
         if not os.path.exists(localFilePath):
-            raise Exception('Script to add geo data to JP2 file failed!')
+            # Generate the final image to upload
+            cmd = 'gdal_translate -of GTiff ' + mapPath + ' ' + localFilePath
+            print cmd
+            os.system(cmd)
+        
+    else: # Use the map projected image from the ASU web site
+        
+        if not os.path.exists(asuImagePath):
+            # Download the image file
+            cmd = 'wget ' + imageUrl + ' -O ' + asuImagePath
+            print cmd
+            os.system(cmd)
+
+        localFilePath = os.path.join(tempDir, filePrefix + '.jp2') # The output file we will upload
+        if not os.path.exists(localFilePath):
+            # Correct the file - The JP2 file from ASU needs the geo data from the label file!
+            cmd = 'addGeoToAsuCtxJp2.py --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
+            print cmd
+            os.system(cmd)
+            
+            if not os.path.exists(localFilePath):
+                raise Exception('Script to add geo data to JP2 file failed!')
     
     # Upload the file
     cmdArgs = [localFilePath, '--sensor', '2']
@@ -182,7 +248,7 @@ def logWriter(logQueue, logPath):
 
 
 # TODO: Select from different file types
-def uploadNextFile(dataListPath, outputFolder, numFiles=1, numThreads=1):
+def uploadNextFile(dataListPath, outputFolder, reproject=False, numFiles=1, numThreads=1):
     """Determines the next file to upload, uploads it, and logs it"""
     
     print 'Searching for next file to upload...'
@@ -248,8 +314,8 @@ def uploadNextFile(dataListPath, outputFolder, numFiles=1, numThreads=1):
         prefix, volume = line.split(',')
         prefix = prefix.strip()
         volume = volume.strip()
-        imageUrl, labelUrl = generatePdsPath(prefix, volume)
-        jobResults.append(pool.apply_async(uploadFile, args=(prefix, imageUrl, labelUrl, queue, outputFolder)))
+        imageUrl, labelUrl, edrUrl = generatePdsPath(prefix, volume)
+        jobResults.append(pool.apply_async(uploadFile, args=(prefix, imageUrl, labelUrl, edrUrl, reproject, queue, outputFolder)))
     
     
     # Wait until all threads have finished
@@ -286,6 +352,8 @@ def main():
             parser.add_option("-u", "--upload", dest="upload", type=int,
                               help="Upload this many files instead of fetching the list.")
 
+            parser.add_option("--reproject", action="store_true", dest="reproject", default=False,
+                              help="Project the images ourselves instead of using the ASU projections.")
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -323,7 +391,7 @@ def main():
             #cmd = 'cat'
             #os.system(cmd)
         else:
-            uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.upload, options.numThreads)
+            uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.reproject, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
 
 

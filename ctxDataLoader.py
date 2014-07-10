@@ -40,6 +40,26 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+def getCreationTime(filePath):
+    """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    timeString = ''
+    f = open(filePath, 'r')
+    for line in f:
+        if 'StartTime' in line:
+            timeString = IrgStringFunctions.getLineAfterText(line, '=')
+    f.close()
+  
+    if not timeString:
+        raise Exception('Unable to find time string in file ' + filePath)
+  
+    # Get to the correct format
+    timeString = timeString.strip()
+    timeString = timeString[:-4] + 'Z'
+  
+    # The time string is almost in the correct format
+    return timeString
+
 def extractPvlSection(inputPath, outputPath, sectionName):
     """Copies a section of a PVL file to another file"""
     
@@ -54,6 +74,16 @@ def extractPvlSection(inputPath, outputPath, sectionName):
             copyingLines = True # Start copying this section
             
         if copyingLines: # Copy this line to the output file
+            
+            # Specific checks for the mapping section!
+            
+            # Force this value to zero
+            if "CenterLongitude" in line: 
+                line = "CenterLongitude    = 0.0\n"
+            # Force this value to -180 to 180 range
+            if "LongitudeDomain" in line: 
+                line = "LongitudeDomain    = 180\n"
+            
             outputFile.write(line)
             numLines = numLines + 1
             
@@ -161,6 +191,7 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
         print cmd
         os.system(cmd)
 
+    timeString = getCreationTime(asuLabelPath)
 
     if reproject: # Map project the EDR ourselves
         
@@ -211,7 +242,7 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
                 raise Exception('Script to add geo data to JP2 file failed!')
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', '2']
+    cmdArgs = [localFilePath, '--sensor', '2', '--acqTime', timeString]
     #print cmdArgs
     assetId = mapsEngineUpload.main(cmdArgs)
     #assetId = 12345
@@ -336,7 +367,29 @@ def uploadNextFile(dataListPath, outputFolder, reproject=False, numFiles=1, numT
     
 
 
+def checkUploads(logPath):
 
+    print 'Checking the status of uploaded files...'    
+
+    # Get server authorization and hold on to the token
+    bearerToken = mapsEngineUpload.authorize()
+
+    if not os.path.exists(logPath):
+        raise Exception('Input log file ' + logPath + ' does not exist!')
+        
+    outFile = open(logPath, 'r')
+    for line in outFile:
+        # Extract the asset ID
+        prefix, assetId = lastUploadedLine.split(',')
+        
+        # Check if this asset was uploaded
+        status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
+        
+        if not status:
+            print 'Prefix ' + prefix + ' was not uploaded correctly!'
+            # TODO: Do something about it!
+        
+    outFile.close()
 
 
 #--------------------------------------------------------------------------------
@@ -354,6 +407,9 @@ def main():
 
             parser.add_option("--reproject", action="store_true", dest="reproject", default=False,
                               help="Project the images ourselves instead of using the ASU projections.")
+
+            parser.add_option("--checkUploads", action="store_true", default=False,
+                                        dest="checkUploads",  help="Verify that all uploaded files actually made it up.")
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -390,6 +446,9 @@ def main():
             # TODO: Concatenate files!!!
             #cmd = 'cat'
             #os.system(cmd)
+        elif options.checkUploads:
+            # TODO: Clean up file paths!
+            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
         else:
             uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.reproject, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)

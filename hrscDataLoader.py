@@ -40,6 +40,24 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+def getCreationTime(filePath):
+    """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    # Use subprocess to parse the command output
+    cmd = ['gdalinfo', filePath]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    cmdOut, err = p.communicate()
+
+    # Find the time string in the text
+    timeString = IrgStringFunctions.getLineAfterText(cmdOut, 'PRODUCT_CREATION_TIME=')
+    
+    # Get to the correct format
+    timeString = timeString.strip()
+    timeString = timeString[:-5] + 'Z'
+    
+    return timeString
+
+
 # fileType is the file name after the prefix
 def generatePdsPath(filePrefix):
     """Generate the full PDS path for a given HRSC data file"""
@@ -107,13 +125,16 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
         print cmd
         os.system(cmd)
     
+    # Extract the image creation time
+    timeString = getCreationTime(downloadPath)
+    
     # Convert to GTiff format
     cmd = 'gdal_translate -of GTiff ' + downloadPath + ' ' + localFilePath
     print cmd
     os.system(cmd)
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', '1']
+    cmdArgs = [localFilePath, '--sensor', '1', '--acqTime', timeString]
     #print cmdArgs
     assetId = mapsEngineUpload.main(cmdArgs)
     #assetId = 12345
@@ -230,7 +251,30 @@ def uploadNextFile(dataListPath, outputFolder, numFiles=1, numThreads=1):
     
     return True
     
+def checkUploads(logPath):
 
+    print 'Checking the status of uploaded files...'    
+
+    # Get server authorization and hold on to the token
+    bearerToken = mapsEngineUpload.authorize()
+
+    if not os.path.exists(logPath):
+        raise Exception('Input log file ' + logPath + ' does not exist!')
+        
+    outFile = open(logPath, 'r')
+    for line in outFile:
+        # Extract the asset ID
+        prefix, assetId = lastUploadedLine.split(',')
+        
+        # Check if this asset was uploaded
+        status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
+        
+        if not status:
+            print 'Prefix ' + prefix + ' was not uploaded correctly!'
+            # TODO: Do something about it!
+        
+    outFile.close()
+    
 
 
 
@@ -245,9 +289,12 @@ def main():
         try:
             usage = "usage: hrscDataLoader.py <output folder> [--help][--manual]\n  "
             parser = optparse.OptionParser(usage=usage)
+            
             parser.add_option("-u", "--upload", dest="upload", type=int,
                               help="Upload this many files instead of fetching the list.")
 
+            parser.add_option("--checkUploads", action="store_true", default=False,
+                                        dest="checkUploads",  help="Verify that all uploaded files actually made it up.")
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -273,14 +320,19 @@ def main():
             os.mkdir(options.outputFolder)
 
         # These are input lists that just show the available images
-        pspListPath = os.path.join(options.outputFolder, 'pspList.csv')
+        #pspListPath = os.path.join(options.outputFolder, 'pspList.csv')
+
+        # TODO: Set this
+        inputListPath = 'hrscImageList_smallPatch.csv'
 
         # If we are not uploading data, update the data list
-        if not options.upload:
-            getDataList(pspListPath)
+        if options.upload:
+            getDataList(inputListPath)
+        elif options.checkUploads:
+            # TODO: Clean up file paths!
+            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
         else:
-            uploadNextFile('hrscImageList_smallPatch.csv', options.outputFolder, options.upload, options.numThreads)
-            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
+            uploadNextFile(inputListPath, options.outputFolder, options.upload, options.numThreads)
 
 
         endTime = time.time()

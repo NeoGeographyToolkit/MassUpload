@@ -40,8 +40,28 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+def getCreationTime(filePath):
+    """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    timeString = ''
+    f = open(filePath, 'r')
+    for line in f:
+        if 'STOP_TIME' in line:
+            timeString = IrgStringFunctions.getLineAfterText(line, '=')
+    f.close()
+  
+    if not timeString:
+        raise Exception('Unable to find time string in file ' + filePath)
+  
+    # Get to the correct format
+    timeString = timeString.strip()
+    timeString = timeString[:-4] + 'Z'
+  
+    return timeString
+
+
 # fileType is the file name after the prefix
-def generatePdsPath(filePrefix, fileType):
+def generatePdsPaths(filePrefix, fileType):
     """Generate the full PDS path for a given HiRISE data file"""
     
     # File prefix looks like this: PSP_009716_1755 or ESP_011984_1755
@@ -54,12 +74,13 @@ def generatePdsPath(filePrefix, fileType):
     frameNumber = filePrefix[4:9]
     orbDir = 'ORB_'+ frameNumber[0:4] +'00_'+ frameNumber[0:4] +'99'
     
-    filename = filePrefix + fileType
-    baseUrl  = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"
-    fullUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ filename
-
-    #print filePrefix + fileType + ' -> ' + fullUrl
-    return fullUrl
+    fileName  = filePrefix + fileType
+    labelName = os.path.splitext(fileName)[0] + '.LBL'
+    baseUrl   = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"
+    imageUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ fileName
+    labelUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ labelName
+    
+    return (imageUrl, labelUrl)
 
 # missionCode should be ESP or PSP
 def getDataList(outputFilePath, missionCode):
@@ -112,21 +133,32 @@ def getDataList(outputFilePath, missionCode):
     print 'Wrote updated data list to ' + outputFilePath
 
 
-def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
+def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
     """Uploads a remote file to maps engine"""
     
     print 'Uploading file ' + remoteFilePath
     
+    localFilePath  = os.path.join(tempDir, os.path.basename(remoteFilePath))
+    localLabelPath = os.path.join(tempDir, os.path.basename(remoteLabelPath))
     
-    localFilePath = os.path.join(tempDir, os.path.basename(remoteFilePath))
+    
     if not os.path.exists(localFilePath):
         # Download the file
         cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
         print cmd
         os.system(cmd)
+
+    if not os.path.exists(remoteLabelPath):
+        # Download the file
+        cmd = 'wget ' + remoteLabelPath + ' -O ' + localLabelPath
+        print cmd
+        os.system(cmd)
+
+
+    timeString = getCreationTime(localLabelPath)
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', 0]
+    cmdArgs = [localFilePath, '--sensor', 0, '--acqTime', timeString]
     #print cmdArgs
     assetId = GoogleMapsEngine.main(cmdArgs)
     #assetId = 12345
@@ -231,8 +263,8 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
     # For each line generate the full download path
     jobResults = []
     for line in linesToProcess:
-        fullPath = generatePdsPath(line, targetEnd)
-        jobResults.append(pool.apply_async(uploadFile, args=(line, fullPath, queue, outputFolder)))
+        remoteImagePath, remoteLabelPath = generatePdsPaths(line, targetEnd)
+        jobResults.append(pool.apply_async(uploadFile, args=(line, remoteImagePath, remoteLabelPath, queue, outputFolder)))
     
     
     # Wait until all threads have finished
@@ -253,7 +285,29 @@ def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numTh
     
 
 
+def checkUploads(logPath):
 
+    print 'Checking the status of uploaded files...'    
+
+    # Get server authorization and hold on to the token
+    bearerToken = mapsEngineUpload.authorize()
+
+    if not os.path.exists(logPath):
+        raise Exception('Input log file ' + logPath + ' does not exist!')
+        
+    outFile = open(logPath, 'r')
+    for line in outFile:
+        # Extract the asset ID
+        prefix, assetId = lastUploadedLine.split(',')
+        
+        # Check if this asset was uploaded
+        status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
+        
+        if not status:
+            print 'Prefix ' + prefix + ' was not uploaded correctly!'
+            # TODO: Do something about it!
+        
+    outFile.close()
 
 
 #--------------------------------------------------------------------------------
@@ -277,6 +331,9 @@ def main():
             
             parser.add_option("--color", action="store_true", dest="getColor",
                               help="Retrieve COLOR image instead of RED images.")
+
+            parser.add_option("--checkUploads", action="store_true", default=False,
+                                        dest="checkUploads",  help="Verify that all uploaded files actually made it up.")
 
             parser.add_option("--threads", type="int", dest="numThreads", default=1,
                               help="Number of threads to use.")
@@ -313,6 +370,9 @@ def main():
             # TODO: Concatenate files!!!
             #cmd = 'cat'
             #os.system(cmd)
+        elif options.checkUploads:
+            # TODO: Clean up file paths!
+            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
         else:
             uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)

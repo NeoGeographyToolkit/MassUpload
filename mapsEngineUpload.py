@@ -76,7 +76,7 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
         status = False
 
     print response.text
-    return (status, response.status_code)
+    return status
     
     #url = 'https://www.googleapis.com/mapsengine/v1/assets?projectId='+PROJECT_ID
     #tokenString = 'Bearer '+bearerToken
@@ -167,12 +167,12 @@ def authorize(redo=False):
 #  # Is there an additional page of features to load?
 #  request = features.list_next(request, resource)
 
-def createRasterAsset(bearerToken, inputFile, sensorType):
+def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
     
     url = 'https://www.googleapis.com/mapsengine/v1/rasters/upload'
     
     justFilename = os.path.basename(inputFile)
-    
+       
     if sensorType == SENSOR_TYPE_HiRISE:
         data = ( 
         {
@@ -182,11 +182,11 @@ def createRasterAsset(bearerToken, inputFile, sensorType):
           "files": [ # REQUIRED
             { "filename": justFilename }
           ],
-          #"acquisitionTime": {
-          #  "start": "2010-01-01T12:00:00Z",
-          #  "end": "2010-12-01T12:00:00Z",
-          #  "precision": "second"
-          #},
+          "acquisitionTime": {
+            "start": acqTime,
+            "end":   acqTime,
+            "precision": "second"
+          },
           "draftAccessList": "Map Editors", # REQUIRED
           "attribution": "NASA Public Domain", # REQUIRED
           "tags": ["Mars", "MRO", "HiRISE"],
@@ -201,11 +201,11 @@ def createRasterAsset(bearerToken, inputFile, sensorType):
           "files": [ # REQUIRED
             { "filename": justFilename }
           ],
-          #"acquisitionTime": {
-          #  "start": "2010-01-01T12:00:00Z",
-          #  "end": "2010-12-01T12:00:00Z",
-          #  "precision": "second"
-          #},
+          "acquisitionTime": {
+            "start": acqTime,
+            "end":   acqTime,
+            "precision": "second"
+          },
           "draftAccessList": "Map Editors", # REQUIRED
           "attribution": "NASA Public Domain", # REQUIRED
           "tags": ["Mars", "MEX", "HRSC"],
@@ -220,11 +220,11 @@ def createRasterAsset(bearerToken, inputFile, sensorType):
           "files": [ # REQUIRED
             { "filename": justFilename }
           ],
-          #"acquisitionTime": {
-          #  "start": "2010-01-01T12:00:00Z",
-          #  "end": "2010-12-01T12:00:00Z",
-          #  "precision": "second"
-          #},
+          "acquisitionTime": {
+            "start": acqTime,
+            "end":   acqTime,
+            "precision": "second"
+          },
           "draftAccessList": "Map Editors", # REQUIRED
           "attribution": "NASA Public Domain", # REQUIRED
           "tags": ["Mars", "MRO", "CTX"],
@@ -322,6 +322,12 @@ def main(argsIn):
     parser.add_option("--sensor", type="int", dest="sensor", default=0,
                               help="Which sensor? (HiRISE=0, HRSC=1, CTX=2).")
 
+    parser.add_option("--acqTime", dest="acqTime", default="",
+                              help="Pass in the acquisition time of the image in 'YYYY-MM-DDTHH:MM:SSZ' format.")
+
+    parser.add_option("--checkAsset", dest="checkAsset", default="",
+                              help="Query the status of an asset.")
+
     parser.add_option("--manual", action="callback", callback=man,
                       help="Read the manual.")
     (options, args) = parser.parse_args(argsIn)
@@ -346,24 +352,29 @@ def main(argsIn):
     bearerToken = authorize()
     
     
-    #checkIfFileIsLoaded(bearerToken)
-    #raise Exception('----TEST----')
-    
-    
-    # Create empty raster asset request
-    (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor)
-    #if not success:
-    #    print 'Refreshing access token...'
-    #    bearerToken = authorize(True)
-    #    (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor)
-    if not success:
-        raise Exception('Could not get access token!')
-    
-    if success:
-        print 'Created asset ID ' + str(assetId)
-    
-        # Load a file associated with the asset
-        uploadFile(bearerToken, assetId, options.inputPath)
+    if options.checkAsset: # Query asset status by ID
+        if checkIfFileIsLoaded(bearerToken, options.checkAsset):
+            return 1
+        else:
+            return 0
+        #raise Exception('----TEST----')
+        
+    else: # Upload the image
+        
+        # Create empty raster asset request
+        (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
+        #if not success:
+        #    print 'Refreshing access token...'
+        #    bearerToken = authorize(True)
+        #    (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor)
+        if not success:
+            raise Exception('Could not get access token!')
+        
+        if success:
+            print 'Created asset ID ' + str(assetId)
+        
+            # Load a file associated with the asset
+            uploadFile(bearerToken, assetId, options.inputPath)
 
     
     endTime = time.time()

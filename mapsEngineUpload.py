@@ -17,6 +17,9 @@
 #  limitations under the License.
 # __END_LICENSE__
 
+
+# TODO: Move all this crap to a library!
+
 import sys, os, glob, optparse, re, shutil, subprocess, string, time
 
 import json, urllib2, requests, argparse
@@ -28,17 +31,10 @@ from oauth2client import client
 from oauth2client import file as oauth2client_file
 from oauth2client import tools
 
-# Authorization codes
-# TODO: Load these!
-API_KEY       = 'AIzaSyAM1ytSqkzubDMzjVWBjM19uawCkIBVvLY'
-CLIENT_ID     = '298099604529-69gprkqj67qkm5ncfik32uenug8qgagn.apps.googleusercontent.com'
-CLIENT_SECRET = 'kNDmMQi_BH2ttN3XRIY2GA-7'
-PROJECT_ID    = '04070367133797133737'
 
 SENSOR_TYPE_HiRISE = 0
 SENSOR_TYPE_HRSC   = 1
 SENSOR_TYPE_CTX    = 2
-
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
@@ -50,6 +46,23 @@ Tool for uploading raster images to Google Maps Engine
 class Usage(Exception):
     def __init__(self, msg):
         self.msg = msg
+
+def loadKeys():
+    '''Load the authorization keys'''
+    keyPath = os.path.join(sys.path[0], 'keys.txt')
+    
+    f = open(keyPath, 'r')
+    lines = f.readlines()
+    f.close()
+
+    # Authorization codes
+    API_KEY       = IrgStringFunctions.getLineAfterText(lines[0], '=').strip()
+    CLIENT_ID     = IrgStringFunctions.getLineAfterText(lines[1], '=').strip()
+    CLIENT_SECRET = IrgStringFunctions.getLineAfterText(lines[2], '=').strip()
+    PROJECT_ID    = IrgStringFunctions.getLineAfterText(lines[3], '=').strip()
+   
+    return (API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID)
+
 
 # TODO: Is there a way to check for a file without knowing the asset ID?
 def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155897256865'):
@@ -98,11 +111,12 @@ def getCredentials(redo=False):
     #flags = parser.parse_args()
     flags, unknown = parser.parse_known_args()
     
-    print 'Looking for cached credentials'
+    #print 'Looking for cached credentials'
     # Check if we already have a file with OAuth credentials
     storage = oauth2client_file.Storage('mapsengine.dat')
     credentials = storage.get()
     
+    API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
     
     if credentials is None or credentials.invalid or redo:
         print 'Getting credentials'
@@ -133,6 +147,8 @@ def authorize(redo=False):
     # Set up discovery with authorized credentials
     http = credentials.authorize(httplib2.Http())
     
+    API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
+
     service = apiclient.discovery.build('mapsengine', 'v1', http=http, developerKey=API_KEY)
 
     # It is not clear why but adding this pointless code fixed the authorization problems!
@@ -169,6 +185,8 @@ def authorize(redo=False):
 
 def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
     
+    API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
+
     url = 'https://www.googleapis.com/mapsengine/v1/rasters/upload'
     
     justFilename = os.path.basename(inputFile)
@@ -311,8 +329,8 @@ def uploadFile(bearerToken, assetId, filename):
 
 def main(argsIn):
 
-    print ('#################################################################################')
-    print ("Running mapsEngineUpload.py")
+    #print ('#################################################################################')
+    #print ("Running mapsEngineUpload.py")
 
     #try:
     #try:
@@ -343,22 +361,20 @@ def main(argsIn):
     #    raise Usage(msg)
     
     
-    if not os.path.exists(options.inputPath):
+    if not os.path.exists(options.inputPath) and not options.checkAsset:
         raise Exception('Input file does not exist!')
 
     startTime = time.time()
 
     # Get server authorization
     bearerToken = authorize()
-    
-    
+       
     if options.checkAsset: # Query asset status by ID
         if checkIfFileIsLoaded(bearerToken, options.checkAsset):
             return 1
         else:
             return 0
-        #raise Exception('----TEST----')
-        
+       
     else: # Upload the image
         
         # Create empty raster asset request
@@ -370,17 +386,16 @@ def main(argsIn):
         if not success:
             raise Exception('Could not get access token!')
         
-        if success:
-            print 'Created asset ID ' + str(assetId)
+        print 'Created asset ID ' + str(assetId)
         
-            # Load a file associated with the asset
-            uploadFile(bearerToken, assetId, options.inputPath)
+        # Load a file associated with the asset
+        uploadFile(bearerToken, assetId, options.inputPath)
 
     
     endTime = time.time()
 
-    print("Finished in " + str(endTime - startTime) + " seconds.")
-    print('#################################################################################')
+    #print("Finished in " + str(endTime - startTime) + " seconds.")
+    #print('#################################################################################')
     return assetId
 
     #except(Usage, err):

@@ -26,6 +26,8 @@ import multiprocessing
 
 import GoogleMapsEngine
 
+import IrgGeoFunctions
+
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
@@ -164,9 +166,13 @@ def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
     #assetId = 12345
     
     #TODO: Check to make sure the file made it up!
+
+    # Find out the bounding box of the file and generate a log string
+    fileBbox = IrgGeoFunctions.getImageBoundingBox(localFilePath)
+    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
     
     # Record that we uploaded the file
-    logString = filePrefix + ', ' + str(assetId) + '\n' # Log path and the Maps Engine asset ID
+    logString = filePrefix +', '+ str(assetId) +' '+ bboxString + '\n' # Log path and the Maps Engine asset ID
     #print logString
     logQueue.put(logString)
 

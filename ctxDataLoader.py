@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgIsisFunctions
 
 
 def man(option, opt, value, parser):
@@ -196,6 +196,7 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
     timeString = getCreationTime(asuLabelPath)
 
     if reproject: # Map project the EDR ourselves
+        print 'Projecting the EDR image using ISIS...'
         
         if not os.path.exists(mapLabelPath):
             # Generate the map label file
@@ -225,7 +226,14 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
             print cmd
             os.system(cmd)
         
+        # Clean up intermediate files    
+        #os.remove(mapLabelPath)
+        #os.remove(edrPath)
+        #os.remove(calPath)
+        #os.remove(mapPath)
+        
     else: # Use the map projected image from the ASU web site
+        print 'Using ASU projected image...'
         
         if not os.path.exists(asuImagePath):
             # Download the image file
@@ -242,6 +250,9 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
             
             if not os.path.exists(localFilePath):
                 raise Exception('Script to add geo data to JP2 file failed!')
+            
+        # Clean up
+        #os.remove(asuImagePath)
     
     # Upload the file
     cmdArgs = [localFilePath, '--sensor', '2', '--acqTime', timeString]
@@ -263,6 +274,7 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
     # Delete the file
     print 'rm ' + localFilePath
     #os.remove(localFilePath)
+    #os.remove(asuLabelPath)
     
     print 'Finished uploading CTX data file'
     return assetId

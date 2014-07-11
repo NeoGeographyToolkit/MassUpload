@@ -79,6 +79,7 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     
     # See if we got a response
     if response.status_code != 200:
+        print response.text
         return (False, response.status_code)
     
     # TODO: More accurate check?
@@ -91,8 +92,7 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     if jsonDict['processingStatus'] != 'complete':
         status = False
 
-    print response.text
-    return status
+    return status, response.status_code
     
     #url = 'https://www.googleapis.com/mapsengine/v1/assets?projectId='+PROJECT_ID
     #tokenString = 'Bearer '+bearerToken

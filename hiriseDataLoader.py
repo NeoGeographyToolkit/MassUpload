@@ -303,7 +303,7 @@ def checkUploads(logPath):
     outFile = open(logPath, 'r')
     for line in outFile:
         # Extract the asset ID
-        prefix, assetId, bbox = lastUploadedLine.split(',')
+        prefix, assetId, bbox = line.split(',')
         
         # Check if this asset was uploaded
         status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)

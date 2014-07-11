@@ -267,37 +267,19 @@ def checkUploads(logPath):
     outFile = open(logPath, 'r')
     for line in outFile:
         # Extract the asset ID
-        prefix, assetId, bbox = lastUploadedLine.split(',')
+        prefix, assetId, bbox = line.split(',')
         
         # Check if this asset was uploaded
-        status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
+        print 'Checking asset ID = ' + assetId.strip()
+        status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId.strip())
         
         if not status:
             print 'Prefix ' + prefix + ' was not uploaded correctly!'
+            raise Exception('oaeunteosu')
             # TODO: Do something about it!
         
     outFile.close()
     
-
-def checkUploads(logPath):
-
-    print 'Checking the status of uploaded files...'    
-
-    if os.path.exists(logPath):
-        outFile = open(logPath, 'r')
-        for line in outFile:
-            # Extract the asset ID
-            prefix, assetId = line.split(',')
-            
-            cmdArgs = ['dummy', '--checkAsset', assetId]
-            #print cmdArgs
-            status = mapsEngineUpload.main(cmdArgs)
-            
-            if not status:
-                print 'Prefix ' + prefix + ' was not uploaded correctly!'
-                # TODO: Do something about it!
-            
-        outFile.close()
 
 
 #--------------------------------------------------------------------------------

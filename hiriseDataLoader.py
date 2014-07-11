@@ -24,9 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import GoogleMapsEngine
-
-import IrgGeoFunctions
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
 
 def man(option, opt, value, parser):
@@ -50,6 +48,7 @@ def getCreationTime(filePath):
     for line in f:
         if 'STOP_TIME' in line:
             timeString = IrgStringFunctions.getLineAfterText(line, '=')
+            break
     f.close()
   
     if not timeString:
@@ -150,7 +149,7 @@ def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
         print cmd
         os.system(cmd)
 
-    if not os.path.exists(remoteLabelPath):
+    if not os.path.exists(localLabelPath):
         # Download the file
         cmd = 'wget ' + remoteLabelPath + ' -O ' + localLabelPath
         print cmd
@@ -160,9 +159,9 @@ def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
     timeString = getCreationTime(localLabelPath)
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', 0, '--acqTime', timeString]
-    #print cmdArgs
-    assetId = GoogleMapsEngine.main(cmdArgs)
+    cmdArgs = [localFilePath, '--sensor', '0', '--acqTime', timeString]
+    print cmdArgs
+    assetId = mapsEngineUpload.main(cmdArgs)
     #assetId = 12345
     
     #TODO: Check to make sure the file made it up!
@@ -172,8 +171,8 @@ def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
     bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
     
     # Record that we uploaded the file
-    logString = filePrefix +', '+ str(assetId) +' '+ bboxString + '\n' # Log path and the Maps Engine asset ID
-    #print logString
+    logString = filePrefix +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
+    print logString
     logQueue.put(logString)
 
         
@@ -304,7 +303,7 @@ def checkUploads(logPath):
     outFile = open(logPath, 'r')
     for line in outFile:
         # Extract the asset ID
-        prefix, assetId = lastUploadedLine.split(',')
+        prefix, assetId, bbox = lastUploadedLine.split(',')
         
         # Check if this asset was uploaded
         status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
@@ -369,19 +368,18 @@ def main():
         espListPath = os.path.join(options.outputFolder, 'espList.csv')
         fullListFile = os.path.join(options.outputFolder, 'fullList.csv')
 
-        # If we are not uploading data, update the data list
-        if not options.upload:
+        if options.checkUploads:
+            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
+        elif options.upload:
+            uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
+            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
+        else: # Update the data list
+            # TODO: Clean up file paths!
             getDataList(pspListPath, 'PSP')
             getDataList(espListPath, 'ESP')
             # TODO: Concatenate files!!!
             #cmd = 'cat'
             #os.system(cmd)
-        elif options.checkUploads:
-            # TODO: Clean up file paths!
-            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
-        else:
-            uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
-            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
 
 
         endTime = time.time()

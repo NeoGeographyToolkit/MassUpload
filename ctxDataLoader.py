@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
 
 def man(option, opt, value, parser):
@@ -47,7 +47,9 @@ def getCreationTime(filePath):
     f = open(filePath, 'r')
     for line in f:
         if 'StartTime' in line:
+            print line
             timeString = IrgStringFunctions.getLineAfterText(line, '=')
+            break
     f.close()
   
     if not timeString:
@@ -249,11 +251,14 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
     
     #TODO: Check to make sure the file made it up!
     
+    # Find out the bounding box of the file and generate a log string
+    fileBbox = IrgGeoFunctions.getImageBoundingBox(localFilePath)
+    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
+    
     # Record that we uploaded the file
-    logString = filePrefix + ', ' + str(assetId) + '\n' # Log path and the Maps Engine asset ID
+    logString = filePrefix +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
     #print logString
     logQueue.put(logString)
-
         
     # Delete the file
     print 'rm ' + localFilePath
@@ -380,7 +385,7 @@ def checkUploads(logPath):
     outFile = open(logPath, 'r')
     for line in outFile:
         # Extract the asset ID
-        prefix, assetId = lastUploadedLine.split(',')
+        prefix, assetId, bbox = lastUploadedLine.split(',')
         
         # Check if this asset was uploaded
         status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
@@ -439,19 +444,17 @@ def main():
         espListPath = os.path.join(options.outputFolder, 'espList.csv')
         fullListFile = os.path.join(options.outputFolder, 'fullList.csv')
 
-        # If we are not uploading data, update the data list
-        if not options.upload:
+        if options.checkUploads:
+            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
+        elif options.upload:
+            uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.reproject, options.upload, options.numThreads)
+            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
+        else: # Update the data list
             getDataList(pspListPath, 'PSP')
             #getDataList(espListPath, 'ESP')
             # TODO: Concatenate files!!!
             #cmd = 'cat'
             #os.system(cmd)
-        elif options.checkUploads:
-            # TODO: Clean up file paths!
-            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
-        else:
-            uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.reproject, options.upload, options.numThreads)
-            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
 
 
         endTime = time.time()

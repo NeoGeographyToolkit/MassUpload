@@ -24,6 +24,8 @@ import sys, os, glob, optparse, re, shutil, subprocess, string, time
 
 import json, urllib2, requests, argparse
 
+import IrgStringFunctions
+
 import apiclient
 from apiclient import discovery
 import httplib2
@@ -47,6 +49,7 @@ class Usage(Exception):
     def __init__(self, msg):
         self.msg = msg
 
+# TODO: Don't reload these every time!
 def loadKeys():
     '''Load the authorization keys'''
     keyPath = os.path.join(sys.path[0], 'keys.txt')
@@ -101,8 +104,6 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     #   raster list = GET /rasterCollections/#rasterCollectionId$/rasters
     
 #--------------------------------------------------------------------------------
-
-# TODO: Need to update these to use the refresh token for "offline" access!
 
 def getCredentials(redo=False):
 
@@ -202,7 +203,7 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
           ],
           "acquisitionTime": {
             "start": acqTime,
-            "end":   acqTime,
+            #"end":   acqTime,
             "precision": "second"
           },
           "draftAccessList": "Map Editors", # REQUIRED
@@ -221,7 +222,7 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
           ],
           "acquisitionTime": {
             "start": acqTime,
-            "end":   acqTime,
+            #"end":   acqTime,
             "precision": "second"
           },
           "draftAccessList": "Map Editors", # REQUIRED
@@ -240,7 +241,7 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
           ],
           "acquisitionTime": {
             "start": acqTime,
-            "end":   acqTime,
+            #"end":   acqTime,
             "precision": "second"
           },
           "draftAccessList": "Map Editors", # REQUIRED
@@ -329,8 +330,8 @@ def uploadFile(bearerToken, assetId, filename):
 
 def main(argsIn):
 
-    #print ('#################################################################################')
-    #print ("Running mapsEngineUpload.py")
+    print ('#################################################################################')
+    print ("Running mapsEngineUpload.py")
 
     #try:
     #try:
@@ -348,7 +349,12 @@ def main(argsIn):
 
     parser.add_option("--manual", action="callback", callback=man,
                       help="Read the manual.")
+    
+    print argsIn
+    
     (options, args) = parser.parse_args(argsIn)
+
+    print args
 
     if len(args) < 1: # DEBUG
         #options.inputPath = 'means.png'
@@ -368,6 +374,7 @@ def main(argsIn):
 
     # Get server authorization
     bearerToken = authorize()
+    print 'Got bearer token'
        
     if options.checkAsset: # Query asset status by ID
         if checkIfFileIsLoaded(bearerToken, options.checkAsset):

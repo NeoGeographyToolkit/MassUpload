@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
 
 def man(option, opt, value, parser):
@@ -113,8 +113,7 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
     """Uploads a remote file to maps engine"""
     
     print 'Uploading file ' + remoteFilePath
-    
-    
+        
     localFileName = os.path.splitext(os.path.basename(remoteFilePath))[0]+'.tif'
     localFilePath = os.path.join(tempDir, localFileName)
     downloadPath  = os.path.join(tempDir, os.path.basename(remoteFilePath))
@@ -141,8 +140,12 @@ def uploadFile(filePrefix, remoteFilePath, logQueue, tempDir):
     
     #TODO: Check to make sure the file made it up!
     
+    # Find out the bounding box of the file and generate a log string
+    fileBbox = IrgGeoFunctions.getImageBoundingBox(localFilePath)
+    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
+    
     # Record that we uploaded the file
-    logString = filePrefix + ', ' + str(assetId) + '\n' # Log path and the Maps Engine asset ID
+    logString = filePrefix +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
     #print logString
     logQueue.put(logString)
 
@@ -264,7 +267,7 @@ def checkUploads(logPath):
     outFile = open(logPath, 'r')
     for line in outFile:
         # Extract the asset ID
-        prefix, assetId = lastUploadedLine.split(',')
+        prefix, assetId, bbox = lastUploadedLine.split(',')
         
         # Check if this asset was uploaded
         status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
@@ -344,14 +347,13 @@ def main():
         # TODO: Set this
         inputListPath = 'hrscImageList_smallPatch.csv'
 
-        # If we are not uploading data, update the data list
-        if options.upload:
-            getDataList(inputListPath)
-        elif options.checkUploads:
-            # TODO: Clean up file paths!
+        if options.checkUploads:
             checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
-        else:
+        elif options.upload:
             uploadNextFile(inputListPath, options.outputFolder, options.upload, options.numThreads)
+        else: # Update the data list
+            # TODO: Clean up file paths!
+            getDataList(inputListPath)
 
 
         endTime = time.time()

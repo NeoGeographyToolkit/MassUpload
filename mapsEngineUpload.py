@@ -18,8 +18,6 @@
 # __END_LICENSE__
 
 
-# TODO: Move all this crap to a library!
-
 import sys, os, glob, optparse, re, shutil, subprocess, string, time
 
 import json, urllib2, requests, argparse
@@ -33,10 +31,11 @@ from oauth2client import client
 from oauth2client import file as oauth2client_file
 from oauth2client import tools
 
-
+# Code numbers used to identify which sensor is being loaded
 SENSOR_TYPE_HiRISE = 0
 SENSOR_TYPE_HRSC   = 1
 SENSOR_TYPE_CTX    = 2
+SENSOR_TYPE_THEMIS = 3
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
@@ -184,7 +183,7 @@ def authorize(redo=False):
 #  # Is there an additional page of features to load?
 #  request = features.list_next(request, resource)
 
-def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
+def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=None):
     
     API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
 
@@ -192,65 +191,50 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=''):
     
     justFilename = os.path.basename(inputFile)
        
+    # Set up common metadata
+    data = ({"projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL}
+             "files": [ # REQUIRED
+                      { "filename": justFilename }
+                     ],
+             #"acquisitionTime": {
+             #   "start": acqTime,
+             #   "end":   acqTime,
+             #   "precision": "second"
+             #   },
+             "draftAccessList": "Map Editors", # REQUIRED
+             "maskType": "autoMask"})
+
+    if acqTime: # Add the timestamp if it was passed in
+        data["acquisitionTime"] = {"start": acqTime,
+                                   #"end":   acqTime,
+                                   "precision": "second"
+                                  }
+
+    # Sensor specific metadata
     if sensorType == SENSOR_TYPE_HiRISE:
-        data = ( 
-        {
-          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
-          "name": 'HiRISE_'+justFilename,  # REQUIRED
-          "description": "HiRISE map projected RDR data",
-          "files": [ # REQUIRED
-            { "filename": justFilename }
-          ],
-          "acquisitionTime": {
-            "start": acqTime,
-            #"end":   acqTime,
-            "precision": "second"
-          },
-          "draftAccessList": "Map Editors", # REQUIRED
-          "attribution": "NASA Public Domain", # REQUIRED
-          "tags": ["Mars", "MRO", "HiRISE"],
-          "maskType": "autoMask"
-        } )
+        data["name"]        = 'HiRISE_'+justFilename  # REQUIRED
+        data["description"] = "HiRISE map projected RDR data"
+        data["attribution"] = "NASA Public Domain" # REQUIRED
+        data["tags"]        = ["Mars", "MRO", "HiRISE"]
     elif sensorType == SENSOR_TYPE_HRSC:
-        data = ( 
-        {
-          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
-          "name": 'HRSC_'+justFilename,  # REQUIRED
-          "description": "HRSC map projected RDR data",
-          "files": [ # REQUIRED
-            { "filename": justFilename }
-          ],
-          "acquisitionTime": {
-            "start": acqTime,
-            #"end":   acqTime,
-            "precision": "second"
-          },
-          "draftAccessList": "Map Editors", # REQUIRED
-          "attribution": "NASA Public Domain", # REQUIRED
-          "tags": ["Mars", "MEX", "HRSC"],
-          "maskType": "autoMask"
-        } )
+        data["name"]        = 'HRSC_'+justFilename  # REQUIRED
+        data["description"] = "HRSC map projected RDR data"
+        data["attribution"] = "NASA Public Domain" # REQUIRED
+        data["tags"]        = ["Mars", "MEX", "HRSC"]
     elif sensorType == SENSOR_TYPE_CTX:
-        data = ( 
-        {
-          "projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL
-          "name": 'CTX_'+justFilename,  # REQUIRED
-          "description": "CTX map projected RDR data",
-          "files": [ # REQUIRED
-            { "filename": justFilename }
-          ],
-          "acquisitionTime": {
-            "start": acqTime,
-            #"end":   acqTime,
-            "precision": "second"
-          },
-          "draftAccessList": "Map Editors", # REQUIRED
-          "attribution": "NASA Public Domain", # REQUIRED
-          "tags": ["Mars", "MRO", "CTX"],
-          "maskType": "autoMask"
-        } )
+        data["name"]        = 'CTX_'+justFilename  # REQUIRED
+        data["description"] = "CTX map projected RDR data"
+        data["attribution"] = "NASA Public Domain" # REQUIRED
+        data["tags"]        = ["Mars", "MRO", "CTX"]
+    elif sensorType == SENSOR_TYPE_THEMIS:
+        data["name"]        = 'THEMIS_'+justFilename  # REQUIRED
+        data["description"] = "THEMIS map projected data"
+        data["attribution"] = "NASA Public Domain" # REQUIRED
+        data["tags"]        = ["Mars", "MO", "THEMIS"]
     else:
         raise Exception('Unrecognized sensor type!')
+
+
         
     print(data)
     tokenString = 'Bearer '+bearerToken
@@ -339,7 +323,7 @@ def main(argsIn):
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option("--sensor", type="int", dest="sensor", default=0,
-                              help="Which sensor? (HiRISE=0, HRSC=1, CTX=2).")
+                              help="Which sensor? (HiRISE=0, HRSC=1, CTX=2, THEMIS=3).")
 
     parser.add_option("--acqTime", dest="acqTime", default="",
                               help="Pass in the acquisition time of the image in 'YYYY-MM-DDTHH:MM:SSZ' format.")

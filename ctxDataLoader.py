@@ -40,8 +40,12 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
-def getCreationTime(filePath):
+def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    if len(fileList) < 2:
+        raise Exception('Error, missing label file path!')
+    filePath = fileList[1]
     
     timeString = ''
     f = open(filePath, 'r')
@@ -61,6 +65,137 @@ def getCreationTime(filePath):
   
     # The time string is almost in the correct format
     return timeString
+
+
+def findAllDataSets(db, dataAddFunctionCall, sensorCode):
+    '''Add all known data sets to the SQL database'''
+
+    print 'Updating CTX PDS data list...'
+   
+    baseUrl = "http://pds-imaging.jpl.nasa.gov/data/mro/mars_reconnaissance_orbiter/ctx/"
+
+    # Parse the top PDS level
+    parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())  
+    #print parsedIndexPage.prettify()
+
+    # Loop through outermost directory
+    for line in parsedIndexPage.findAll('a'):
+        volumeName = line.string
+        if (not 'mrox_' in volumeName) or ('txt' in volumeName): # Skip other links
+            continue
+        volumePath = baseUrl + volumeName + 'data/'
+        
+        print 'Scanning directory ' + volumePath
+        
+        # Parse next directory level
+        volumePage = BeautifulSoup(urllib2.urlopen((volumePath)).read())
+        print volumePage.prettify()
+        raise Exception('Checking VOLUME PAGE DEBUG')
+        
+        # Loop through inner directory
+        for line in volumePage.findAll('a'):
+            dataName = line.string
+            if not '.IMG' in dataName: # Skip other links
+                continue
+            
+            ## Now store the file prefix and the volume we found it in
+            #outputFile.write(dataName[:-4] +', '+ volumeName[:-1] +'\n')
+            
+            # Load volume name as subtype, data prefix as data set name.
+            dataAddFunctionCall(db, sensorCode, volumeName[:-1], dataName[:-4], line)
+
+    print 'Added CTX data files to database!'
+    
+    
+
+def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+    '''Retrieves a remote file and prepares it for upload'''
+    
+    print 'Uploading file ' + setName
+    
+    asuImagePath  = os.path.join(workDir, setName + '_noGeo.jp2') # Map projected image from ASU
+    asuLabelPath  = os.path.join(workDir, setName + '_noGeo.lbl') # Label from ASU
+    edrPath       = os.path.join(workDir, setName + '.IMG')       # Raw image from PDS
+    #cubPath     = os.path.join(workDir, setName + '.cub')        # Output of mroctx2isis
+    #calPath     = os.path.join(workDir, setName + '.cal.cub')    # Output of ctxcal
+    mapPath       = os.path.join(workDir, setName + '.map.cub')   # Output of cam2map
+    mapLabelPath  = os.path.join(workDir, setName + '.map.pvl')   # Specify projection to cam2map
+    localFilePath = os.path.join(workDir, setName + '.tif')       # The output file we will upload
+    
+    # Generate the remote URLs from the data prefix and volume stored in these parameters
+    asuImageUrl, asuLabelPath, edrUrl = generatePdsPath(setName, subtype)
+    
+    # We are using the label path in both projection cases
+    if not os.path.exists(asuLabelPath):
+        # Download the label file
+        cmd = 'wget ' + labelUrl + ' -O ' + asuLabelPath
+        print cmd
+        os.system(cmd)
+
+    if True: # Map project the EDR ourselves <-- Going with this approach!
+        print 'Projecting the EDR image using ISIS...'
+        
+        if not os.path.exists(mapLabelPath):
+            # Generate the map label file
+            numLinesCopied = extractPvlSection(asuLabelPath, mapLabelPath, "Mapping")
+            if numLinesCopied < 10:
+                raise Exception('Failed to copy map data from file ' + asuLabelPath)
+        
+        if not os.path.exists(edrPath):
+            # Download the EDR file
+            cmd = 'wget ' + edrUrl + ' -O ' + edrPath
+            print cmd
+            os.system(cmd)
+      
+        # Convert and apply calibration to the CTX file
+        calPath = IrgIsisFunctions.prepareCtxImage(edrPath, workDir, True)
+        
+        if not os.path.exists(mapPath):
+            # Generate the map projected file
+            cmd = 'cam2map matchmap=True from=' + calPath + ' to=' + mapPath + ' map='+mapLabelPath
+            print cmd
+            os.system(cmd)
+        
+        if not os.path.exists(localFilePath):
+            # Generate the final image to upload
+            cmd = 'gdal_translate -of GTiff ' + mapPath + ' ' + localFilePath
+            print cmd
+            os.system(cmd)
+        
+        # Clean up intermediate files    
+        #os.remove(mapLabelPath)
+        #os.remove(edrPath)
+        #os.remove(calPath)
+        #os.remove(mapPath)
+        
+    else: # Use the map projected image from the ASU web site
+        print 'Using ASU projected image...'
+        
+        if not os.path.exists(asuImagePath):
+            # Download the image file
+            cmd = 'wget ' + asuImageUrl + ' -O ' + asuImagePath
+            print cmd
+            os.system(cmd)
+
+        if not os.path.exists(localFilePath):
+            # Correct the file - The JP2 file from ASU needs the geo data from the label file!
+            cmd = 'addGeoToAsuCtxJp2.py --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
+            print cmd
+            os.system(cmd)
+            
+            if not os.path.exists(localFilePath):
+                raise Exception('Script to add geo data to JP2 file failed!')
+            
+        # Clean up
+        #os.remove(asuImagePath)
+    
+    # Two local files are left around, the first should be uploaded.
+    return [localFilePath, asuLabelPath]
+        
+
+
+#--------------------------------------------------------------------------------
+
 
 def extractPvlSection(inputPath, outputPath, sectionName):
     """Copies a section of a PVL file to another file"""
@@ -96,22 +231,11 @@ def extractPvlSection(inputPath, outputPath, sectionName):
     
     return numLines # Return the number of lines copied
 
-# fileType is the file name after the prefix
 def generatePdsPath(filePrefix, volume):
     """Generate the full PDS path for a given CTX data file"""
     
     # File prefix looks something like this: B08_012841_1751_XN_04S222W
     # Volume ID looks like this: mrox_0738
-    
-
-    #baseUrl = 'http://viewer.mars.asu.edu/planetview/inst/ctx/' #<>#start'
-    ##baseUrl = "http://viewer.mars.asu.edu/planetview/inst/ctx#/planetview/inst/ctx/"
-    ##http://viewer.mars.asu.edu/planetview/inst/ctx#/planetview/inst/ctx/B08_012841_1751_XN_04S222W
-    #pageUrl = baseUrl + filePrefix + '#start'
-    #
-    ## Need to retrieve the URL from a web site
-    #parsedPage = BeautifulSoup(urllib2.urlopen((pageUrl)).read())
-    #print parsedPage.prettify()
     
     # Grab the file directly from the ASU map projected database.
     imageUrl = ("http://image.mars.asu.edu/stream/"+filePrefix+
@@ -126,48 +250,42 @@ def generatePdsPath(filePrefix, volume):
 
     return (imageUrl, labelUrl, edrUrl)
 
-# missionCode should be ESP or PSP
-def getDataList(outputFilePath, missionCode):
-    """Populates a text file list of all available HiRISE RDR data"""
+def getDataList(outputFilePath):
+    """Populates a text file list of all available CTX data and its volume"""
        
     print 'Updating CTX PDS data list...'
        
    
-    # TODO: Do another loop for ESP!
-    baseUrl = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"+missionCode+"/"
+    baseUrl = "http://pds-imaging.jpl.nasa.gov/data/mro/mars_reconnaissance_orbiter/ctx/"
 
     # Parse the top PDS level
-    parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
+    parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())  
+    #print parsedIndexPage.prettify()
 
     outputFile = open(outputFilePath, 'w')
 
     # Loop through outermost directory
     for line in parsedIndexPage.findAll('a'):
-        orbName = line.string
-        if not 'ORB' in orbName: # Skip link up a directory
+        volumeName = line.string
+        if (not 'mrox_' in volumeName) or ('txt' in volumeName): # Skip other links
             continue
-        orbPath = baseUrl + orbName
+        volumePath = baseUrl + volumeName + 'data/'
         
-        #print 'Scanning directory ' + orbPath
+        print 'Scanning directory ' + volumePath
         
         # Parse next directory level
-        orbPage = BeautifulSoup(urllib2.urlopen((orbPath)).read())
-        
-        #print orbPage.prettify()
+        volumePage = BeautifulSoup(urllib2.urlopen((volumePath)).read())
+        #print volumePage.prettify()
         
         # Loop through inner directory
-        for line in orbPage.findAll('a'):
-            pspName = line.string
-            if not 'PSP' in pspName: # Skip link up a directory
+        for line in volumePage.findAll('a'):
+            dataName = line.string
+            if not '.IMG' in dataName: # Skip other links
                 continue
             
-            ## No need to loop through the next level; the file names are fixed.
-            #pspPath = orbPath + pspName + pspName[:-1]
-            
-            # TODO: Don't store paths, just store the name.
-            #outputFile.write(pspPath + '\n')
-            outputFile.write(pspName[:-1] + '\n')
-            
+            # Now store the file prefix and the volume we found it in
+            outputFile.write(dataName[:-4] +', '+ volumeName[:-1] +'\n')
+
     outputFile.close()
     
     print 'Wrote updated data list to ' + outputFilePath
@@ -185,7 +303,7 @@ def uploadFile(filePrefix, imageUrl, labelUrl, edrUrl, reproject, logQueue, temp
     #calPath     = os.path.join(tempDir, filePrefix + '.cal.cub')    # Output of ctxcal
     mapPath       = os.path.join(tempDir, filePrefix + '.map.cub')   # Output of cam2map
     mapLabelPath  = os.path.join(tempDir, filePrefix + '.map.pvl')   # Specify projection to cam2map
-    
+        
     # We are using the label path in both projection cases
     if not os.path.exists(asuLabelPath):
         # Download the label file
@@ -452,9 +570,7 @@ def main():
             os.mkdir(options.outputFolder)
 
         # These are input lists that just show the available images
-        pspListPath = os.path.join(options.outputFolder, 'pspList.csv')
-        espListPath = os.path.join(options.outputFolder, 'espList.csv')
-        fullListFile = os.path.join(options.outputFolder, 'fullList.csv')
+        linkListPath = os.path.join(options.outputFolder, 'ctxDataList.csv')
 
         if options.checkUploads:
             checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
@@ -462,11 +578,7 @@ def main():
             uploadNextFile('ctxImageList_smallPatch.csv', options.outputFolder, options.reproject, options.upload, options.numThreads)
             #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
         else: # Update the data list
-            getDataList(pspListPath, 'PSP')
-            #getDataList(espListPath, 'ESP')
-            # TODO: Concatenate files!!!
-            #cmd = 'cat'
-            #os.system(cmd)
+            getDataList(linkListPath)
 
 
         endTime = time.time()

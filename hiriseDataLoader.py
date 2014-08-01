@@ -39,9 +39,14 @@ class Usage(Exception):
 
 
 #--------------------------------------------------------------------------------
+# Functions needed for the unified data loader
 
-def getCreationTime(filePath):
+def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    if len(fileList) < 2:
+        raise Exception('Error, missing label file path!')
+    filePath = fileList[1]
     
     timeString = ''
     f = open(filePath, 'r')
@@ -59,6 +64,95 @@ def getCreationTime(filePath):
     timeString = timeString[:-4] + 'Z'
   
     return timeString
+
+
+def findAllDataSets(db, dataAddFunctionCall, sensorCode):
+    '''Add all known data sets to the SQL database'''
+    
+    print 'Updating HiRISE PDS data list...'
+       
+    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/<PSP or ESP>/<ORB_PATH>/<PSP or ESP PATH>/<FILE_NAME.JP2>
+    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/ESP/ORB_011900_011999/ESP_011984_1755/
+    #http://hirise-pds.lpl.arizona.edu/download/PDS/RDR/PSP/ORB_001400_001499/PSP_001430_1815/PSP_001430_1815_RED.JP2
+    
+    # We are interested in the primary and extended mission phases
+    missionCodeList = ['PSP', 'ESP']
+    for missionCode in missionCodeList:
+    
+        baseUrl = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"+missionCode+"/"
+    
+        # Parse the top PDS level
+        parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
+       
+        # Loop through outermost directory
+        for line in parsedIndexPage.findAll('a'):
+            orbName = line.string
+            if not 'ORB' in orbName: # Skip link up a directory
+                continue
+            orbPath = baseUrl + orbName
+            
+            #print 'Scanning directory ' + orbPath
+            
+            # Parse next directory level
+            orbPage = BeautifulSoup(urllib2.urlopen((orbPath)).read())
+            
+            #print orbPage.prettify()
+            
+            # Loop through inner directory
+            for line in orbPage.findAll('a'):
+                xspName = line.string
+                if not missionCode in xspName: # Skip link up a directory
+                    continue
+                dataPrefix = xspName[:-1] # Strip off the trailing '/'
+                
+                ## No need to loop through the next level; the file names are fixed.
+                #xspPath = orbPath + dataPrefix + '/' + dataPrefix
+                
+                redUrl   = orbPath + dataPrefix + '/' + dataPrefix + '_RED.JP2'
+                colorUrl = orbPath + dataPrefix + '/' + dataPrefix + '_COLOR.JP2'
+                
+                # Add both the RED and COLOR files to the database.
+                dataAddFunctionCall(db, sensorCode, 'RED',   dataPrefix, redUrl)
+                dataAddFunctionCall(db, sensorCode, 'COLOR', dataPrefix, colorUrl)
+    
+    
+
+
+def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+    '''Retrieves a remote file and prepares it for upload'''
+    
+    print 'Uploading file ' + setName
+    
+    # The label file URL is the same as the image but with a different extension
+    remoteLabelURL = getLabelPathFromImagePath(remoteURL)
+    
+    localFilePath  = os.path.join(workDir, os.path.basename(remoteURL))
+    localLabelPath = os.path.join(workDir, os.path.basename(remoteLabelURL))
+    
+    if not os.path.exists(localFilePath):
+        # Download the file
+        cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
+        print cmd
+        os.system(cmd)
+
+    if not os.path.exists(localLabelPath):
+        # Download the file
+        cmd = 'wget ' + remoteLabelPath + ' -O ' + localLabelPath
+        print cmd
+        os.system(cmd)
+    
+    # First file is for uploade, second contains the timestamp
+    return [localFilePath, localLabelPath]
+
+    
+
+
+#--------------------------------------------------------------------------------
+
+def getLabelPathFromImagePath(imagePath):
+    '''Given the image path, return the corresponding label path'''
+    # Just replace the extension!
+    return (imagePath[:,-4] + 'LBL')
 
 
 # fileType is the file name after the prefix

@@ -40,8 +40,13 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
-def getCreationTime(filePath):
+
+def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    if len(fileList) < 2:
+        raise Exception('Error, missing original file path!')
+    filePath = fileList[1]
     
     # Use subprocess to parse the command output
     cmd = ['gdalinfo', filePath]
@@ -56,6 +61,66 @@ def getCreationTime(filePath):
     timeString = timeString[:-5] + 'Z'
     
     return timeString
+    
+
+def findAllDataSets(db, dataAddFunctionCall, sensorCode):
+    '''Add all known data sets to the SQL database'''
+    
+    print 'Updating HRSC PDS data list...'
+          
+    baseUrl = "http://pds-geosciences.wustl.edu/mex/mex-m-hrsc-5-refdr-mapprojected-v2/mexhrsc_1001/data/"
+
+    # Parse the top PDS level
+    parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
+    
+    # Loop through outermost directory
+    for line in parsedIndexPage.findAll('a'):
+        
+        dataPrefix = 'h' + line.string
+        
+        subFolderUrl = baseUrl + line.string + '/'
+        parsedDataPage = BeautifulSoup(urllib2.urlopen((subFolderUrl)).read())
+        
+        # Loop through the data files
+        # - There is a core set of files on each page but there can be
+        #   more with incremented image numbers.
+        for d in parsedDataPage.findAll('a'):
+            dataFileName = d.string[:-4]     # Lop off the .img portion
+            subtype      = dataFileName[-3:] # Extract the type
+
+            # Easier to just call this function to get the URL
+            url = generatePdsPath(dataFileName)
+
+            dataAddFunctionCall(db, sensorCode, subtype,   dataFileName, url)
+
+    
+def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+    '''Retrieves a remote file and prepares it for upload'''
+    
+    print 'Uploading file ' + remoteFilePath
+        
+    localFileName = os.path.splitext(os.path.basename(remoteFilePath))[0]+'.tif'
+    localFilePath = os.path.join(workDir, localFileName)
+    downloadPath  = os.path.join(workDir, os.path.basename(remoteFilePath))
+    
+    if not os.path.exists(localFilePath):
+        # Download the file
+        cmd = 'wget ' + remoteFilePath + ' -O ' + downloadPath
+        print cmd
+        os.system(cmd)
+    
+    # Convert to GTiff format
+    cmd = 'gdal_translate -of GTiff ' + downloadPath + ' ' + localFilePath
+    print cmd
+    os.system(cmd)
+    
+    return [localFilePath, downloadPath]
+    
+
+#--------------------------------------------------------------------------------
+
+
+
 
 
 # fileType is the file name after the prefix

@@ -80,7 +80,7 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 
     # Loop through outermost directory
     for line in parsedIndexPage.findAll('a'):
-        volumeName = line.string
+        volumeName = line.string # Contains a trailing /
         if (not 'mrox_' in volumeName) or ('txt' in volumeName): # Skip other links
             continue
         volumePath = baseUrl + volumeName + 'data/'
@@ -89,20 +89,17 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
         
         # Parse next directory level
         volumePage = BeautifulSoup(urllib2.urlopen((volumePath)).read())
-        print volumePage.prettify()
-        raise Exception('Checking VOLUME PAGE DEBUG')
         
         # Loop through inner directory
         for line in volumePage.findAll('a'):
             dataName = line.string
             if not '.IMG' in dataName: # Skip other links
                 continue
-            
-            ## Now store the file prefix and the volume we found it in
-            #outputFile.write(dataName[:-4] +', '+ volumeName[:-1] +'\n')
-            
+                        
             # Load volume name as subtype, data prefix as data set name.
-            dataAddFunctionCall(db, sensorCode, volumeName[:-1], dataName[:-4], line)
+            url = volumePath + dataName
+            prefix = dataName[:-4] # Strip off .IMG
+            dataAddFunctionCall(db, sensorCode, volumeName[:-1], prefix, url)
 
     print 'Added CTX data files to database!'
     

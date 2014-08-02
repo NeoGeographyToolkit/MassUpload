@@ -251,6 +251,8 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=None):
         print('Error: Unauthorized access!')
     if response.status_code == 403:
         print('Error: Forbidden operation!')
+    if response.status_code == 503:
+        print('Error: Service backend error!')
     if response.status_code != 200:
         return (False, response.status_code)
     
@@ -368,8 +370,16 @@ def main(argsIn):
        
     else: # Upload the image
         
+        MAX_NUM_RETRIES = 10  # Max number of times to retry (in case server is busy)
+        SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+        
         # Create empty raster asset request
-        (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
+        for i in range(1,MAX_NUM_RETRIES):
+            (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
+            if success:
+                break
+            else: # Wait for more than a second before trying again
+                time.sleep(SLEEP_TIME)
         #if not success:
         #    print 'Refreshing access token...'
         #    bearerToken = authorize(True)
@@ -380,7 +390,12 @@ def main(argsIn):
         print 'Created asset ID ' + str(assetId)
         
         # Load a file associated with the asset
-        uploadFile(bearerToken, assetId, options.inputPath)
+        for i in range(1,MAX_NUM_RETRIES):
+            success = uploadFile(bearerToken, assetId, options.inputPath)
+            if success:
+                break
+            else: # Wait for more than a second before trying again
+                time.sleep(SLEEP_TIME)
 
     
     endTime = time.time()

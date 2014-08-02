@@ -71,14 +71,20 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     baseUrl = "http://pds-geosciences.wustl.edu/mex/mex-m-hrsc-5-refdr-mapprojected-v2/mexhrsc_1001/data/"
 
     # Parse the top PDS level
+    print baseUrl
     parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
     
     # Loop through outermost directory
     for line in parsedIndexPage.findAll('a'):
         
+        # Skip links we are not interested in
+        if len(line.string.strip()) != 4:
+            continue
+        
         dataPrefix = 'h' + line.string
         
         subFolderUrl = baseUrl + line.string + '/'
+        print subFolderUrl
         parsedDataPage = BeautifulSoup(urllib2.urlopen((subFolderUrl)).read())
         
         # Loop through the data files

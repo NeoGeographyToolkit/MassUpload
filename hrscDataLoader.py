@@ -103,15 +103,15 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
-    print 'Uploading file ' + remoteFilePath
+    print 'Uploading file ' + remoteURL
         
-    localFileName = os.path.splitext(os.path.basename(remoteFilePath))[0]+'.tif'
+    localFileName = os.path.splitext(os.path.basename(remoteURL))[0]+'.tif'
     localFilePath = os.path.join(workDir, localFileName)
-    downloadPath  = os.path.join(workDir, os.path.basename(remoteFilePath))
+    downloadPath  = os.path.join(workDir, os.path.basename(remoteURL))
     
     if not os.path.exists(localFilePath):
         # Download the file
-        cmd = 'wget ' + remoteFilePath + ' -O ' + downloadPath
+        cmd = 'wget ' + remoteURL + ' -O ' + downloadPath
         print cmd
         os.system(cmd)
     

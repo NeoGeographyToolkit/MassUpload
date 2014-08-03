@@ -120,12 +120,12 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     localFilePath = os.path.join(workDir, setName + '.tif')       # The output file we will upload
     
     # Generate the remote URLs from the data prefix and volume stored in these parameters
-    asuImageUrl, asuLabelPath, edrUrl = generatePdsPath(setName, subtype)
+    asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
     
     # We are using the label path in both projection cases
     if not os.path.exists(asuLabelPath):
         # Download the label file
-        cmd = 'wget ' + labelUrl + ' -O ' + asuLabelPath
+        cmd = 'wget ' + asuLabelUrl + ' -O ' + asuLabelPath
         print cmd
         os.system(cmd)
 

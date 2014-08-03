@@ -78,7 +78,7 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     
     # See if we got a response
     if response.status_code != 200:
-        print response.text
+        #print response.text
         return (False, response.status_code)
     
     # TODO: More accurate check?
@@ -361,21 +361,29 @@ def main(argsIn):
     # Get server authorization
     bearerToken = authorize()
     print 'Got bearer token'
-       
+    
+
+    MAX_NUM_RETRIES = 3  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+   
     if options.checkAsset: # Query asset status by ID
-        if checkIfFileIsLoaded(bearerToken, options.checkAsset):
-            return 1
-        else:
-            return 0
+
+        for i in range(1,MAX_NUM_RETRIES):
+            success, statusCode = checkIfFileIsLoaded(bearerToken, options.checkAsset)
+            print success
+            print statusCode
+            if success:
+                return 1
+            else:
+                print 'sleeping...'
+                time.sleep(SLEEP_TIME)
+        return 0
        
     else: # Upload the image
-        
-        MAX_NUM_RETRIES = 10  # Max number of times to retry (in case server is busy)
-        SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
-        
+              
         # Create empty raster asset request
         for i in range(1,MAX_NUM_RETRIES):
-            (success, assetId) = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
+            success, assetId = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
             if success:
                 break
             else: # Wait for more than a second before trying again

@@ -136,7 +136,7 @@ def getCurrentTimeString():
 def logWriter(logQueue, logPath):
     '''Listens for messages on the queue and writes them to a file.'''
 
-    print 'Starting writer'
+    print 'Starting log writer'
     f = open(logPath, 'a') 
     while 1: # Run until the process is killed
         message = logQueue.get() # Wait for a new message
@@ -148,9 +148,12 @@ def logWriter(logQueue, logPath):
     print 'Writer stopped'
 
 
-def uploadFile(db, fileInfo, logQueue, workDir):
+def uploadFile(dbPath, fileInfo, logQueue, workDir):
     """Uploads a remote file to maps engine"""
     
+    print 'Uploading file ' + fileInfo.remoteURL()
+
+    db = sqlite3.connect(dbPath)
     cursor = db.cursor()
     
     # Choose the "library" to use based on the sensor type
@@ -166,12 +169,9 @@ def uploadFile(db, fileInfo, logQueue, workDir):
         version = 1
     else:
         raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
-
     
-    print 'Uploading file ' + fileInfo.remoteURL()
-
     # Call sensor-specific function to fetch and prepare the file.
-    localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subType(), fileInfo.remoteURL(), workDir)
+    localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
     if len(localFileList) == 0:
         raise Exception('Failed to retrieve any local files!')
     preppedFilePath = localFileList[0]
@@ -181,16 +181,16 @@ def uploadFile(db, fileInfo, logQueue, workDir):
 
     # Extract a timestamp from the file
     timeString = getCreationTime(localFileList)
-    cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", timeString, str(fileInfo.tableId()))
+    cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", (timeString, str(fileInfo.tableId())))
     
     # Find out the bounding box of the file and generate a log string
     fileBbox = IrgGeoFunctions.getImageBoundingBox(preppedFilePath)
-    #bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
-    cursor.execute("UPDATE Files SET minLon=? maxLon=? minLat=? maxLat=? WHERE idx=?",
-               str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId()))
+    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
+    cursor.execute("UPDATE Files SET minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
+                   (str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId())))
     
     # Upload the file
-    cmdArgs = [localFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+    cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
     #print cmdArgs
     #assetId = mapsEngineUpload.main(cmdArgs)
     assetId = 12345 # DEBUG!
@@ -199,10 +199,11 @@ def uploadFile(db, fileInfo, logQueue, workDir):
 
     # Update the database
     currentTimeString = getCurrentTimeString()
-    cursor.execute("UPDATE Files SET status=? uploadTime=? version=?, assetID=? WHERE idx=?",
-               str(STATUS_UPLOADED), currentTimeString, str(version), str(assetId), str(fileInfo.tableId()))
+    cursor.execute("UPDATE Files SET status=?, uploadTime=?, version=?, assetID=? WHERE idx=?",
+                    (str(STATUS_UPLOADED), currentTimeString, str(version), str(assetId), str(fileInfo.tableId())))
     db.commit()
- 
+    db.close() 
+
     # Record that we uploaded the file
     logString = fileInfo.setName() +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
     #print logString
@@ -218,17 +219,19 @@ def uploadFile(db, fileInfo, logQueue, workDir):
     return assetId
 
 
-def uploadNextFile(db, sensorCode, outputFolder, numFiles=1, numThreads=1):
+def uploadNextFile(dbPath, sensorCode, outputFolder, numFiles=1, numThreads=1):
     """Determines the next file to upload, uploads it, and logs it"""
     
-    cursor = db.cursor()
-    
     print 'Searching for next file to upload...'
-    
+
+    db = sqlite3.connect(dbPath)
+    cursor = db.cursor()
+        
     # query the SQL database for one or more entries for this sensor which have not been uploaded yet.
-    rows = cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=? AND LIMIT=?',
-                          (str(sensorCode), str(STATUS_NONE), str(numFiles)))
-    
+    cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=? LIMIT ?',
+                   (str(sensorCode), str(STATUS_NONE), str(numFiles)))
+    rows = cursor.fetchall()
+    db.close()
     if rows == []: # Make sure we found the next lines
         raise Exception('Could not find any data files left to upload!')
     
@@ -253,8 +256,8 @@ def uploadNextFile(db, sensorCode, outputFolder, numFiles=1, numThreads=1):
     for line in rows:
         fileInfo = TableRecord(line) # Wrap the data line
         print 'Spawning thread for: '
-        print fileInfo
-        jobResults.append(pool.apply_async(uploadFile, args=(db, fileInfo, queue, outputFolder)))
+        print str(fileInfo)
+        jobResults.append(pool.apply_async(uploadFile, args=(dbPath, fileInfo, queue, outputFolder)))
     
     
     # Wait until all threads have finished
@@ -282,22 +285,33 @@ def checkUploads(db, sensorType):
     # Get server authorization and hold on to the token
     bearerToken = mapsEngineUpload.authorize()
 
+    MAX_NUM_RETRIES = 4  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+
     # Query the data base for all sensor data files which have been uploaded but not confirmed 
-    for row in cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=?', str(sensorType), str(STATUS_UPLOADED)):
+    cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=?', (str(sensorType), str(STATUS_UPLOADED)))
+    rows = cursor.fetchall()
+    for row in rows:
 
         # Wrap the row to make it easier to get information
         o = TableRecord(row)
         
         # Check if this asset was uploaded
-        print 'Checking asset ID = ' + o.assetId()
-        status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, o.assetId)
+        print 'Checking asset ID = ' + o.assetID()
+        for i in range(1,MAX_NUM_RETRIES):
+            status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, o.assetID())
+            if (responseCode == 403) or (responseCode == 503):
+                print 'Server is busy, sleeping ' + str(SLEEP_TIME) + ' seconds...'
+                time.sleep(SLEEP_TIME)
+            else:
+                break
         
         if not status:
             print 'Data set ' + o.setName() + ' was not uploaded correctly!'
             # Update the file info in the database to show it was not updated correctly.
             # - TODO: Is there a way to make sure we re-upload to the same asset ID?
             cursor.execute("UPDATE Files SET status=? WHERE idx=?",
-                           str(STATUS_NONE), str(o.tableId()))
+                           (str(STATUS_NONE), str(o.tableId())))
             db.commit()
 
 
@@ -353,15 +367,16 @@ def main():
     #    raise Exception('Missing output folder!')
     #    return 1;
     #options.outputFolder = args[1]
-    # TODO: Take this as an input?
-    options.outputFolder = '/home/smcmich1/data/google/'
+    # The output path is hardcoded for now with subfolders for each sensor
+    options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
 
     # Check the database connection
-    # - Default should be to a thread-safe connection
+    # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    db = sqlite3.connect('/home/smcmich1/data/google/googleData.db')
+    dbPath = '/home/smcmich1/data/google/googleData.db'
+    db = sqlite3.connect(dbPath)
     print 'Connected to database'
     
     print "Beginning processing....."
@@ -377,7 +392,8 @@ def main():
         checkUploads(db, options.sensorType)
         
     elif options.upload: # Upload one or more files
-        uploadNextFile(db, options.sensorType, options.outputFolder, options.upload, options.numThreads)
+        db.close()
+        uploadNextFile(dbPath, options.sensorType, options.outputFolder, options.upload, options.numThreads)
         
     else: # Update the database of data files
         getDataList(db, options.sensorType)

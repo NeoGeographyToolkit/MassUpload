@@ -179,8 +179,19 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     if not os.path.exists(preppedFilePath):
         raise Exception('Prepped file does not exist: ' + preppedFilePath)
 
-    # Extract a timestamp from the file
+    # Need the time string before uploading
     timeString = getCreationTime(localFileList)
+
+    # Upload the file
+    cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+    #print cmdArgs
+    assetId = mapsEngineUpload.main(cmdArgs)
+    #assetId = 12345 # DEBUG!
+   
+    #TODO: Check to make sure the file made it up!
+
+
+    # Extract a timestamp from the file
     cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", (timeString, str(fileInfo.tableId())))
     
     # Find out the bounding box of the file and generate a log string
@@ -189,13 +200,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     cursor.execute("UPDATE Files SET minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
                    (str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId())))
     
-    # Upload the file
-    cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
-    #print cmdArgs
-    #assetId = mapsEngineUpload.main(cmdArgs)
-    assetId = 12345 # DEBUG!
-   
-    #TODO: Check to make sure the file made it up!
+
+
 
     # Update the database
     currentTimeString = getCurrentTimeString()
@@ -255,8 +261,6 @@ def uploadNextFile(dbPath, sensorCode, outputFolder, numFiles=1, numThreads=1):
     jobResults = []
     for line in rows:
         fileInfo = TableRecord(line) # Wrap the data line
-        print 'Spawning thread for: '
-        print str(fileInfo)
         jobResults.append(pool.apply_async(uploadFile, args=(dbPath, fileInfo, queue, outputFolder)))
     
     
@@ -297,6 +301,7 @@ def checkUploads(db, sensorType):
         o = TableRecord(row)
         
         # Check if this asset was uploaded
+        # TODO: Option to force checking for confirmed files
         print 'Checking asset ID = ' + o.assetID()
         for i in range(1,MAX_NUM_RETRIES):
             status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, o.assetID())
@@ -306,13 +311,17 @@ def checkUploads(db, sensorType):
             else:
                 break
         
-        if not status:
+        if status:
+            # Mark the file upload as confirmed so we don't check it again
+            cursor.execute("UPDATE Files SET status=? WHERE idx=?",
+                           (str(STATUS_CONFIRMED), str(o.tableId())))
+        else: 
             print 'Data set ' + o.setName() + ' was not uploaded correctly!'
             # Update the file info in the database to show it was not updated correctly.
             # - TODO: Is there a way to make sure we re-upload to the same asset ID?
             cursor.execute("UPDATE Files SET status=? WHERE idx=?",
                            (str(STATUS_NONE), str(o.tableId())))
-            db.commit()
+        db.commit()
 
 
     print 'Finished checking uploaded files.'

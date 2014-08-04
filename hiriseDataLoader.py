@@ -121,7 +121,7 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
-    print 'Uploading file ' + setName
+    #print 'Uploading file ' + setName
     
     # The label file URL is the same as the image but with a different extension
     remoteLabelURL = getLabelPathFromImagePath(remoteURL)

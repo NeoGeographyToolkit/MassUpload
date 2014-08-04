@@ -65,6 +65,22 @@ def loadKeys():
    
     return (API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID)
 
+def printErrorInfo(desiredCode, receivedCode, errorText):
+    '''Prints a short message if the error is known, long otherwise'''
+
+    if receivedCode == 401:
+        print('Error: Unauthorized access!')
+    elif receivedCode == 403:
+        print('Warning: Rate limit exceeded!')
+    elif receivedCode == 404:
+        print('Error: The specified entity does not exist!')
+    elif receivedCode == 500:
+        print('Warning: Internal server error!')
+    elif receivedCode == 503:
+        print('Warning: Service backend error!')
+    elif receivedCode != desiredCode:
+        print errorText # Did not recognize the code, print the full error text
+
 
 # TODO: Is there a way to check for a file without knowing the asset ID?
 def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155897256865'):
@@ -76,9 +92,10 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     headers = {'Authorization': tokenString}
     response = requests.get(url, headers=headers)
     
-    # See if we got a response
-    if response.status_code != 200:
-        #print response.text
+    # Check status code
+    DESIRED_CODE = 200
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+    if response.status_code != DESIRED_CODE:
         return (False, response.status_code)
     
     # TODO: More accurate check?
@@ -236,24 +253,18 @@ def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=None):
 
 
         
-    print(data)
+    #print(data)
     tokenString = 'Bearer '+bearerToken
     headers = {'Authorization': tokenString,
                'Content-Type': 'application/json'}
-    print(headers)
+    #print(headers)
     
     response = requests.post(url, data=json.dumps(data), headers=headers)
     
-    print response.text
-    
-    print('Received status code ' + str(response.status_code))
-    if response.status_code == 401:
-        print('Error: Unauthorized access!')
-    if response.status_code == 403:
-        print('Error: Forbidden operation!')
-    if response.status_code == 503:
-        print('Error: Service backend error!')
-    if response.status_code != 200:
+    # Check status code
+    DESIRED_CODE = 200
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)   
+    if response.status_code != DESIRED_CODE:
         return (False, response.status_code)
     
     jsonDict = json.loads(response.text)
@@ -287,9 +298,9 @@ def uploadFile(bearerToken, assetId, filename):
                'Content-Type':   contentString,
                'Content-Length': str(imageSizeBytes)}
 
-    print headers
-    print url
-    print filename
+    #print headers
+    #print url
+    #print filename
 
     # Submit the post request with file data
 #    fileList = {'file': open(filename, 'rb')}
@@ -298,17 +309,16 @@ def uploadFile(bearerToken, assetId, filename):
     with open(filename, 'rb') as f:
         response = requests.post(url, headers=headers, data=f) 
     
-    print response.text
+    # Check status code
+    DESIRED_CODE = 204
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
     
     # Check response status code
-    print('Received status code ' + str(response.status_code))
     if response.status_code != 204:
-        print 'Failed to upload file!'
         return False
     print 'File upload started successfully!'
     return True
  
-
     # To check upload progress:
     # GET https://www.googleapis.com/mapsengine/v1/rasters/{raster_ID}
     # Authorization: Bearer {token}
@@ -336,11 +346,7 @@ def main(argsIn):
     parser.add_option("--manual", action="callback", callback=man,
                       help="Read the manual.")
     
-    print argsIn
-    
     (options, args) = parser.parse_args(argsIn)
-
-    print args
 
     if len(args) < 1: # DEBUG
         #options.inputPath = 'means.png'
@@ -363,8 +369,8 @@ def main(argsIn):
     print 'Got bearer token'
     
 
-    MAX_NUM_RETRIES = 3  # Max number of times to retry (in case server is busy)
-    SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+    MAX_NUM_RETRIES = 10  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 2.1 # Time to wait between retries (Google handles only one operation/second)
    
     if options.checkAsset: # Query asset status by ID
 

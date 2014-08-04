@@ -103,7 +103,7 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
-    print 'Uploading file ' + remoteURL
+    #print 'Uploading file ' + remoteURL
         
     localFileName = os.path.splitext(os.path.basename(remoteURL))[0]+'.tif'
     localFilePath = os.path.join(workDir, localFileName)

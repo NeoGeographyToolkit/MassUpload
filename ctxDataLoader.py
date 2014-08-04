@@ -108,7 +108,7 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
-    print 'Uploading file ' + setName
+    #print 'Uploading file ' + setName
     
     asuImagePath  = os.path.join(workDir, setName + '_noGeo.jp2') # Map projected image from ASU
     asuLabelPath  = os.path.join(workDir, setName + '_noGeo.lbl') # Label from ASU

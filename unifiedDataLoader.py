@@ -37,6 +37,7 @@ SENSOR_TYPE_THEMIS = 3
 STATUS_NONE      = 0
 STATUS_UPLOADED  = 1
 STATUS_CONFIRMED = 2
+STATUS_ERROR     = -1
 
 SENSOR_CODES = {'hirise' : SENSOR_TYPE_HiRISE,
                 'hrsc'  : SENSOR_TYPE_HRSC,
@@ -104,7 +105,6 @@ def addDataRecord(db, sensor, subType, setName, remoteURL):
     cursor.execute("INSERT INTO Files VALUES(null, ?, ?, ?, null, 0, null, ?, null, null, null, null, null, null)",
                (str(sensor), subType, setName, remoteURL))
     db.commit()
-    # TODO: Verify that the insertion went through?
     return True
     
 #--------------------------------------------------------------------------------
@@ -171,9 +171,23 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
     
     # Call sensor-specific function to fetch and prepare the file.
-    localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
-    if len(localFileList) == 0:
-        raise Exception('Failed to retrieve any local files!')
+    try:
+        localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
+        if len(localFileList) == 0:
+            raise Exception('Failed to retrieve any local files!')
+    # TODO: Clean up exception handling
+    except: # Make sure an error does not stop other uploads
+        print 'Failed to fetch/prep file ' + fileInfo.remoteURL()
+
+        # TODO: Add a tool to flag all of these for processing
+        # Record the error in the database
+        cursor.execute("UPDATE Files SET status=? WHERE idx=?", 
+                       (str(STATUS_ERROR), str(fileInfo.tableId())))
+        db.commit()
+        db.close()
+
+        return -1
+
     preppedFilePath = localFileList[0]
     
     if not os.path.exists(preppedFilePath):
@@ -185,11 +199,11 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     # Upload the file
     cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
     #print cmdArgs
-    assetId = mapsEngineUpload.main(cmdArgs)
-    #assetId = 12345 # DEBUG!
-   
-    #TODO: Check to make sure the file made it up!
+    #assetId = mapsEngineUpload.main(cmdArgs)
+    assetId = 12345 # DEBUG!
 
+    # The file won't make it up every time so the --checkUploads call will be
+    #   needed to catch stragglers.
 
     # Extract a timestamp from the file
     cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", (timeString, str(fileInfo.tableId())))

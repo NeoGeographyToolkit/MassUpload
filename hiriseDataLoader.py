@@ -131,13 +131,13 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     
     if not os.path.exists(localFilePath):
         # Download the file
-        cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
+        cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
         print cmd
         os.system(cmd)
 
     if not os.path.exists(localLabelPath):
         # Download the file
-        cmd = 'wget ' + remoteLabelPath + ' -O ' + localLabelPath
+        cmd = 'wget ' + remoteLabelURL + ' -O ' + localLabelPath
         print cmd
         os.system(cmd)
     
@@ -152,7 +152,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
 def getLabelPathFromImagePath(imagePath):
     '''Given the image path, return the corresponding label path'''
     # Just replace the extension!
-    return (imagePath[:,-4] + 'LBL')
+    return (imagePath[:-4] + '.LBL')
 
 
 # fileType is the file name after the prefix

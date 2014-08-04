@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgIsisFunctions
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgIsisFunctions, IrgFileFunctions
 
 
 def man(option, opt, value, parser):
@@ -122,12 +122,16 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     # Generate the remote URLs from the data prefix and volume stored in these parameters
     asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
     
+    # Note: ASU seems to be missing some files!
+    # TODO: Make a wget function in the IRG python files!
     # We are using the label path in both projection cases
     if not os.path.exists(asuLabelPath):
         # Download the label file
         cmd = 'wget ' + asuLabelUrl + ' -O ' + asuLabelPath
         print cmd
         os.system(cmd)
+    if not IrgFileFunctions.doesFileExist(asuLabelPath):
+        raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
 
     if True: # Map project the EDR ourselves <-- Going with this approach!
         print 'Projecting the EDR image using ISIS...'

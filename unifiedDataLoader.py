@@ -172,9 +172,9 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     
     # Call sensor-specific function to fetch and prepare the file.
     try:
-        localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
-        if len(localFileList) == 0:
-            raise Exception('Failed to retrieve any local files!')
+      localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
+      if len(localFileList) == 0:
+          raise Exception('Failed to retrieve any local files!')
     # TODO: Clean up exception handling
     except: # Make sure an error does not stop other uploads
         print 'Failed to fetch/prep file ' + fileInfo.remoteURL()
@@ -199,8 +199,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     # Upload the file
     cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
     #print cmdArgs
-    #assetId = mapsEngineUpload.main(cmdArgs)
-    assetId = 12345 # DEBUG!
+    assetId = mapsEngineUpload.main(cmdArgs)
+    #assetId = 12345 # DEBUG!
 
     # The file won't make it up every time so the --checkUploads call will be
     #   needed to catch stragglers.
@@ -214,8 +214,6 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     cursor.execute("UPDATE Files SET minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
                    (str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId())))
     
-
-
 
     # Update the database
     currentTimeString = getCurrentTimeString()
@@ -232,13 +230,14 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         
     # Delete all the local files left by the prep function
     print 'rm ' + preppedFilePath
-    #for f in localFileList:
+    for f in localFileList:
+        pass
         #os.remove(f)
     
     print 'Finished uploading data file!'
     return assetId
 
-
+# TODO: Write a wrapper script to keep this going
 def uploadNextFile(dbPath, sensorCode, outputFolder, numFiles=1, numThreads=1):
     """Determines the next file to upload, uploads it, and logs it"""
     

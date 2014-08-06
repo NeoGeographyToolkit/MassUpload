@@ -166,11 +166,13 @@ def authorize(redo=False):
     
     API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
 
+    #print 'Setting up Maps Engine API service.'
     service = apiclient.discovery.build('mapsengine', 'v1', http=http, developerKey=API_KEY)
 
     # It is not clear why but adding this pointless code fixed the authorization problems!
     #print '=================='    
     # Read the location of every Feature in a Table.
+    #print 'Testing dummy request'
     features = service.tables().features()
     request = features.list(id='12421761926155747447-06672618218968397709',
                             maxResults=10, version='published')

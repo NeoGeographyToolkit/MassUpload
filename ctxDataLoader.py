@@ -46,26 +46,43 @@ def getCreationTime(fileList):
     if len(fileList) < 2:
         raise Exception('Error, missing label file path!')
     filePath = fileList[1]
-    
+
+    # The exact time string is the only thing written to this file so just read it out!    
     timeString = ''
     f = open(filePath, 'r')
     for line in f:
-        if 'StartTime' in line:
-            print line
-            timeString = IrgStringFunctions.getLineAfterText(line, '=')
-            break
+        timeString = line.strip()
     f.close()
   
+    if not timeString:
+        raise Exception('Unable to find time string in file ' + filePath)
+
+        return timeString
+
+
+def getCreationTimeHelper(filePath):
+    '''Extracts the file creation time from the EDR .IMG image, then saves in to a file'''
+
+    # Call gdalinfo on the file and grab the output
+    cmd = ['gdalinfo', filePath]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    outputText, err = p.communicate()
+    outputTextLines = outputText.split('\n')
+    
+    timeString = ''
+    for line in outputTextLines:
+        if 'PRODUCT_CREATION_TIME' in line:
+            timeString = IrgStringFunctions.getLineAfterText(line, '=')
+            break
+
     if not timeString:
         raise Exception('Unable to find time string in file ' + filePath)
   
     # Get to the correct format
     timeString = timeString.strip()
-    timeString = timeString[:-4] + 'Z'
-  
-    # The time string is almost in the correct format
+    timeString = timeString + 'Z'
     return timeString
-
+    
 
 def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     '''Add all known data sets to the SQL database'''
@@ -110,9 +127,14 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     
     #print 'Uploading file ' + setName
     
+    # Images with a center over this latitude will use stereographic projection
+    #   instead of simple cylindrical projection.
+    HIGH_LATITUDE_CUTOFF = 65 # Degrees
+    
     asuImagePath  = os.path.join(workDir, setName + '_noGeo.jp2') # Map projected image from ASU
     asuLabelPath  = os.path.join(workDir, setName + '_noGeo.lbl') # Label from ASU
     edrPath       = os.path.join(workDir, setName + '.IMG')       # Raw image from PDS
+    timePath      = os.path.join(workDir, setName + '.time')      # Contains only the file capture time string
     #cubPath     = os.path.join(workDir, setName + '.cub')        # Output of mroctx2isis
     #calPath     = os.path.join(workDir, setName + '.cal.cub')    # Output of ctxcal
     mapPath       = os.path.join(workDir, setName + '.map.cub')   # Output of cam2map
@@ -122,38 +144,36 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     # Generate the remote URLs from the data prefix and volume stored in these parameters
     asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
     
-    # Note: ASU seems to be missing some files!
-    # TODO: Make a wget function in the IRG python files!
-    # We are using the label path in both projection cases
-    if not os.path.exists(asuLabelPath):
-        # Download the label file
-        cmd = 'wget ' + asuLabelUrl + ' -O ' + asuLabelPath
-        print cmd
-        os.system(cmd)
-    if not IrgFileFunctions.doesFileExist(asuLabelPath):
-        raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
-
     if True: # Map project the EDR ourselves <-- Going with this approach!
         print 'Projecting the EDR image using ISIS...'
-        
-        if not os.path.exists(mapLabelPath):
-            # Generate the map label file
-            numLinesCopied = extractPvlSection(asuLabelPath, mapLabelPath, "Mapping")
-            if numLinesCopied < 10:
-                raise Exception('Failed to copy map data from file ' + asuLabelPath)
         
         if not os.path.exists(edrPath):
             # Download the EDR file
             cmd = 'wget ' + edrUrl + ' -O ' + edrPath
             print cmd
             os.system(cmd)
+
+        # Extract the image capture time from the .IMG file
+        if not os.path.exists(timePath):
+            timeString = getCreationTimeHelper(edrPath)
+            f = open(timePath, 'w')
+            f.write(timeString)
+            f.close()
       
         # Convert and apply calibration to the CTX file
         calPath = IrgIsisFunctions.prepareCtxImage(edrPath, workDir, True)
+
+        # Find out the center latitude of the file and determine if it is high latitude
+        centerLat = IrgIsisFunctions.getCubeCenterLatitude(calPath, workDir)
+        highLat   = abs(centerLat) > HIGH_LATITUDE_CUTOFF
+
+        if not os.path.exists(mapLabelPath):
+            # Generate the map label file           
+            generateDefaultMappingPvl(mapLabelPath, highLat)
         
         if not os.path.exists(mapPath):
             # Generate the map projected file
-            cmd = 'cam2map matchmap=True from=' + calPath + ' to=' + mapPath + ' map='+mapLabelPath
+            cmd = 'cam2map matchmap=False from=' + calPath + ' to=' + mapPath + ' map='+mapLabelPath
             print cmd
             os.system(cmd)
         
@@ -169,8 +189,22 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         #os.remove(calPath)
         #os.remove(mapPath)
         
+        # Two local files are left around, the first should be uploaded.
+        return [localFilePath, timePath]
+        
     else: # Use the map projected image from the ASU web site
         print 'Using ASU projected image...'
+        
+        # Note: ASU seems to be missing some files!
+        # TODO: Make a wget function in the IRG python files!
+        # We are using the label path in both projection cases
+        if not os.path.exists(asuLabelPath):
+            # Download the label file
+            cmd = 'wget ' + asuLabelUrl + ' -O ' + asuLabelPath
+            print cmd
+            os.system(cmd)
+        if not IrgFileFunctions.doesFileExist(asuLabelPath):
+            raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
         
         if not os.path.exists(asuImagePath):
             # Download the image file
@@ -188,14 +222,40 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
                 raise Exception('Script to add geo data to JP2 file failed!')
             
         # Clean up
-        #os.remove(asuImagePath)
+        os.remove(asuImagePath)
     
-    # Two local files are left around, the first should be uploaded.
-    return [localFilePath, asuLabelPath]
+        # Two local files are left around, the first should be uploaded.
+        return [localFilePath, asuLabelPath]
         
 
 
 #--------------------------------------------------------------------------------
+
+def getCreationTimeFromAsuLabelFile(fileList):
+    """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
+    
+    if len(fileList) < 2:
+        raise Exception('Error, missing label file path!')
+    filePath = fileList[1]
+    
+    timeString = ''
+    f = open(filePath, 'r')
+    for line in f:
+        if 'StartTime' in line:
+            print line
+            timeString = IrgStringFunctions.getLineAfterText(line, '=')
+            break
+    f.close()
+  
+    if not timeString:
+        raise Exception('Unable to find time string in file ' + filePath)
+  
+    # Get to the correct format
+    timeString = timeString.strip()
+    timeString = timeString[:-4] + 'Z'
+  
+    # The time string is almost in the correct format
+    return timeString
 
 
 def extractPvlSection(inputPath, outputPath, sectionName):
@@ -231,6 +291,64 @@ def extractPvlSection(inputPath, outputPath, sectionName):
     outputFile.close()
     
     return numLines # Return the number of lines copied
+
+
+
+def generateDefaultMappingPvl(outputPath, highLat):
+    '''Generates a map projection PVL file'''
+    
+    # Define the default map projection parameters
+    # - Many of the parameters are left blank so ISIS can compute them.
+    if highLat:
+        linesToWrite = ['Group = Mapping',
+                            '  TargetName         = Mars',
+                            '  ProjectionName     = PolarStereographic',
+                            '  EquatorialRadius   = 3396190.0 <meters>',
+                            '  PolarRadius        = 3376190.0 <meters>',
+                            '  LatitudeType       = Planetocentric',
+                            '  LongitudeDirection = PositiveEast',
+                            '  LongitudeDomain    = 180',
+                              #PixelResolution    = 5.8134967010484 <meters/pixel>
+                              #Scale              = 10196.049051274 <pixels/degree>
+                              #UpperLeftCornerX   = 11998557.230248 <meters>
+                              #UpperLeftCornerY   = 2163550.9322622 <meters>
+                              #MinimumLatitude    = 31.465310023405
+                              #MaximumLatitude    = 36.50039485868
+                              #MinimumLongitude   = 202.42295041134
+                              #MaximumLongitude   = 203.72039993543
+                            '  CenterLongitude    = 0.0',
+                            'End_Group']
+    else: # Normal latitude range
+        linesToWrite = ['Group = Mapping',
+                        '  TargetName         = Mars',
+                        '  ProjectionName     = SimpleCylindrical',
+                        '  EquatorialRadius   = 3396190.0 <meters>',
+                        '  PolarRadius        = 3376200.0 <meters>',
+                        '  LatitudeType       = Planetocentric',
+                        '  LongitudeDirection = PositiveEast',
+                        '  LongitudeDomain    = 180',
+                          #PixelResolution    = 5.8134967010484 <meters/pixel>
+                          #Scale              = 10196.049051274 <pixels/degree>
+                          #UpperLeftCornerX   = 11998557.230248 <meters>
+                          #UpperLeftCornerY   = 2163550.9322622 <meters>
+                          #MinimumLatitude    = 31.465310023405
+                          #MaximumLatitude    = 36.50039485868
+                          #MinimumLongitude   = 202.42295041134
+                          #MaximumLongitude   = 203.72039993543
+                        '  CenterLongitude    = 0.0',
+                        'End_Group']
+
+    # Open the output file
+    outputFile = open(outputPath, 'w')
+    numLines = 0
+        
+    # Write out all the lines
+    for line in linesToWrite:
+        outputFile.write(line + '\n')
+        numLines = numLines + 1
+    outputFile.close()
+    
+    return numLines
 
 def generatePdsPath(filePrefix, volume):
     """Generate the full PDS path for a given CTX data file"""

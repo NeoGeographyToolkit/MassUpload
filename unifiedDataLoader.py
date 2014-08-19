@@ -339,6 +339,105 @@ def checkUploads(db, sensorType):
 
     print 'Finished checking uploaded files.'
     
+
+def updateDbFromWeb(db, sensorType):
+    '''Update the database from files already uploaded'''
+    # This is required if the database file is lost after data has been uploaded!
+
+    print 'Querying Maps Engine for uploaded file list...'
+
+    cursor = db.cursor()
+
+    MAX_NUM_RETRIES = 4  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+
+    # Get server authorization and hold on to the token.
+    bearerToken = mapsEngineUpload.authorize()
+
+    # Get the list of assets
+    assetList = mapsEngineUpload.getRasterList(bearerToken)
+    if not assetList:
+        raise Exception('Failed to detect any uploaded assets!')
+    print 'Found ' + str(len(assetList)) + ' existing raster assets in Maps Engine'
+
+    # Add each asset to the database if it is not already there.
+    for asset in assetList:
+
+        uploadName = asset['name']
+        if uploadName[-4:] == '.jp2': # These are based on ASU's images
+            print 'Skipping uploaded jp2 file'
+            continue
+
+        # Fetch the the acquisition time
+        for i in range(1,MAX_NUM_RETRIES):
+            status, detailedInfo = mapsEngineUpload.queryUploadedFile(bearerToken, asset['assetID'])
+            if (not status) and (detailedInfo == 403) or (detailedInfo == 503):
+                print 'Server is busy, sleeping ' + str(SLEEP_TIME) + ' seconds...'
+                time.sleep(SLEEP_TIME)
+            else:
+                break
+
+        # CTX
+        sensor     = SENSOR_TYPE_CTX
+        version    = 1 
+        subType    = '' # This is the volume which we can't get from online
+        setName    = uploadName[4:-4] # Extract this from the uploaded asset name
+        remoteURL  = '' # Not stored online!
+        acqTime    = detailedInfo['acquisitionTime']['start'] #TODO: Check syntax!
+        uploadTime = asset['uploadTime']
+
+        print 'Adding ' + setName + ',  ' + asset['assetID']
+
+        # Check if the asset is already loaded in to the database.
+        cursor.execute('SELECT * FROM Files WHERE assetId=?', [asset['assetID']])
+        rows = cursor.fetchall()
+        if len(rows) >= 1:            
+            record = TableRecord(rows[0]) # Wrap the row to make it easier to get information
+
+            # Check if this table entry has already been updated
+            if record.status() == STATUS_UPLOADED:
+                print 'This entry has already been updated!'
+                #continue
+
+            # Update the table row with the upload information
+            cursor.execute("UPDATE Files SET acqTime=?, status=?, version=?, assetId=?, uploadTime=?, minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
+                           (acqTime, str(STATUS_UPLOADED), version, asset['assetID'], uploadTime, 
+                            asset['minLat'], asset['minLon'], asset['maxLat'], asset['maxLon'], str(record.tableId())))
+        else:
+            # We haven't seen the asset ID before, but what about the set name?
+            cursor.execute('SELECT * FROM Files WHERE setname=?', [setName])
+            rows = cursor.fetchall()
+
+            if len(rows) > 1: # Check for this error case
+                raise Exception('Multiple rows found with set name ' + setname)
+
+            if len(rows) < 1: # Set name not in the database
+                # Otherwise we need to add the asset to the database.
+                # - Maybe this should never happen?
+                raise Exception('WARNING: This data set not found in the database!')
+                cursor.execute("INSERT INTO Files VALUES(null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               (str(sensor), subType, setName, acqTime, str(STATUS_UPLOADED), version, remoteURL, asset['assetID'], 
+                                uploadTime, asset['minLat'], asset['minLon'], asset['maxLat'], asset['maxLon']))
+
+            else: # We found the set in the database, update it.
+                record = TableRecord(rows[0]) # Wrap the row to make it easier to get information
+
+                cursor.execute("UPDATE Files SET acqTime=?, status=?, version=?, assetId=?, uploadTime=?, minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
+                               (acqTime, str(STATUS_UPLOADED), version, asset['assetID'], uploadTime, 
+                                asset['minLat'], asset['minLon'], asset['maxLat'], asset['maxLon'], str(record.tableId())))
+
+        # Execute whatever action we decidede on.
+        db.commit()
+
+        #raise Exception('DEBUG FORMATS!')
+
+        # Note that the upload status is not confirmed.
+        # - The upload checker script should be run to take care of this.
+
+
+    print 'Finished checking uploaded files.'
+
+
 def getDataList(db, sensorCode):
     '''Update the list of available data sets from the given sensor'''
 
@@ -390,14 +489,14 @@ def main():
     #    return 1;
     #options.outputFolder = args[1]
     # The output path is hardcoded for now with subfolders for each sensor
-    options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
+    options.outputFolder = os.path.join('/byss/smcmich1/data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
 
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    dbPath = '/home/smcmich1/data/google/googleData.db'
+    dbPath = '/byss/smcmich1/data/google/googlePlanetary.db'
     db = sqlite3.connect(dbPath)
     print 'Connected to database'
     
@@ -408,7 +507,10 @@ def main():
     # Make sure the working directory exists
     if not os.path.exists(options.outputFolder):
         os.mkdir(options.outputFolder)
-    
+
+    # Rarely used option to update after a local database loss!    
+    updateDbFromWeb(db, options.sensorType)
+    return 0
     
     if options.checkUploads: # Check to see if uploaded files made it up ok
         checkUploads(db, options.sensorType)

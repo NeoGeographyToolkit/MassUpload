@@ -1,6 +1,6 @@
 
 
-CREATE TABLE Files (
+CREATE TABLE Files(
   idx        INTEGER PRIMARY KEY AUTOINCREMENT,
   sensor     TEXT NOT NULL,
   subtype    TEXT NOT NULL,

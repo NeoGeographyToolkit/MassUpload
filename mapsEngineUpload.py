@@ -82,9 +82,28 @@ def printErrorInfo(desiredCode, receivedCode, errorText):
         print errorText # Did not recognize the code, print the full error text
 
 
-# TODO: Is there a way to check for a file without knowing the asset ID?
-def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155897256865'):
-    """Determine if a file has already been uploaded into Maps Engine"""
+def getProjectsInfo(bearerToken):
+    """Returns a list of the user's projects"""
+
+    # Send request for information on this asset
+    url = 'https://www.googleapis.com/mapsengine/v1/projects/'
+    tokenString = 'Bearer '+bearerToken
+    headers = {'Authorization': tokenString}
+    response = requests.get(url, headers=headers)
+    
+    print response.text
+
+    # Check status code
+    DESIRED_CODE = 200
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+    if response.status_code != DESIRED_CODE:
+        return (False, response.status_code)
+
+    return (True, response.status_code)
+
+
+def queryUploadedFile(bearerToken, assetId = '04070367133797133737-15079892155897256865'):
+    """Fetches information about a file has already been uploaded into Maps Engine"""
 
     # Send request for information on this asset
     url = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId
@@ -97,10 +116,25 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     printErrorInfo(DESIRED_CODE, response.status_code, response.text)
     if response.status_code != DESIRED_CODE:
         return (False, response.status_code)
-    
+
+    # Convert to dictionary format    
+    jsonDict = json.loads(response.text)
+    return (True, jsonDict)
+
+
+# TODO: Is there a way to check for a file without knowing the asset ID?
+def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155897256865'):
+    """Determine if a file has already been uploaded into Maps Engine"""
+
+    (result, info) = queryUploadedFile(bearerToken, assetId)
+
+    if not result: # Query failed, return error info
+        return (result, info)
+
+   
     # TODO: More accurate check?
     # Check if all files are loaded and processing is finished    
-    jsonDict = json.loads(response.text)
+    jsonDict = info
     status = True
     for f in jsonDict['files']:
         if (f['uploadStatus'] != 'complete'):
@@ -108,7 +142,7 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     if jsonDict['processingStatus'] != 'complete':
         status = False
 
-    return status, response.status_code
+    return status, 200
     
     #url = 'https://www.googleapis.com/mapsengine/v1/assets?projectId='+PROJECT_ID
     #tokenString = 'Bearer '+bearerToken
@@ -119,6 +153,53 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     # raster collection ID = GET /rasterCollections?projectId=<id>
     #   raster list = GET /rasterCollections/#rasterCollectionId$/rasters
     
+
+def getRasterList(bearerToken):
+    """Gets a list of uploaded files"""
+
+    # This only works if all of the files have been manually loaded into a mosaic 
+    #  in Maps Engine!
+
+    # TODO: Generalize this!
+    ctxAssetId = '04070367133797133737-11575601353866955997'
+    setiProjectId = '04070367133797133737'
+    assetId = ctxAssetId
+
+    # Send request for information on this asset
+    url = 'https://www.googleapis.com/mapsengine/v1/rasterCollections/' + assetId + '/rasters?projectId=' + setiProjectId
+    tokenString = 'Bearer '+bearerToken
+    headers = {'Authorization': tokenString}
+    response = requests.get(url, headers=headers)
+
+    # Check status code
+    DESIRED_CODE = 200
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+    if response.status_code != DESIRED_CODE:
+        return []
+    
+    # Get all the information from each of these files
+    jsonDict  = json.loads(response.text)
+    status    = True
+    assetList = []
+    for f in jsonDict['rasters']:
+
+        # A few of these fields will need to be reformatted to fit in the database
+        assetInfo = dict()
+        assetInfo['assetID']    = f['id']
+        assetInfo['uploadTime'] = f['creationTime']
+        assetInfo['name']       = f['name']
+        assetInfo['minLat']     = f['bbox'][0]
+        assetInfo['minLon']     = f['bbox'][1]
+        assetInfo['maxLat']     = f['bbox'][2]
+        assetInfo['maxLon']     = f['bbox'][3]
+        #TODO: Handle bbox error when failed data is hit!
+
+        assetList.append(assetInfo)
+
+
+    return assetList
+
+
 #--------------------------------------------------------------------------------
 
 def getCredentials(redo=False):

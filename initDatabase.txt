@@ -1,0 +1,20 @@
+
+
+CREATE TABLE Files (
+  idx        INTEGER PRIMARY KEY AUTOINCREMENT,
+  sensor     TEXT NOT NULL,
+  subtype    TEXT NOT NULL,
+  setname    TEXT NOT NULL,
+  acqTime    DATE,
+  status     INTEGER NOT NULL,
+  version    INTEGER,
+  remoteURL  TEXT NOT NULL,
+  assetID    TEXT,
+  uploadTime DATE,
+  minLon     FLOAT,
+  maxLon     FLOAT,
+  minLat     FLOAT,
+  maxLat     FLOAT
+);
+
+

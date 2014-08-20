@@ -165,38 +165,56 @@ def getRasterList(bearerToken):
     setiProjectId = '04070367133797133737'
     assetId = ctxAssetId
 
-    # Send request for information on this asset
     url = 'https://www.googleapis.com/mapsengine/v1/rasterCollections/' + assetId + '/rasters?projectId=' + setiProjectId
     tokenString = 'Bearer '+bearerToken
-    headers = {'Authorization': tokenString}
-    response = requests.get(url, headers=headers)
 
-    # Check status code
-    DESIRED_CODE = 200
-    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
-    if response.status_code != DESIRED_CODE:
-        return []
-    
-    # Get all the information from each of these files
-    jsonDict  = json.loads(response.text)
-    status    = True
+    # We will have to make multiple sequential requests due to return count limits.
+    gotEntireList = False
+    nextPageToken = None
     assetList = []
-    for f in jsonDict['rasters']:
 
-        # A few of these fields will need to be reformatted to fit in the database
-        assetInfo = dict()
-        assetInfo['assetID']    = f['id']
-        assetInfo['uploadTime'] = f['creationTime']
-        assetInfo['name']       = f['name']
-        assetInfo['minLat']     = f['bbox'][0]
-        assetInfo['minLon']     = f['bbox'][1]
-        assetInfo['maxLat']     = f['bbox'][2]
-        assetInfo['maxLon']     = f['bbox'][3]
-        #TODO: Handle bbox error when failed data is hit!
+    while (not gotEntireList):
 
-        assetList.append(assetInfo)
+        # Send request for information on this asset
+        headers = {'Authorization': tokenString}
+        if nextPageToken:           
+            payload = {'pageToken': nextPageToken}
+            response = requests.get(url, headers=headers, params=payload)
+        else:
+            response = requests.get(url, headers=headers)       
 
+        # Check status code
+        DESIRED_CODE = 200
+        printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+        if response.status_code != DESIRED_CODE:
+            return []
+        
+        # Get all the information from each of these files
+        jsonDict  = json.loads(response.text)
+        #print jsonDict
+        print 'Got ' + str(len(jsonDict['rasters'])) + ' results'
+        status    = True
+        for f in jsonDict['rasters']:
 
+            # A few of these fields will need to be reformatted to fit in the database
+            assetInfo = dict()
+            assetInfo['assetID']    = f['id']
+            assetInfo['uploadTime'] = f['creationTime']
+            assetInfo['name']       = f['name']
+            assetInfo['minLat']     = f['bbox'][0]
+            assetInfo['minLon']     = f['bbox'][1]
+            assetInfo['maxLat']     = f['bbox'][2]
+            assetInfo['maxLon']     = f['bbox'][3]
+            #TODO: Handle bbox error when failed data is hit!
+
+            assetList.append(assetInfo)
+
+        # Get the next page token, otherwise we are finished.
+        if 'nextPageToken' in jsonDict:
+            nextPageToken = jsonDict['nextPageToken']
+        else:
+            gotEntireList = True
+       
     return assetList
 
 

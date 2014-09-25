@@ -470,8 +470,8 @@ def main(argsIn):
     print 'Got bearer token'
     
 
-    MAX_NUM_RETRIES = 10  # Max number of times to retry (in case server is busy)
-    SLEEP_TIME      = 2.1 # Time to wait between retries (Google handles only one operation/second)
+    MAX_NUM_RETRIES = 20  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 2.5 # Time to wait between retries (Google handles only one operation/second)
    
     if options.checkAsset: # Query asset status by ID
 

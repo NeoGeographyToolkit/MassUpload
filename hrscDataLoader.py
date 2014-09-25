@@ -91,6 +91,11 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
         # - There is a core set of files on each page but there can be
         #   more with incremented image numbers.
         for d in parsedDataPage.findAll('a'):
+            if '[' in d.string: # Skip some bad links
+                continue
+
+            print d.string
+
             dataFileName = d.string[:-4]     # Lop off the .img portion
             subtype      = dataFileName[-3:] # Extract the type
 
@@ -120,6 +125,10 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     print cmd
     os.system(cmd)
     
+    # Insert a delay here to make sure that the tiny files do not get uploaded too fast for Google.
+    # - For the larger files this will barely be noticable.
+    time.sleep(5)
+
     return [localFilePath, downloadPath]
     
 

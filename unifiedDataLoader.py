@@ -22,7 +22,7 @@ from BeautifulSoup import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
-import multiprocessing, sqlite3
+import multiprocessing, sqlite3, traceback
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
@@ -69,7 +69,7 @@ class TableRecord:
     def tableId(self):
         return self.data[0]
     def sensor(self):
-        return self.data[1]
+        return int(self.data[1])
     def subtype(self):
         return self.data[2]
     def setName(self):
@@ -153,87 +153,102 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
     
     print 'Uploading file ' + fileInfo.remoteURL()
 
-    db = sqlite3.connect(dbPath)
-    cursor = db.cursor()
-    
-    # Choose the "library" to use based on the sensor type
-    # - The current version of each sensor's data files is set here.
-    if   fileInfo.sensor() == SENSOR_TYPE_HiRISE:
-        from hiriseDataLoader import fetchAndPrepFile, getCreationTime
-        version = 1
-    elif fileInfo.sensor() == SENSOR_TYPE_HRSC:
-        from hrscDataLoader import fetchAndPrepFile, getCreationTime
-        version = 1
-    elif fileInfo.sensor() == SENSOR_TYPE_CTX:
-        from ctxDataLoader import fetchAndPrepFile, getCreationTime
-        version = 1
-    else:
-        raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
-    
-    # Call sensor-specific function to fetch and prepare the file.
     try:
-      localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
-      if len(localFileList) == 0:
-          raise Exception('Failed to retrieve any local files!')
-    # TODO: Clean up exception handling
-    except: # Make sure an error does not stop other uploads
-        print 'Failed to fetch/prep file ' + fileInfo.remoteURL()
+
+        db = sqlite3.connect(dbPath)
+        cursor = db.cursor()
+        
+        # Choose the "library" to use based on the sensor type
+        # - The current version of each sensor's data files is set here.
+        if   fileInfo.sensor() == SENSOR_TYPE_HiRISE:
+            from hiriseDataLoader import fetchAndPrepFile, getCreationTime
+            version = 1
+        elif fileInfo.sensor() == SENSOR_TYPE_HRSC:
+            from hrscDataLoader import fetchAndPrepFile, getCreationTime
+            version = 1
+        elif fileInfo.sensor() == SENSOR_TYPE_CTX:
+            from ctxDataLoader import fetchAndPrepFile, getCreationTime
+            version = 1
+        else:
+            raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
+        
+        # Call sensor-specific function to fetch and prepare the file.
+
+        localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
+        if len(localFileList) == 0:
+            raise Exception('Failed to retrieve any local files!')
+
+        preppedFilePath = localFileList[0]
+        print preppedFilePath
+        
+        if not os.path.exists(preppedFilePath):
+            raise Exception('Prepped file does not exist: ' + preppedFilePath)
+
+        # Check the file size
+        MAX_UPLOAD_SIZE = 1024*1024*1024*10 # 10 GB upload limit
+        statinfo = os.stat(preppedFilePath)
+        fileSizeBytes = statinfo.st_size
+        if (fileSizeBytes > MAX_UPLOAD_SIZE):
+            raise Exception('Processed file is too large to upload!') # TODO: Automated split of file?
+        
+
+        # Need the time string before uploading
+        timeString = getCreationTime(localFileList)
+
+        # Go ahead and get the bounding box
+        fileBbox = IrgGeoFunctions.getImageBoundingBox(preppedFilePath)
+
+        # Upload the file
+        cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+        #print cmdArgs
+        assetId = mapsEngineUpload.main(cmdArgs)
+        #assetId = 12345 # DEBUG!
+
+        # The file won't make it up every time so the --checkUploads call will be
+        #   needed to catch stragglers.
+
+        # Extract a timestamp from the file
+        cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", (timeString, str(fileInfo.tableId())))
+        
+        # Log the bounding box
+        bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
+        cursor.execute("UPDATE Files SET minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
+                       (str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId())))
+
+        # Log the time string
+        currentTimeString = getCurrentTimeString()
+        cursor.execute("UPDATE Files SET status=?, uploadTime=?, version=?, assetID=? WHERE idx=?",
+                        (str(STATUS_UPLOADED), currentTimeString, str(version), str(assetId), str(fileInfo.tableId())))
+
+        db.commit()
+        db.close() 
+
+        # Record that we uploaded the file
+        logString = fileInfo.setName() +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
+        #print logString
+        logQueue.put(logString)
+
+            
+        # Delete all the local files left by the prep function
+        print 'rm ' + preppedFilePath
+        for f in localFileList:
+            #pass
+            os.remove(f)
+    
+    except Exception, e:# Make sure an error does not stop other uploads
+    
+        print traceback.format_exc()
+        print str(e)
 
         # TODO: Add a tool to flag all of these for processing
         # Record the error in the database
-        cursor.execute("UPDATE Files SET status=? WHERE idx=?", 
-                       (str(STATUS_ERROR), str(fileInfo.tableId())))
-        db.commit()
-        db.close()
+        #cursor.execute("UPDATE Files SET status=? WHERE idx=?", 
+        #               (str(STATUS_ERROR), str(fileInfo.tableId())))
+        #db.commit()
+        #db.close()
 
         return -1
 
-    preppedFilePath = localFileList[0]
-    
-    if not os.path.exists(preppedFilePath):
-        raise Exception('Prepped file does not exist: ' + preppedFilePath)
-
-    # Need the time string before uploading
-    timeString = getCreationTime(localFileList)
-
-    # Upload the file
-    cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
-    #print cmdArgs
-    assetId = mapsEngineUpload.main(cmdArgs)
-    #assetId = 12345 # DEBUG!
-
-    # The file won't make it up every time so the --checkUploads call will be
-    #   needed to catch stragglers.
-
-    # Extract a timestamp from the file
-    cursor.execute("UPDATE Files SET acqTime=? WHERE idx=?", (timeString, str(fileInfo.tableId())))
-    
-    # Find out the bounding box of the file and generate a log string
-    fileBbox = IrgGeoFunctions.getImageBoundingBox(preppedFilePath)
-    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
-    cursor.execute("UPDATE Files SET minLon=?, maxLon=?, minLat=?, maxLat=? WHERE idx=?",
-                   (str(fileBbox[0]), str(fileBbox[1]), str(fileBbox[2]), str(fileBbox[3]), str(fileInfo.tableId())))
-    
-
-    # Update the database
-    currentTimeString = getCurrentTimeString()
-    cursor.execute("UPDATE Files SET status=?, uploadTime=?, version=?, assetID=? WHERE idx=?",
-                    (str(STATUS_UPLOADED), currentTimeString, str(version), str(assetId), str(fileInfo.tableId())))
-    db.commit()
-    db.close() 
-
-    # Record that we uploaded the file
-    logString = fileInfo.setName() +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
-    #print logString
-    logQueue.put(logString)
-
-        
-    # Delete all the local files left by the prep function
-    print 'rm ' + preppedFilePath
-    for f in localFileList:
-        pass
-        #os.remove(f)
-    
     print 'Finished uploading data file!'
     return assetId
 
@@ -302,13 +317,19 @@ def checkUploads(db, sensorType):
     # Get server authorization and hold on to the token
     bearerToken = mapsEngineUpload.authorize()
 
-    MAX_NUM_RETRIES = 4  # Max number of times to retry (in case server is busy)
-    SLEEP_TIME      = 1.1 # Time to wait between retries (Google handles only one operation/second)
+    MAX_NUM_RETRIES = 2  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME      = 2.0 # Time to wait between retries (Google handles only one operation/second)
 
     # Query the data base for all sensor data files which have been uploaded but not confirmed 
     cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=?', (str(sensorType), str(STATUS_UPLOADED)))
     rows = cursor.fetchall()
+    print 'Found ' + str(len(rows)) + ' entries'
+    skip = 0
     for row in rows:
+        if skip > 0:
+            skip = skip - 1
+            continue
+        time.sleep(0.7) # Minimum sleep time
 
         # Wrap the row to make it easier to get information
         o = TableRecord(row)
@@ -318,7 +339,7 @@ def checkUploads(db, sensorType):
         print 'Checking asset ID = ' + o.assetID()
         for i in range(1,MAX_NUM_RETRIES):
             status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, o.assetID())
-            if (responseCode == 403) or (responseCode == 503):
+            if (responseCode == 403) or (responseCode == 503) or (responseCode == 401):
                 print 'Server is busy, sleeping ' + str(SLEEP_TIME) + ' seconds...'
                 time.sleep(SLEEP_TIME)
             else:
@@ -328,6 +349,7 @@ def checkUploads(db, sensorType):
             # Mark the file upload as confirmed so we don't check it again
             cursor.execute("UPDATE Files SET status=? WHERE idx=?",
                            (str(STATUS_CONFIRMED), str(o.tableId())))
+            #db.commit()
         else: 
             print 'Data set ' + o.setName() + ' was not uploaded correctly!'
             # Update the file info in the database to show it was not updated correctly.
@@ -335,6 +357,8 @@ def checkUploads(db, sensorType):
             cursor.execute("UPDATE Files SET status=? WHERE idx=?",
                            (str(STATUS_NONE), str(o.tableId())))
         db.commit()
+        #if not status:
+        #    raise Exception('DEBUG')
 
 
     print 'Finished checking uploaded files.'
@@ -489,7 +513,7 @@ def main():
     #    return 1;
     #options.outputFolder = args[1]
     # The output path is hardcoded for now with subfolders for each sensor
-    options.outputFolder = os.path.join('/byss/smcmich1/data/google/', args[0].lower())
+    options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
 
@@ -508,9 +532,9 @@ def main():
     if not os.path.exists(options.outputFolder):
         os.mkdir(options.outputFolder)
 
-    # Rarely used option to update after a local database loss!    
-    updateDbFromWeb(db, options.sensorType)
-    return 0
+    ## Rarely used option to update after a local database loss!    
+    #updateDbFromWeb(db, options.sensorType)
+    #return 0
     
     if options.checkUploads: # Check to see if uploaded files made it up ok
         checkUploads(db, options.sensorType)

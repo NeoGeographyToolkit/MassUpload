@@ -40,6 +40,72 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+#TODO: Put this back in the IRG function list!
+def fileIsNonZero(fpath):  
+    '''Return true if the file exists and is non-empty'''
+    return True if os.path.isfile(fpath) and os.path.getsize(fpath) > 0 else False
+
+
+def putIsisHeaderIn180(headerPath):
+    '''Make sure the header info is for +/- 180 degrees!'''
+
+    # TODO: DELETE THIS FUNCTION, IT DOES NOT SEEM WE NEED IT!
+    return headerPath
+
+    if not os.path.exists(headerPath):
+        raise Exception('Header does not exist: ' + headerPath)
+
+    outputPath   = headerPath + '_fixed.txt'
+    inputHeader  = open(headerPath, 'r')
+    outputHeader = open(outputPath, 'w') # For now we always overwrite the file
+    
+    # Correction constants
+    PI     = 3.14159265358979323846264338327950288419716939937510
+    RADIUS = 3396190.0 # Equatorial radius of Mars
+    correction = 2.0*PI*RADIUS
+
+    correctExtents = False
+    for line in inputHeader:
+        # Check for problem lines and replace them!
+
+        # Don't try to process other projection types!
+        if ('    ProjectionName     =' in line) and not ('SimpleCylindrical' in line):
+            inputHeader.close()
+            outputHeader.close()
+            os.remove(outputHeader)
+            return headerPath
+
+        # Need to switch to zero center point
+        if '    CenterLongitude    = 180.0' in line:
+            outputHeader.write('    CenterLongitude    = 0.0')    
+            correctExtents = True # Set correction needed flag
+            continue
+
+        if '    LongitudeDomain    = 360' in line:
+            outputHeader.write('    LongitudeDomain    = 180')    
+            correctExtents = True # Set correction needed flag
+            continue
+
+        if correctExtents and ('UpperLeftCornerX' in line):
+            # Get the existing value
+            valStart   = line.find('=') + 1
+            valStop    = line.find('<') - 1
+            currentVal = float(line[valStart:valStop])
+            newVal     = currentVal 
+            
+            outputHeader.write('    LongitudeDomain    = 180')    
+            continue
+
+
+        # No changes needed to this line
+        outputHeader.write(line)
+
+    inputHeader.close()
+    outputHeader.close()
+
+    return newHeaderPath
+
+
 def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
     
@@ -47,17 +113,27 @@ def getCreationTime(fileList):
         raise Exception('Error, missing label file path!')
     filePath = fileList[1]
 
-    # The exact time string is the only thing written to this file so just read it out!    
     timeString = ''
     f = open(filePath, 'r')
+#    OUR METHOD
+#    # The exact time string is the only thing written to this file so just read it out!    
+#    for line in f:
+#        timeString = line.strip()
+
+#   ASU METHOD
+#   Extract the time string from the label file
     for line in f:
-        timeString = line.strip()
-    f.close()
+        if 'StartTime             = ' in line:
+            eqPos = line.find('=')
+            timeString = line[eqPos+1:].strip() + 'Z'
+	    break
+
+    f.close()    
   
     if not timeString:
         raise Exception('Unable to find time string in file ' + filePath)
 
-        return timeString
+    return timeString
 
 
 def getCreationTimeHelper(filePath):
@@ -96,10 +172,16 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     #print parsedIndexPage.prettify()
 
     # Loop through outermost directory
+    skip = 0
     for line in parsedIndexPage.findAll('a'):
         volumeName = line.string # Contains a trailing /
         if (not 'mrox_' in volumeName) or ('txt' in volumeName): # Skip other links
             continue
+
+        skip = skip - 1
+        if skip > 0:
+            continue
+
         volumePath = baseUrl + volumeName + 'data/'
         
         print 'Scanning directory ' + volumePath
@@ -144,7 +226,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     # Generate the remote URLs from the data prefix and volume stored in these parameters
     asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
     
-    if True: # Map project the EDR ourselves <-- Going with this approach!
+    if False: # Map project the EDR ourselves <-- Going with this approach!
         print 'Projecting the EDR image using ISIS...'
         
         if not os.path.exists(edrPath):
@@ -167,17 +249,21 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         centerLat = IrgIsisFunctions.getCubeCenterLatitude(calPath, workDir)
         highLat   = abs(centerLat) > HIGH_LATITUDE_CUTOFF
 
-        if not os.path.exists(mapLabelPath):
+        if True:#not os.path.exists(mapLabelPath):
             # Generate the map label file           
             generateDefaultMappingPvl(mapLabelPath, highLat)
         
-        if not os.path.exists(mapPath):
+        if True:#not os.path.exists(mapPath):
             # Generate the map projected file
-            cmd = 'cam2map matchmap=False from=' + calPath + ' to=' + mapPath + ' map='+mapLabelPath
+            cmd = ['timeout', '20h', 'cam2map', 'matchmap=','False', 'from=', calPath, 'to=', mapPath, 'map=', mapLabelPath]
             print cmd
-            os.system(cmd)
+            #os.system(cmd)
+            p = subprocess.Popen(cmd)
+            p.communicate()
+            if (p.returncode != 0):
+                raise Exception('Error or timeout running cam2map, returnCode = ' + str(p.returncode))
         
-        if not os.path.exists(localFilePath):
+        if True: #not os.path.exists(localFilePath):
             # Generate the final image to upload
             cmd = 'gdal_translate -of GTiff ' + mapPath + ' ' + localFilePath
             print cmd
@@ -196,25 +282,31 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         print 'Using ASU projected image...'
         
         # Note: ASU seems to be missing some files!
-        # TODO: Make a wget function in the IRG python files!
         # We are using the label path in both projection cases
         if not os.path.exists(asuLabelPath):
             # Download the label file
-            cmd = 'wget ' + asuLabelUrl + ' -O ' + asuLabelPath
+            cmd = 'wget "' + asuLabelUrl + '" -O ' + asuLabelPath
             print cmd
             os.system(cmd)
-        if not IrgFileFunctions.doesFileExist(asuLabelPath):
+        if not fileIsNonZero(asuLabelPath):
             raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
         
         if not os.path.exists(asuImagePath):
             # Download the image file
-            cmd = 'wget ' + asuImageUrl + ' -O ' + asuImagePath
+            cmd = 'wget "' + asuImageUrl + '" -O ' + asuImagePath
             print cmd
             os.system(cmd)
+        if not fileIsNonZero(asuImagePath):
+            raise Exception('Failed to download image file at URL: ' + asuImageUrl)
+
+        ## Correct the ISIS header if needed
+        #fixedAsuHeaderPath = putIsisHeaderIn180(asuLabelPath)
+        #if (fixedAsuHeaderPath != asuLabelPath):
+        #    os.remove(asuLabelPath) # Delete replaced header
 
         if not os.path.exists(localFilePath):
             # Correct the file - The JP2 file from ASU needs the geo data from the label file!
-            cmd = 'addGeoToAsuCtxJp2.py --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
+            cmd = 'addGeoToAsuCtxJp2.py --keep --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
             print cmd
             os.system(cmd)
             
@@ -224,7 +316,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         # Clean up
         os.remove(asuImagePath)
     
-        # Two local files are left around, the first should be uploaded.
+        # Three local files are left around, the first should be uploaded.
         return [localFilePath, asuLabelPath]
         
 

@@ -134,6 +134,11 @@ def addDataRecord(db, sensor, subType, setName, remoteURL):
 #    Takes the list of files returned by fetchAndPrepFile
 #    return null
 
+#def getBoundingBox(fileList):
+#    """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
+#    Takes the list of files returned by fetchAndPrepFile
+#    return null
+
 #def findAllDataSets(db, dataAddFunctionCall, sensorCode):
 #    '''Add all known data sets to the SQL database'''
 #    return False
@@ -179,13 +184,13 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # Choose the "library" to use based on the sensor type
         # - The current version of each sensor's data files is set here.
         if   fileInfo.sensor() == SENSOR_TYPE_HiRISE:
-            from hiriseDataLoader import fetchAndPrepFile, getCreationTime
+            from hiriseDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
             version = 1
         elif fileInfo.sensor() == SENSOR_TYPE_HRSC:
-            from hrscDataLoader import fetchAndPrepFile, getCreationTime
+            from hrscDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
             version = 1
         elif fileInfo.sensor() == SENSOR_TYPE_CTX:
-            from ctxDataLoader import fetchAndPrepFile, getCreationTime
+            from ctxDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
             version = 1
         else:
             raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
@@ -213,8 +218,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # Need the time string before uploading
         timeString = getCreationTime(localFileList)
 
-        # Go ahead and get the bounding box
-        fileBbox = IrgGeoFunctions.getImageBoundingBox(preppedFilePath)
+        # Go ahead and get the bounding box       
+        fileBbox = getBoundingBox(localFileList)
 
         # Upload the file
         cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]

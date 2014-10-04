@@ -62,6 +62,9 @@ def getCreationTime(fileList):
     
     return timeString
     
+def getBoundingBox(fileList):
+    """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
+    return IrgGeoFunctions.getImageBoundingBox(fileList[0])
 
 def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     '''Add all known data sets to the SQL database'''
@@ -155,6 +158,8 @@ def generatePdsPath(filePrefix):
     #print filePrefix + fileType + ' -> ' + fullUrl
     return fullUrl
 
+
+fileBbox = IrgGeoFunctions.getImageBoundingBox(preppedFilePath)
 
 def getDataList(outputFilePath):
     """Populates a text file list of all available HRSC RDR data"""

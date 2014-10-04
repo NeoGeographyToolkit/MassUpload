@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgFileFunctions
 
 
 def man(option, opt, value, parser):
@@ -64,6 +64,10 @@ def getCreationTime(fileList):
     timeString = timeString[:-4] + 'Z'
   
     return timeString
+
+def getBoundingBox(fileList):
+    """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
+    return getBoundingBoxFromIsisLabel(fileList[1])
 
 
 def findAllDataSets(db, dataAddFunctionCall, sensorCode):
@@ -134,14 +138,25 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
         print cmd
         os.system(cmd)
+    if not IrgFileFunctions.fileIsNonZero(localFilePath):
+        raise Exception('Unable to download from URL: ' + remoteURL)
 
     if not os.path.exists(localLabelPath):
         # Download the file
         cmd = 'wget ' + remoteLabelURL + ' -O ' + localLabelPath
         print cmd
         os.system(cmd)
+    if not IrgFileFunctions.fileIsNonZero(localLabelPath):
+        raise Exception('Unable to download from URL: ' + remoteLabelURL)
     
-    # First file is for uploade, second contains the timestamp
+    # Call code to fix the header information in the JP2 file!
+    # TODO: Make sure the binary is found!
+    cmd = 'fix_jp2 ' + localFilePath
+    print cmd
+    os.system(cmd)
+
+    
+    # First file is for upload, second contains the timestamp
     return [localFilePath, localLabelPath]
 
     

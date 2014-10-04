@@ -18,11 +18,16 @@
 
 import sys
 
-from BeautifulSoup import BeautifulSoup
+#from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
-import multiprocessing, sqlite3, traceback
+import multiprocessing, traceback
+
+#import sqlite3
+from pysqlite2 import dbapi2 as sqlite3
+
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
@@ -240,12 +245,18 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         print traceback.format_exc()
         print str(e)
 
-        # TODO: Add a tool to flag all of these for processing
         # Record the error in the database
-        #cursor.execute("UPDATE Files SET status=? WHERE idx=?", 
-        #               (str(STATUS_ERROR), str(fileInfo.tableId())))
-        #db.commit()
-        #db.close()
+        cursor.execute("UPDATE Files SET status=? WHERE idx=?", 
+                       (str(STATUS_ERROR), str(fileInfo.tableId())))
+        db.commit()
+        db.close()
+
+        try: # Delete localFileList if it exists
+            for f in localFileList:
+                os.remove(f)
+        except:
+            pass
+
 
         return -1
 

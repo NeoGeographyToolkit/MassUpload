@@ -162,7 +162,7 @@ def getCreationTimeHelper(filePath):
 
 def getBoundingBox(fileList):
     """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
-    return getBoundingBoxFromIsisLabel(fileList[1])
+    return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[1])
 
 def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     '''Add all known data sets to the SQL database'''

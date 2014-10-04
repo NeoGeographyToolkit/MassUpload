@@ -546,7 +546,7 @@ def main():
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    dbPath = '/byss/smcmich1/data/google/googlePlanetary.db'
+    dbPath = '/home/smcmich1/data/google/googlePlanetary_ctxSplit.db'
     db = sqlite3.connect(dbPath)
     print 'Connected to database'
     

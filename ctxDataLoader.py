@@ -292,7 +292,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             cmd = 'wget "' + asuLabelUrl + '" -O ' + asuLabelPath
             print cmd
             os.system(cmd)
-        if not fileIsNonZero(asuLabelPath):
+        if not IrgFileFunctions.fileIsNonZero(asuLabelPath):
             raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
         
         if not os.path.exists(asuImagePath):
@@ -300,7 +300,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             cmd = 'wget "' + asuImageUrl + '" -O ' + asuImagePath
             print cmd
             os.system(cmd)
-        if not fileIsNonZero(asuImagePath):
+        if not IrgFileFunctions.fileIsNonZero(asuImagePath):
             raise Exception('Failed to download image file at URL: ' + asuImageUrl)
 
         ## Correct the ISIS header if needed
@@ -314,7 +314,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             print cmd
             os.system(cmd)
             
-            if not os.path.exists(localFilePath):
+            if not IrgFileFunctions.fileIsNonZero(localFilePath):
                 raise Exception('Script to add geo data to JP2 file failed!')
             
         # Clean up

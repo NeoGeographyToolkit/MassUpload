@@ -39,15 +39,28 @@ SENSOR_TYPE_HRSC   = 1
 SENSOR_TYPE_CTX    = 2
 SENSOR_TYPE_THEMIS = 3
 
+# Main status codes describing upload status
 STATUS_NONE      = 0
 STATUS_UPLOADED  = 1
 STATUS_CONFIRMED = 2
 STATUS_ERROR     = -1
 
+# Extra status codes, equal to STATUS_NONE plus assigned to a specific machine
+STATUS_ASSIGNED_LUNOKHOD1 = 1000
+STATUS_ASSIGNED_LUNOKHOD2 = 1001
+STATUS_ASSIGNED_M         = 1002
+STATUS_ASSIGNED_BYSS      = 1003
+STATUS_ASSIGNED_ALDERAAN  = 1004
+STATUS_ASSIGNED_CHIP      = 1005
+STATUS_ASSIGNED_DALE      = 1006
+
 SENSOR_CODES = {'hirise' : SENSOR_TYPE_HiRISE,
                 'hrsc'  : SENSOR_TYPE_HRSC,
                 'ctx'   : SENSOR_TYPE_CTX,
                 'THEMIS': SENSOR_TYPE_THEMIS}
+
+# Set this code equal to the machine's STATUS code to only process those files!
+THIS_MACHINE_CODE = TODO
 
 
 #----------------------------------------------------------------
@@ -71,27 +84,27 @@ class TableRecord:
     def __init__(self, row):
         self.data = row
 
-    def tableId(self):
+    def tableId(self): # Unique ID
         return self.data[0]
-    def sensor(self):
+    def sensor(self): # Sensor code
         return int(self.data[1])
-    def subtype(self):
+    def subtype(self): # String identifying the sub-sensor
         return self.data[2]
-    def setName(self):
+    def setName(self): # Data set name
         return self.data[3]
-    def acqTime(self):
+    def acqTime(self): # Time image taken
         return self.data[4]
-    def status(self):
+    def status(self): # Upload status
         return self.data[5]
-    def version(self):
+    def version(self): # Version tag
         return self.data[6]
-    def remoteURL(self):
+    def remoteURL(self): # Original file source
         return self.data[7]
-    def assetID(self):
+    def assetID(self): # Asset ID assigned by Maps Engine
         return self.data[8]
-    def uploadTime(self):
+    def uploadTime(self): # Time file uploaded to Maps Engine
         return self.data[9]
-    #def minLat(self): # TODO: Nice BB wrapper
+    #def minLat(self): # TODO: Nice Bounding Box wrapper
     #    return self.data[10]
 
 # Function that is passed in to findAllDataSets below.
@@ -272,9 +285,11 @@ def uploadNextFile(dbPath, sensorCode, outputFolder, numFiles=1, numThreads=1):
     db = sqlite3.connect(dbPath)
     cursor = db.cursor()
         
-    # query the SQL database for one or more entries for this sensor which have not been uploaded yet.
+    # Query the SQL database for one or more entries for this sensor which have not been uploaded yet.
+    # - Using THIS_MACHINE_CODE means that only files allocated to this machine will be handled!
     cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=? LIMIT ?',
-                   (str(sensorCode), str(STATUS_NONE), str(numFiles)))
+                   (str(sensorCode), str(THIS_MACHINE_CODE), str(numFiles)))
+                   #(str(sensorCode), str(STATUS_NONE), str(numFiles)))
     rows = cursor.fetchall()
     db.close()
     if rows == []: # Make sure we found the next lines

@@ -40,6 +40,9 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
+def getUploadList(fileList):
+    '''Returns the subset of the fileList that needs to be uploaded to GME'''
+    return fileList[0]
 
 def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""

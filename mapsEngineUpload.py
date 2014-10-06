@@ -301,19 +301,28 @@ def authorize(redo=False):
 #  # Is there an additional page of features to load?
 #  request = features.list_next(request, resource)
 
-def createRasterAsset(bearerToken, inputFile, sensorType, acqTime=None):
+def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None):
     
     API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
 
     url = 'https://www.googleapis.com/mapsengine/v1/rasters/upload'
     
-    justFilename = os.path.basename(inputFile)
-       
+    # The first file in the list is used for metadata
+    mainInputPath = inputPathList[0]
+    justFilename = os.path.basename(mainInputPath)
+    
+    # Set up list of files to be uploaded
+    filesField = []
+    for f in inputPathList:
+        fileField.append({ "filename": os.path.basename(f) })
+    
+    
     # Set up common metadata
     data = ({"projectId": PROJECT_ID,  # REQUIRED, taken from Maps Engine URL}
-             "files": [ # REQUIRED
-                      { "filename": justFilename }
-                     ],
+#             "files": [ # REQUIRED
+#                      { "filename": justFilename }
+#                     ],
+             "files": filesField, # REQUIRED
              #"acquisitionTime": {
              #   "start": acqTime,
              #   "end":   acqTime,
@@ -385,8 +394,9 @@ def uploadFile(bearerToken, assetId, filename):
     imageSizeBytes = os.path.getsize(filename)
     
     # Get the file extension tag to use
-    ext = os.path.splitext(filename)[1]
-    if (ext.lower == '.jp2'):
+    #ext = os.path.splitext(filename)[1]
+    #if (ext.lower() == '.jp2'):
+    if ('.jp2' in filename.lower()):
         contentString = 'image/jpg2'
     else: # Default to geotiff type
         contentString = 'image/tiff'
@@ -454,15 +464,17 @@ def main(argsIn):
         options.inputPath = '/home/smcmich1/data/production/NAC_DTM_M151318807_M181974094/results/output-DEM.tif'
         #options.inputPath = '/home/smcmich1/data/google/mapsengine-cmd-line-sample/PSP_001427_1820_RED.JP2'
     else:
-        options.inputPath = args[0]
+        # Load a list of input files and make sure they all exist
+        options.inputPathList = []
+        for f in args:
+            options.inputPathList.append(f)
+            if (not options.checkAsset) and (not os.path.exists(options.inputPath)):
+                raise Exception('Input file does not exist!')
     
     #except(optparse.OptionError, msg):
     #    raise Usage(msg)
     
     
-    if not os.path.exists(options.inputPath) and not options.checkAsset:
-        raise Exception('Input file does not exist!')
-
     startTime = time.time()
 
     # Get server authorization
@@ -490,7 +502,7 @@ def main(argsIn):
               
         # Create empty raster asset request
         for i in range(1,MAX_NUM_RETRIES):
-            success, assetId = createRasterAsset(bearerToken, options.inputPath, options.sensor, options.acqTime)
+            success, assetId = createRasterAsset(bearerToken, options.inputPathList, options.sensor, options.acqTime)
             if success:
                 break
             else: # Wait for more than a second before trying again
@@ -504,13 +516,14 @@ def main(argsIn):
         
         print 'Created asset ID ' + str(assetId)
         
-        # Load a file associated with the asset
-        for i in range(1,MAX_NUM_RETRIES):
-            success = uploadFile(bearerToken, assetId, options.inputPath)
-            if success:
-                break
-            else: # Wait for more than a second before trying again
-                time.sleep(SLEEP_TIME)
+        # Load each file associated with the asset
+        for inputPath in options.inputPathList:
+            for i in range(1,MAX_NUM_RETRIES):
+                success = uploadFile(bearerToken, assetId, inputPath)
+                if success:
+                    break
+                else: # Wait for more than a second before trying again
+                    time.sleep(SLEEP_TIME)
 
     
     endTime = time.time()

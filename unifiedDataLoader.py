@@ -147,6 +147,9 @@ def addDataRecord(db, sensor, subType, setName, remoteURL):
 #    '''Retrieves a remote file and prepares it for upload'''
 #    returns a list of created files with the first one being the one to upload
 
+#def getUploadList(fileList):
+#    '''Returns the subset of the fileList that needs to be uploaded to GME'''
+#    return fileList[0]
 
 #--------------------------------------------------------------------------------
 # Other functions
@@ -184,13 +187,13 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # Choose the "library" to use based on the sensor type
         # - The current version of each sensor's data files is set here.
         if   fileInfo.sensor() == SENSOR_TYPE_HiRISE:
-            from hiriseDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
+            from hiriseDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox, getUploadList
             version = 1
         elif fileInfo.sensor() == SENSOR_TYPE_HRSC:
-            from hrscDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
+            from hrscDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox, getUploadList
             version = 1
         elif fileInfo.sensor() == SENSOR_TYPE_CTX:
-            from ctxDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox
+            from ctxDataLoader import fetchAndPrepFile, getCreationTime, getBoundingBox, getUploadList
             version = 1
         else:
             raise Exception('Sensor type ' + fileInfo.sensor() + ' is not supported!')
@@ -222,7 +225,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         fileBbox = getBoundingBox(localFileList)
 
         # Upload the file
-        cmdArgs = [preppedFilePath, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+        uploadList = getUploadList(localFileList)
+        cmdArgs = [uploadList, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
         #print cmdArgs
         assetId = mapsEngineUpload.main(cmdArgs)
         #assetId = 12345 # DEBUG!
@@ -253,7 +257,6 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
 
             
         # Delete all the local files left by the prep function
-        print 'rm ' + preppedFilePath
         for f in localFileList:
             #pass
             os.remove(f)

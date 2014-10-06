@@ -26,6 +26,7 @@ import multiprocessing
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgIsisFunctions, IrgFileFunctions
 
+from addGeoToAsuCtxJp2 import addGeoDataToAsuJp2File
 
 def man(option, opt, value, parser):
     print >>sys.stderr, parser.usage
@@ -40,11 +41,9 @@ class Usage(Exception):
 
 #--------------------------------------------------------------------------------
 
-#TODO: Put this back in the IRG function list!
-def fileIsNonZero(fpath):  
-    '''Return true if the file exists and is non-empty'''
-    return True if os.path.isfile(fpath) and os.path.getsize(fpath) > 0 else False
-
+def getUploadList(fileList):
+    '''Returns the subset of the fileList that needs to be uploaded to GME'''
+    return [fileList[0], fileList[1]] # Image file and the sidecar header file
 
 def putIsisHeaderIn180(headerPath):
     '''Make sure the header info is for +/- 180 degrees!'''
@@ -111,7 +110,7 @@ def getCreationTime(fileList):
     
     if len(fileList) < 2:
         raise Exception('Error, missing label file path!')
-    filePath = fileList[1]
+    filePath = fileList[2]
 
     timeString = ''
     f = open(filePath, 'r')
@@ -126,7 +125,7 @@ def getCreationTime(fileList):
         if 'StartTime             = ' in line:
             eqPos = line.find('=')
             timeString = line[eqPos+1:].strip() + 'Z'
-	    break
+        break
 
     f.close()    
   
@@ -225,7 +224,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     #calPath     = os.path.join(workDir, setName + '.cal.cub')    # Output of ctxcal
     mapPath       = os.path.join(workDir, setName + '.map.cub')   # Output of cam2map
     mapLabelPath  = os.path.join(workDir, setName + '.map.pvl')   # Specify projection to cam2map
-    localFilePath = os.path.join(workDir, setName + '.tif')       # The output file we will upload
+    localFilePath = os.path.join(workDir, setName + '.jp2')       # The output file we will upload
     
     # Generate the remote URLs from the data prefix and volume stored in these parameters
     asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
@@ -310,19 +309,20 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
 
         if not os.path.exists(localFilePath):
             # Correct the file - The JP2 file from ASU needs the geo data from the label file!
-            cmd = 'addGeoToAsuCtxJp2.py --keep --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
-            print cmd
-            os.system(cmd)
+            #cmd = 'addGeoToAsuCtxJp2.py --keep --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
+            #print cmd
+            #os.system(cmd)
+            # TODO: Remove unnecessary image copy here
+            (correctedPath, sidecarPath) = addGeoDataToAsuJp2File(asuImagePath, asuLabelPath, localFilePath, keep=True)
             
-            if not IrgFileFunctions.fileIsNonZero(localFilePath):
+            if not IrgFileFunctions.fileIsNonZero(sidecarPath):
                 raise Exception('Script to add geo data to JP2 file failed!')
             
         # Clean up
         os.remove(asuImagePath)
-    
+       
         # Three local files are left around, the first should be uploaded.
-        return [localFilePath, asuLabelPath]
-        
+        return [correctedPath, sidecarPath, asuLabelPath]
 
 
 #--------------------------------------------------------------------------------

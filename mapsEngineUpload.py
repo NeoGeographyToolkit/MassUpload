@@ -314,7 +314,7 @@ def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None):
     # Set up list of files to be uploaded
     filesField = []
     for f in inputPathList:
-        fileField.append({ "filename": os.path.basename(f) })
+        filesField.append({ "filename": os.path.basename(f) })
     
     
     # Set up common metadata
@@ -459,6 +459,8 @@ def main(argsIn):
     
     (options, args) = parser.parse_args(argsIn)
 
+    #print args
+
     if len(args) < 1: # DEBUG
         #options.inputPath = 'means.png'
         options.inputPath = '/home/smcmich1/data/production/NAC_DTM_M151318807_M181974094/results/output-DEM.tif'
@@ -468,7 +470,7 @@ def main(argsIn):
         options.inputPathList = []
         for f in args:
             options.inputPathList.append(f)
-            if (not options.checkAsset) and (not os.path.exists(options.inputPath)):
+            if (not options.checkAsset) and (not os.path.exists(f)):
                 raise Exception('Input file does not exist!')
     
     #except(optparse.OptionError, msg):

@@ -125,7 +125,7 @@ def getCreationTime(fileList):
         if 'StartTime             = ' in line:
             eqPos = line.find('=')
             timeString = line[eqPos+1:].strip() + 'Z'
-        break
+            break
 
     f.close()    
   
@@ -161,7 +161,7 @@ def getCreationTimeHelper(filePath):
 
 def getBoundingBox(fileList):
     """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
-    return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[1])
+    return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[2])
 
 def findAllDataSets(db, dataAddFunctionCall, sensorCode):
     '''Add all known data sets to the SQL database'''
@@ -307,20 +307,19 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         #if (fixedAsuHeaderPath != asuLabelPath):
         #    os.remove(asuLabelPath) # Delete replaced header
 
-        if not os.path.exists(localFilePath):
+        if True: # This is fast now, so do it every time
             # Correct the file - The JP2 file from ASU needs the geo data from the label file!
             #cmd = 'addGeoToAsuCtxJp2.py --keep --label '+ asuLabelPath +' '+ asuImagePath +' '+ localFilePath
             #print cmd
             #os.system(cmd)
             # TODO: Remove unnecessary image copy here
-            (correctedPath, sidecarPath) = addGeoDataToAsuJp2File(asuImagePath, asuLabelPath, localFilePath, keep=True)
+            (correctedPath, sidecarPath) = addGeoDataToAsuJp2File(asuImagePath, asuLabelPath, localFilePath, keep=False)
             
             if not IrgFileFunctions.fileIsNonZero(sidecarPath):
                 raise Exception('Script to add geo data to JP2 file failed!')
-            
+   
         # Clean up
         os.remove(asuImagePath)
-       
         # Three local files are left around, the first should be uploaded.
         return [correctedPath, sidecarPath, asuLabelPath]
 

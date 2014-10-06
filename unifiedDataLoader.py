@@ -60,7 +60,7 @@ SENSOR_CODES = {'hirise' : SENSOR_TYPE_HiRISE,
                 'THEMIS': SENSOR_TYPE_THEMIS}
 
 # Set this code equal to the machine's STATUS code to only process those files!
-THIS_MACHINE_CODE = TODO
+THIS_MACHINE_CODE = TODO#STATUS_ASSIGNED_ALDERAAN
 
 
 #----------------------------------------------------------------
@@ -226,7 +226,9 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
 
         # Upload the file
         uploadList = getUploadList(localFileList)
-        cmdArgs = [uploadList, '--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+        cmdArgs = ['--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+        for f in uploadList:
+            cmdArgs.append(f)
         #print cmdArgs
         assetId = mapsEngineUpload.main(cmdArgs)
         #assetId = 12345 # DEBUG!
@@ -275,6 +277,7 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         try: # Delete localFileList if it exists
             for f in localFileList:
                 os.remove(f)
+                #pass
         except:
             pass
 

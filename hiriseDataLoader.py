@@ -136,29 +136,34 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     
     localFilePath  = os.path.join(workDir, os.path.basename(remoteURL))
     localLabelPath = os.path.join(workDir, os.path.basename(remoteLabelURL))
-    
-    if not os.path.exists(localFilePath):
-        # Download the file
-        cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
-        print cmd
-        os.system(cmd)
-    if not IrgFileFunctions.fileIsNonZero(localFilePath):
-        raise Exception('Unable to download from URL: ' + remoteURL)
 
     if not os.path.exists(localLabelPath):
-        # Download the file
+        # Download the label
         cmd = 'wget ' + remoteLabelURL + ' -O ' + localLabelPath
         print cmd
         os.system(cmd)
     if not IrgFileFunctions.fileIsNonZero(localLabelPath):
         raise Exception('Unable to download from URL: ' + remoteLabelURL)
+
+    # Check the projection type
+    projType = IrgGeoFunctions.getProjectionFromIsisLabel(localLabelPath)
+    if projType == 'POLAR STEREOGRAPHIC':
+        os.remove(localLabelPath)
+        raise Exception('POLAR STEREOGRAPHIC images on hold until Google fixes a bug!')
+    
+    if not os.path.exists(localFilePath):
+        # Download the image
+        cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
+        print cmd
+        os.system(cmd)
+    if not IrgFileFunctions.fileIsNonZero(localFilePath):
+        raise Exception('Unable to download from URL: ' + remoteURL)
     
     # Call code to fix the header information in the JP2 file!
     # TODO: Make sure the binary is found!
     cmd = 'fix_jp2 ' + localFilePath
     print cmd
     os.system(cmd)
-
     
     # First file is for upload, second contains the timestamp
     return [localFilePath, localLabelPath]

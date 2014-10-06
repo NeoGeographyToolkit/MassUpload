@@ -294,6 +294,12 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         if not IrgFileFunctions.fileIsNonZero(asuLabelPath):
             raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
         
+        # Check the projection type
+        projType = IrgGeoFunctions.getProjectionFromIsisLabel(asuLabelPath)
+        if projType != 'SimpleCylindrical':
+            os.remove(asuLabelPath)
+            raise Exception(projType + ' images on hold until Google fixes a bug!')
+        
         if not os.path.exists(asuImagePath):
             # Download the image file
             cmd = 'wget "' + asuImageUrl + '" -O ' + asuImagePath

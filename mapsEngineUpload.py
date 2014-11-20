@@ -301,7 +301,7 @@ def authorize(redo=False):
 #  # Is there an additional page of features to load?
 #  request = features.list_next(request, resource)
 
-def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None):
+def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None, extraTags=None):
     
     API_KEY, CLIENT_ID, CLIENT_SECRET, PROJECT_ID = loadKeys()
 
@@ -361,6 +361,8 @@ def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None):
     else:
         raise Exception('Unrecognized sensor type!')
 
+    if extraTags: # Add extra user tags if they were passed in
+        data["tags"] += extraTags
 
         
     #print(data)
@@ -442,7 +444,7 @@ def main(argsIn):
 
     #try:
     #try:
-    usage = "usage: mapsEngineUpload.py <input image> [--manual]\n  "
+    usage = "usage: mapsEngineUpload.py <input images> [--manual]\n  "
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option("--sensor", type="int", dest="sensor", default=0,
@@ -450,6 +452,9 @@ def main(argsIn):
 
     parser.add_option("--acqTime", dest="acqTime", default="",
                               help="Pass in the acquisition time of the image in 'YYYY-MM-DDTHH:MM:SSZ' format.")
+
+    parser.add_option("--tag", dest="tag", default=None,
+                              help="Pass in an additional metadata tag.")
 
     parser.add_option("--checkAsset", dest="checkAsset", default="",
                               help="Query the status of an asset.")
@@ -476,6 +481,10 @@ def main(argsIn):
     #except(optparse.OptionError, msg):
     #    raise Usage(msg)
     
+    # For now we only support a single extra tag
+    extraTags = None
+    if options.tag:
+        extraTags = [options.tag]
     
     startTime = time.time()
 
@@ -504,7 +513,8 @@ def main(argsIn):
               
         # Create empty raster asset request
         for i in range(1,MAX_NUM_RETRIES):
-            success, assetId = createRasterAsset(bearerToken, options.inputPathList, options.sensor, options.acqTime)
+            success, assetId = createRasterAsset(bearerToken, options.inputPathList,
+                                                 options.sensor, options.acqTime, extraTags)
             if success:
                 break
             else: # Wait for more than a second before trying again

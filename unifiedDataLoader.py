@@ -204,6 +204,9 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         if len(localFileList) == 0:
             raise Exception('Failed to retrieve any local files!')
 
+        # In order for this to work, all modules must set the subtype consistently.
+        isDem = (fileInfo.subtype() == 'DEM')
+
         preppedFilePath = localFileList[0]
         print preppedFilePath
         
@@ -224,9 +227,12 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # Go ahead and get the bounding box       
         fileBbox = getBoundingBox(localFileList)
 
-        # Upload the file
+        # Upload all of the files
         uploadList = getUploadList(localFileList)
         cmdArgs = ['--sensor', str(fileInfo.sensor()), '--acqTime', timeString]
+        if isDem: # For DEM files, add an additional DEM tag.
+            cmdArgs.append('--tag') 
+            cmdArgs.append('DEM')
         for f in uploadList:
             cmdArgs.append(f)
         #print cmdArgs

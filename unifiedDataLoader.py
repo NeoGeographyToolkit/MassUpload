@@ -18,15 +18,15 @@
 
 import sys
 
-#from BeautifulSoup import BeautifulSoup
-from bs4 import BeautifulSoup
+from BeautifulSoup import BeautifulSoup
+#from bs4 import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing, traceback
 
-#import sqlite3
-from pysqlite2 import dbapi2 as sqlite3
+import sqlite3
+#from pysqlite2 import dbapi2 as sqlite3
 
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
@@ -60,7 +60,8 @@ SENSOR_CODES = {'hirise' : SENSOR_TYPE_HiRISE,
                 'THEMIS': SENSOR_TYPE_THEMIS}
 
 # Set this code equal to the machine's STATUS code to only process those files!
-THIS_MACHINE_CODE = TODO#STATUS_ASSIGNED_ALDERAAN
+#THIS_MACHINE_CODE = STATUS_ASSIGNED_LUNOKHOD2
+
 
 
 #----------------------------------------------------------------
@@ -266,7 +267,6 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
             
         # Delete all the local files left by the prep function
         for f in localFileList:
-            #pass
             os.remove(f)
     
     except Exception, e:# Make sure an error does not stop other uploads
@@ -287,7 +287,6 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         except:
             pass
 
-
         return -1
 
     print 'Finished uploading data file!'
@@ -305,8 +304,8 @@ def uploadNextFile(dbPath, sensorCode, outputFolder, numFiles=1, numThreads=1):
     # Query the SQL database for one or more entries for this sensor which have not been uploaded yet.
     # - Using THIS_MACHINE_CODE means that only files allocated to this machine will be handled!
     cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=? LIMIT ?',
-                   (str(sensorCode), str(THIS_MACHINE_CODE), str(numFiles)))
-                   #(str(sensorCode), str(STATUS_NONE), str(numFiles)))
+                   #(str(sensorCode), str(THIS_MACHINE_CODE), str(numFiles)))
+                   (str(sensorCode), str(STATUS_NONE), str(numFiles)))
     rows = cursor.fetchall()
     db.close()
     if rows == []: # Make sure we found the next lines
@@ -360,19 +359,21 @@ def checkUploads(db, sensorType):
     # Get server authorization and hold on to the token
     bearerToken = mapsEngineUpload.authorize()
 
-    MAX_NUM_RETRIES = 2  # Max number of times to retry (in case server is busy)
-    SLEEP_TIME      = 2.0 # Time to wait between retries (Google handles only one operation/second)
+    MAX_NUM_RETRIES     = 2  # Max number of times to retry (in case server is busy)
+    SLEEP_TIME          = 1.5 # Time to wait between retries (Google handles only one operation/second)
+    FAILURE_RESET_LIMIT = 20
 
     # Query the data base for all sensor data files which have been uploaded but not confirmed 
     cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=?', (str(sensorType), str(STATUS_UPLOADED)))
     rows = cursor.fetchall()
     print 'Found ' + str(len(rows)) + ' entries'
     skip = 0
+    failureCount = 0
     for row in rows:
         if skip > 0:
             skip = skip - 1
             continue
-        time.sleep(0.7) # Minimum sleep time
+        time.sleep(1.1) # Minimum sleep time
 
         # Wrap the row to make it easier to get information
         o = TableRecord(row)
@@ -384,25 +385,35 @@ def checkUploads(db, sensorType):
             status, responseCode = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, o.assetID())
             if (responseCode == 403) or (responseCode == 503) or (responseCode == 401):
                 print 'Server is busy, sleeping ' + str(SLEEP_TIME) + ' seconds...'
-                time.sleep(SLEEP_TIME)
-            else:
+                failureCount += 1 # Keep track of successive failures
+                time.sleep(SLEEP_TIME) 
+            else: # Got a valid response from Google
+                failureCount = 0 # Reset the failure count
                 break
+        gotValidResponse = (failureCount == 0) # Record if we got a real answer
         
+        if failureCount >= FAILURE_RESET_LIMIT: # Too many failures in a row, reset our connection!
+            print 'Hit successive failure count limit, resetting our connection!!!!!!!!!!!!!!!!!!!!'
+            time.sleep(10)
+            bearerToken = mapsEngineUpload.authorize()
+            time.sleep(10)
+            failureCount = 0
+            
         if status:
             # Mark the file upload as confirmed so we don't check it again
             cursor.execute("UPDATE Files SET status=? WHERE idx=?",
                            (str(STATUS_CONFIRMED), str(o.tableId())))
-            #db.commit()
-        else: 
-            print 'Data set ' + o.setName() + ' was not uploaded correctly!'
-            # Update the file info in the database to show it was not updated correctly.
-            # - TODO: Is there a way to make sure we re-upload to the same asset ID?
-            cursor.execute("UPDATE Files SET status=? WHERE idx=?",
-                           (str(STATUS_NONE), str(o.tableId())))
-        db.commit()
-        #if not status:
-        #    raise Exception('DEBUG')
-
+            db.commit()
+        else: # Did not get confirmation of successful upload
+            if gotValidResponse: # Did get confirmation of failed upload
+                print 'Data set ' + o.setName() + ' was not uploaded correctly!'
+                # Update the file info in the database to show it was not updated correctly.
+                # - TODO: Is there a way to make sure we re-upload to the same asset ID?
+                cursor.execute("UPDATE Files SET status=? WHERE idx=?",
+                               (str(STATUS_NONE), str(o.tableId())))
+                db.commit()
+            else:
+                print 'Never got a valid response, failure count = ' + str(failureCount)
 
     print 'Finished checking uploaded files.'
     
@@ -563,7 +574,7 @@ def main():
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    dbPath = '/home/smcmich1/data/google/googlePlanetary_ctxSplit.db'
+    dbPath = '/byss/smcmich1/data/google/googlePlanetary_ctxMerge.db'
     db = sqlite3.connect(dbPath)
     print 'Connected to database'
     

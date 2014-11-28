@@ -18,7 +18,7 @@
 
 import sys
 
-from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
@@ -26,16 +26,8 @@ import multiprocessing
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgFileFunctions
 
-#
-#def man(option, opt, value, parser):
-#    print >>sys.stderr, parser.usage
-#    print >>sys.stderr, ''' Script for grabbing HiRISE data files'''
-#
-#    sys.exit()
-#
-#class Usage(Exception):
-#    def __init__(self, msg):
-#        self.msg = msg
+THIS_FOLDER  = os.path.dirname(os.path.abspath(__file__))
+FIX_JP2_TOOL = os.path.join(THIS_FOLDER, 'fix_jp2')
 
 
 #--------------------------------------------------------------------------------
@@ -168,45 +160,56 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
     #print 'Uploading file ' + setName
-    
+  
     if subtype != 'DEM': # Handles RED and COLOR images
-        
         # The label file URL is the same as the image but with a different extension
         remoteLabelURL = getLabelPathFromImagePath(remoteURL)
-        
+    
         localFilePath  = os.path.join(workDir, os.path.basename(remoteURL))
         localLabelPath = os.path.join(workDir, os.path.basename(remoteLabelURL))
-    
+
         if not os.path.exists(localLabelPath):
-            # Download the label
-            cmd = 'wget ' + remoteLabelURL + ' -O ' + localLabelPath
+            # Try to get the label locally!
+            pdsStart     = remoteLabelURL.find('PDS')
+            localPdsPath = os.path.join('/HiRISE/Data/', remoteLabelURL[pdsStart:])
+            print localPdsPath
+            if os.path.exists(localPdsPath): # File available locally, just copy it!
+                cmd = 'cp ' + localPdsPath +' '+ localLabelPath
+            else:  # Download the image
+                cmd = 'wget ' + remoteLabelURL + ' -O ' + localLabelPath
             print cmd
             os.system(cmd)
+
         if not IrgFileFunctions.fileIsNonZero(localLabelPath):
             raise Exception('Unable to download from URL: ' + remoteLabelURL)
-    
+
         # Check the projection type
         projType = IrgGeoFunctions.getProjectionFromIsisLabel(localLabelPath)
         if projType == 'POLAR STEREOGRAPHIC':
             os.remove(localLabelPath)
             raise Exception('POLAR STEREOGRAPHIC images on hold until Google fixes a bug!')
-        
-        if not os.path.exists(localFilePath):
-            # Download the image
-            cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
+    
+        if not os.path.exists(localFilePath): # Need to get it from somewhere
+            # Try to get the image locally!
+            pdsStart     = remoteURL.find('PDS')
+            localPdsPath = os.path.join('/HiRISE/Data/', remoteURL[pdsStart:])
+            if os.path.exists(localPdsPath): # File available locally, just copy it!
+                cmd = 'cp ' + localPdsPath +' '+ localFilePath
+            else:  # Download the image
+                cmd = 'wget ' + remoteURL + ' -O ' + localFilePath
             print cmd
             os.system(cmd)
+
+
         if not IrgFileFunctions.fileIsNonZero(localFilePath):
-            os.remove(localLabelPath)
             raise Exception('Unable to download from URL: ' + remoteURL)
-        
+    
         # Call code to fix the header information in the JP2 file!
-        # TODO: Make sure the binary is found!
-        cmd = 'fix_jp2 ' + localFilePath
+        cmd = FIX_JP@_TOOL +' '+ localFilePath
         print cmd
         os.system(cmd)
-        
-        # First file is for upload, second contains the timestamp
+
+        # First file is for upload, second contains the timestamp.
         return [localFilePath, localLabelPath]
 
     else: # Handle DEMs

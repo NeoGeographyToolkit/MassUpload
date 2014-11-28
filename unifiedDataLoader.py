@@ -532,6 +532,82 @@ def getDataList(db, sensorCode):
     
     return findAllDataSets(db, addDataRecord, sensorCode)
 
+
+def checkForBadUploads(sensorCode, db = None):
+    '''Search the local SQL database to find bad uploads that the DB has missed.'''
+
+    # TODO: Parse user inputs to get these!
+    tag         = 'HiRISE'
+    cacheFolder = '~/tempCache' # Web API query results are backed up in to this folder as JSON files.
+    
+    print 'Retrieving asset list for sensor ' + tag + ' in folder ' + cacheFolder
+    if not os.path.exists(cacheFolder):
+        os.mkdir(cacheFolder)
+
+    # Get server authorization and hold on to the token.
+    bearerToken = mapsEngineUpload.authorize()
+
+    # First get a list of all assets.
+    assetList = mapsEngineUpload.findAllRasterUploads(bearerToken, cacheFolder, tag)
+    if not assetList:
+        raise Exception('Failed to detect any uploaded assets!')
+    print 'Found ' + str(len(assetList)) + ' existing raster assets in Maps Engine'
+
+
+    if not db: # If the DB is not present just look up the files.
+        return
+
+    print 'Looking for uploads not contained in the database...'
+
+    cursor = db.cursor()
+
+    # Now make a list of all assets which are not found in the database
+    extraUploads = []
+    for upload in assetList:
+        thisAssetId = str(upload['assetID'])
+        
+        # Query the SQL database to find this upload
+        cursor.execute('SELECT * FROM Files WHERE sensor=? and assetID=?', (str(sensorCode)), thisAssetId)
+        rows = cursor.fetchall()
+        if rows == []: # An orphan upload, what we are looking for!
+            #print 'WARNING: Zero DB rows found for asset ID ' + thisAssetId
+            extraUploads.append(upload)
+        if len(rows) > 1: # Duplicate DB entries!  This is unexpected.
+            print 'WARNING: More than one DB row found for asset ID ' + thisAssetId
+            for row in rows:
+                print row
+
+    db.close() # Done with the database
+
+    #if assetInfo['processingStatus'] != 'complete':
+    #    print '\n===========================\n'
+    #    print f
+    #    #badAssetList.append(assetInfo)
+
+    #print 'Finished fetching results, now searching for duplicates...'
+    #   
+    ## Loop through all the dictionaries and find duplicate entries!
+    #numAssets = len(assetList)
+    #for i in range(0,numAssets): # For each asset
+    #    entry = assetList[i]
+    #    matchCount = 0
+    #    for j in range(i+1,numAssets): # See if any remaining assets match
+    #        other = assetList[j]
+    #        if (entry['name'] == other['name']) and (entry['assetID'] != other['assetID']):
+    #            matchCount += 1
+    #    badAssetList.append(entry) # This returns the first duplicate of each pair
+    #   
+    #print 'Finished searching for duplicates!'
+    #   
+    #return badAssetList
+
+
+
+
+
+    print assetList
+
+
 #--------------------------------------------------------------------------------
 
 def main():
@@ -570,7 +646,6 @@ def main():
     options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
-
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
@@ -585,6 +660,12 @@ def main():
     # Make sure the working directory exists
     if not os.path.exists(options.outputFolder):
         os.mkdir(options.outputFolder)
+
+
+    ## Rarely used option to search for online only problem files!
+    ## - This does not touch the database, only Maps Engine online.
+    #checkForBadUploads(options.sensorType, db)
+    #return 0
 
     ## Rarely used option to update after a local database loss!    
     #updateDbFromWeb(db, options.sensorType)

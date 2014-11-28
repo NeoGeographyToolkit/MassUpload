@@ -86,10 +86,10 @@ def getProjectsInfo(bearerToken):
     """Returns a list of the user's projects"""
 
     # Send request for information on this asset
-    url = 'https://www.googleapis.com/mapsengine/v1/projects/'
+    url         = 'https://www.googleapis.com/mapsengine/v1/projects/'
     tokenString = 'Bearer '+bearerToken
-    headers = {'Authorization': tokenString}
-    response = requests.get(url, headers=headers)
+    headers     = {'Authorization': tokenString}
+    response    = requests.get(url, headers=headers)
     
     print response.text
 
@@ -106,10 +106,10 @@ def queryUploadedFile(bearerToken, assetId = '04070367133797133737-1507989215589
     """Fetches information about a file has already been uploaded into Maps Engine"""
 
     # Send request for information on this asset
-    url = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId
+    url         = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId
     tokenString = 'Bearer '+bearerToken
-    headers = {'Authorization': tokenString}
-    response = requests.get(url, headers=headers)
+    headers     = {'Authorization': tokenString}
+    response    = requests.get(url, headers=headers)
     
     # Check status code
     DESIRED_CODE = 200
@@ -154,16 +154,17 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
     #   raster list = GET /rasterCollections/#rasterCollectionId$/rasters
     
 
-def getRasterList(bearerToken):
-    """Gets a list of uploaded files"""
 
-    # This only works if all of the files have been manually loaded into a mosaic 
-    #  in Maps Engine!
+# TODO: Deprecate this function!
+def getRasterList(bearerToken):
+    """Gets a list of uploaded files - used special case to recover from a lost DB!"""
+
+    # This only works if all of the files have been manually loaded into a mosaic in Maps Engine!
 
     # TODO: Generalize this!
-    ctxAssetId = '04070367133797133737-11575601353866955997'
+    ctxAssetId    = '04070367133797133737-11575601353866955997'
     setiProjectId = '04070367133797133737'
-    assetId = ctxAssetId
+    assetId       = ctxAssetId
 
     url = 'https://www.googleapis.com/mapsengine/v1/rasterCollections/' + assetId + '/rasters?projectId=' + setiProjectId
     tokenString = 'Bearer '+bearerToken
@@ -191,10 +192,13 @@ def getRasterList(bearerToken):
         
         # Get all the information from each of these files
         jsonDict  = json.loads(response.text)
-        #print jsonDict
+        
         print 'Got ' + str(len(jsonDict['rasters'])) + ' results'
-        status    = True
+        status = True
         for f in jsonDict['rasters']:
+
+            print '\n===========================\n'
+            print f
 
             # A few of these fields will need to be reformatted to fit in the database
             assetInfo = dict()
@@ -215,6 +219,86 @@ def getRasterList(bearerToken):
         else:
             gotEntireList = True
        
+    return assetList
+
+
+def findAllRasterUploads(bearerToken, cacheFolder, tag):
+    """Gets a list of all uploaded files with the given tag"""
+    # TODO: Add more flexibility
+    # TODO: Change things so the cache does not have to be cleared when files are changed!
+
+    setiProjectId = '04070367133797133737'
+    tokenString   = 'Bearer '+bearerToken
+
+    url = 'https://www.googleapis.com/mapsengine/v1/rasters?projectId='+setiProjectId+'&tags='+tag#+'&key={YOUR_API_KEY}'
+
+    # We will have to make multiple sequential requests due to return count limits.
+    gotEntireList = False
+    nextPageToken = None
+    assetList     = []
+
+    pageNum = 0
+    while (not gotEntireList): # Keep fetching more files until we have the entire list
+
+        # Local cache path for this request
+        cachePath = os.path.join(cacheFolder, str(pageNum)+'.json')
+        thisText = ''
+
+        if os.path.exists(cachePath): # Read from disk
+            print 'Reading cached file ' + cachePath
+            
+            # Read from cache file
+            f = open(cachePath, 'r')
+            thisText = f.read()
+            f.close()
+            
+        else:
+            print 'Submitting web request'
+            
+            # Send request for information on this asset
+            headers = {'Authorization': tokenString}
+            if nextPageToken:           
+                payload = {'pageToken': nextPageToken}
+                response = requests.get(url, headers=headers, params=payload)
+            else:
+                response = requests.get(url, headers=headers)       
+    
+            # Check status code
+            DESIRED_CODE = 200
+            printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+            if response.status_code != DESIRED_CODE:
+                return []
+            
+            # Write to cache file
+            f = open(cachePath, 'w')
+            f.write(response.text)
+            f.close()
+            thisText = response.text
+        
+        pageNum += 1
+        
+        # Get all the information from each of these files
+        jsonDict  = json.loads(thisText)
+        
+        print 'Got ' + str(len(jsonDict['rasters'])) + ' results'
+        status = True
+        for f in jsonDict['rasters']:
+
+            # Record only fields of interest
+            assetInfo = dict()
+            assetInfo['assetID']          = f['id']
+            assetInfo['uploadTime']       = f['creationTime']
+            assetInfo['name']             = f['name']
+            assetInfo['processingStatus'] = f['processingStatus']
+            
+            assetList.append(assetInfo)
+
+        # Get the next page token, otherwise we are finished.
+        if 'nextPageToken' in jsonDict:
+            nextPageToken = jsonDict['nextPageToken']
+        else:
+            gotEntireList = True
+            
     return assetList
 
 

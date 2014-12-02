@@ -144,15 +144,25 @@ def checkIfFileIsLoaded(bearerToken, assetId = '04070367133797133737-15079892155
 
     return status, 200
     
-    #url = 'https://www.googleapis.com/mapsengine/v1/assets?projectId='+PROJECT_ID
-    #tokenString = 'Bearer '+bearerToken
-    #headers = {'Authorization': tokenString
-    #response = requests.get(url, headers=headers)
-    #print response.text
-    # ?
-    # raster collection ID = GET /rasterCollections?projectId=<id>
-    #   raster list = GET /rasterCollections/#rasterCollectionId$/rasters
+
+def deleteUploadedAsset(bearerToken, assetId):
+    """Deletes an asset has already been uploaded into Maps Engine"""
+
+    # Send request for information on this asset
+    url         = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId
+    tokenString = 'Bearer '+bearerToken
+    headers     = {'Authorization': tokenString}
+    response    = requests.delete(url, headers=headers)
     
+    # Check status code
+    DESIRED_CODE = 200
+    printErrorInfo(DESIRED_CODE, response.status_code, response.text)
+    if response.status_code != DESIRED_CODE:
+        return (False, response.status_code)
+
+    # Convert to dictionary format    
+    jsonDict = json.loads(response.text)
+    return (True, jsonDict)
 
 
 # TODO: Deprecate this function!

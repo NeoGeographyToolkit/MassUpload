@@ -18,16 +18,15 @@
 
 import sys
 
-from BeautifulSoup import BeautifulSoup
-#from bs4 import BeautifulSoup
+#from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing, traceback
 
-import sqlite3
-#from pysqlite2 import dbapi2 as sqlite3
-
+#import sqlite3
+from pysqlite2 import dbapi2 as sqlite3
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
@@ -61,8 +60,6 @@ SENSOR_CODES = {'hirise' : SENSOR_TYPE_HiRISE,
 
 # Set this code equal to the machine's STATUS code to only process those files!
 #THIS_MACHINE_CODE = STATUS_ASSIGNED_LUNOKHOD2
-
-
 
 #----------------------------------------------------------------
 
@@ -373,6 +370,7 @@ def checkUploads(db, sensorType):
         if skip > 0:
             skip = skip - 1
             continue
+
         time.sleep(1.1) # Minimum sleep time
 
         # Wrap the row to make it easier to get information
@@ -538,7 +536,7 @@ def checkForBadUploads(sensorCode, db = None):
 
     # TODO: Parse user inputs to get these!
     tag         = 'HiRISE'
-    cacheFolder = '~/tempCache' # Web API query results are backed up in to this folder as JSON files.
+    cacheFolder = '/home/pirl/smcmich1/tempCache2' # Web API query results are backed up in to this folder as JSON files.
     
     print 'Retrieving asset list for sensor ' + tag + ' in folder ' + cacheFolder
     if not os.path.exists(cacheFolder):
@@ -564,10 +562,10 @@ def checkForBadUploads(sensorCode, db = None):
     # Now make a list of all assets which are not found in the database
     extraUploads = []
     for upload in assetList:
-        thisAssetId = str(upload['assetID'])
+        thisAssetId = str(upload['assetID']).strip()
         
         # Query the SQL database to find this upload
-        cursor.execute('SELECT * FROM Files WHERE sensor=? and assetID=?', (str(sensorCode)), thisAssetId)
+        cursor.execute('SELECT * FROM Files WHERE sensor=? and assetID=?', (str(sensorCode), thisAssetId))
         rows = cursor.fetchall()
         if rows == []: # An orphan upload, what we are looking for!
             #print 'WARNING: Zero DB rows found for asset ID ' + thisAssetId
@@ -578,6 +576,15 @@ def checkForBadUploads(sensorCode, db = None):
                 print row
 
     db.close() # Done with the database
+
+    print 'Found ' + str(len(extraUploads)) + ' unmatched raster assets!\n\n'
+
+    # Print out each extra upload name and asset id, one per line.
+    for u in extraUploads:
+        print u['name'] +', '+ u['assetID']
+
+
+    # TODO: Do something about the bad uploads!
 
     #if assetInfo['processingStatus'] != 'complete':
     #    print '\n===========================\n'
@@ -601,12 +608,7 @@ def checkForBadUploads(sensorCode, db = None):
     #   
     #return badAssetList
 
-
-
-
-
-    print assetList
-
+    #print assetList
 
 #--------------------------------------------------------------------------------
 
@@ -622,7 +624,10 @@ def main():
                       help="Upload this many files instead of fetching the list.")
 
     parser.add_option("--checkUploads", action="store_true", default=False,
-                                dest="checkUploads",  help="Verify that all uploaded files actually made it up.")
+                                dest="checkUploads",  help="Check that all uploaded files actually made it up.")
+
+    parser.add_option('--verifyWebUploads', action='store_true', dest='verifyWebUploads', default=False,
+                      help='Check the web API for bad uploads.')
 
     parser.add_option("--threads", type="int", dest="numThreads", default=1,
                       help="Number of threads to use.")
@@ -643,13 +648,13 @@ def main():
     #    return 1;
     #options.outputFolder = args[1]
     # The output path is hardcoded for now with subfolders for each sensor
-    options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
+    options.outputFolder = os.path.join('/home/pirl/smcmich1/Data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    dbPath = '/byss/smcmich1/data/google/googlePlanetary_ctxMerge.db'
+    dbPath = '/home/pirl/smcmich1/Data/google/googlePlanetary.db'
     db = sqlite3.connect(dbPath)
     print 'Connected to database'
     
@@ -661,11 +666,11 @@ def main():
     if not os.path.exists(options.outputFolder):
         os.mkdir(options.outputFolder)
 
-
-    ## Rarely used option to search for online only problem files!
-    ## - This does not touch the database, only Maps Engine online.
-    #checkForBadUploads(options.sensorType, db)
-    #return 0
+    if options.verifyWebUploads:
+        # Rarely used option to search for online only problem files!
+        # - This does not touch the database, only Maps Engine online.
+        checkForBadUploads(options.sensorType, db)
+        return 0
 
     ## Rarely used option to update after a local database loss!    
     #updateDbFromWeb(db, options.sensorType)

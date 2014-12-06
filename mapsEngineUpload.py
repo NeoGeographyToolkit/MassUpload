@@ -149,11 +149,15 @@ def deleteUploadedAsset(bearerToken, assetId):
     """Deletes an asset has already been uploaded into Maps Engine"""
 
     # Send request for information on this asset
-    url         = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId
+    url         = 'https://www.googleapis.com/mapsengine/v1/rasters/' + assetId.strip()
     tokenString = 'Bearer '+bearerToken
     headers     = {'Authorization': tokenString}
     response    = requests.delete(url, headers=headers)
     
+    print url
+
+    #print response.text
+
     # Check status code
     DESIRED_CODE = 200
     printErrorInfo(DESIRED_CODE, response.status_code, response.text)
@@ -163,6 +167,65 @@ def deleteUploadedAsset(bearerToken, assetId):
     # Convert to dictionary format    
     jsonDict = json.loads(response.text)
     return (True, jsonDict)
+
+def deleteAssetsInList(bearerToken, assetListPath):
+    '''Deletes all of the assets listed in the CSV file'''
+
+    # Set up log files to record successes and failures
+    inputBasePath  = os.path.splitext(assetListPath)[0]
+    successLogPath = inputBasePath + '_out_success.csv'
+    failureLogPath = inputBasePath + '_out_failure.csv'
+    print 'Success log = ' + successLogPath
+    print 'Failure log = ' + failureLogPath
+
+    # Reset the connection if we fail this many times in a row
+    FAIL_COUNT_LIMIT = 10
+
+    # Read the asset ID from each line of the file, then delete it!
+    numDeleted = 0
+    numFailed  = 0
+    successiveFailCount = 0
+    f    = open(assetListPath, 'r')
+    sLog = open(successLogPath, 'w')
+    fLog = open(failureLogPath, 'w')
+    for line in f:
+        parts   = line.split(',')
+        name    = parts[0]
+        assetId = parts[1]
+
+        print 'Deleting asset: ' + line
+        try:
+            (result, info) = deleteUploadedAsset(bearerToken, assetId)
+        except: # Handle unknown errors
+            result = False
+        if result:
+            sLog.write(line)
+            numDeleted += 1
+            successiveFailCount = 0
+            break # DEBUG!!!!!
+        else:
+            fLog.write(line)
+            print 'Failed to delete asset!'
+            numFailed += 1
+            successiveFailCount += 1
+        time.sleep(1.0)
+
+        if successiveFailCount >= FAIL_COUNT_LIMIT:
+            print 'Refreshing network connection...'
+            try:
+                bearerToken = authorize()
+            except:
+                pass
+            successiveFailCount = 0
+    
+    # Clean up and report results
+    f.close()
+    sLog.close()
+    fLog.close()
+    print 'Successfully deleted: ' + str(numDeleted)
+    print 'Failed to delete:     ' + str(numFailed)
+    return 0
+
 
 
 # TODO: Deprecate this function!
@@ -238,7 +301,6 @@ def findAllRasterUploads(bearerToken, cacheFolder, tag):
     # TODO: Change things so the cache does not have to be cleared when files are changed!
 
     setiProjectId = '04070367133797133737'
-    tokenString   = 'Bearer '+bearerToken
 
     url = 'https://www.googleapis.com/mapsengine/v1/rasters?projectId='+setiProjectId+'&tags='+tag#+'&key={YOUR_API_KEY}'
 
@@ -247,7 +309,9 @@ def findAllRasterUploads(bearerToken, cacheFolder, tag):
     nextPageToken = None
     assetList     = []
 
-    pageNum = 0
+    FAIL_COUNT_LIMIT = 10
+    pageNum   = 0
+    failCount = 0
     while (not gotEntireList): # Keep fetching more files until we have the entire list
 
         # Local cache path for this request
@@ -266,7 +330,8 @@ def findAllRasterUploads(bearerToken, cacheFolder, tag):
             print 'Submitting web request'
             
             # Send request for information on this asset
-            headers = {'Authorization': tokenString}
+            tokenString = 'Bearer '+bearerToken
+            headers     = {'Authorization': tokenString}
             if nextPageToken:           
                 payload = {'pageToken': nextPageToken}
                 response = requests.get(url, headers=headers, params=payload)
@@ -277,7 +342,13 @@ def findAllRasterUploads(bearerToken, cacheFolder, tag):
             DESIRED_CODE = 200
             printErrorInfo(DESIRED_CODE, response.status_code, response.text)
             if response.status_code != DESIRED_CODE:
-                return []
+                print 'Retrieval error, trying again'
+                time.sleep(1.5)
+                failCount += 1
+                if failCount >= FAIL_COUNT_LIMIT:
+                    failCount   = 0
+                    bearerToken = authorize()
+                continue
             
             # Write to cache file
             f = open(cachePath, 'w')
@@ -553,6 +624,9 @@ def main(argsIn):
     parser.add_option("--checkAsset", dest="checkAsset", default="",
                               help="Query the status of an asset.")
 
+    parser.add_option('--deleteAssets', dest='deleteAssets', action='store_true',
+                      help='Read in a list of assets and delete them all.')
+
     parser.add_option("--manual", action="callback", callback=man,
                       help="Read the manual.")
     
@@ -561,7 +635,6 @@ def main(argsIn):
     #print args
 
     if len(args) < 1: # DEBUG
-        #options.inputPath = 'means.png'
         options.inputPath = '/home/smcmich1/data/production/NAC_DTM_M151318807_M181974094/results/output-DEM.tif'
         #options.inputPath = '/home/smcmich1/data/google/mapsengine-cmd-line-sample/PSP_001427_1820_RED.JP2'
     else:
@@ -570,7 +643,7 @@ def main(argsIn):
         for f in args:
             options.inputPathList.append(f)
             if (not options.checkAsset) and (not os.path.exists(f)):
-                raise Exception('Input file does not exist!')
+                raise Exception('Input file '+ f +'does not exist!')
     
     #except(optparse.OptionError, msg):
     #    raise Usage(msg)
@@ -586,6 +659,10 @@ def main(argsIn):
     bearerToken = authorize()
     print 'Got bearer token'
     
+    
+    if options.deleteAssets: # Call desired function
+        return deleteAssetsInList(bearerToken, options.inputPathList[0])
+
 
     MAX_NUM_RETRIES = 20  # Max number of times to retry (in case server is busy)
     SLEEP_TIME      = 2.5 # Time to wait between retries (Google handles only one operation/second)

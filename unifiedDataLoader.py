@@ -265,6 +265,7 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # Delete all the local files left by the prep function
         for f in localFileList:
             os.remove(f)
+            #print 'REMOVE DISABLED'
     
     except Exception, e:# Make sure an error does not stop other uploads
     
@@ -280,7 +281,7 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         try: # Delete localFileList if it exists
             for f in localFileList:
                 os.remove(f)
-                #pass
+                #print 'REMOVE DISABLED!'
         except:
             pass
 

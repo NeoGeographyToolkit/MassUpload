@@ -40,7 +40,7 @@ def getUploadList(fileList):
 def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
     
-    if len(fileList) < 2:  # DEM files do not have a creation time!
+    if 'DTE' in fileList[0]:  # DEM files do not have a creation time!
         #raise Exception('Error, missing label file path!')
         return '1900-01-01T00:00:00Z' # Return a flag date
     filePath = fileList[1]
@@ -66,7 +66,7 @@ def getBoundingBox(fileList):
     """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
     if len(fileList) == 2: # Read BB from the label file
         return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[1])
-    else: # No label for the DEM file, read it from the DEM
+    else: # No label file, read it from the the main file
         return IrgGeoFunctions.getImageBoundingBox(fileList[0]) # This information is also available in the IMG file header
 
 
@@ -92,6 +92,7 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
        
         # Loop through outermost directory
         for line in parsedIndexPage.findAll('a'):
+
             orbName = line.string
             if not 'ORB' in orbName: # Skip link up a directory
                 continue
@@ -145,14 +146,14 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
                     continue
                 dataPrefix = xspName[:-1] # Strip off the trailing '/'
                 
-                stereoPageUrl = orbPage + dataPrefix + '/'
+                stereoPageUrl = orbPath + dataPrefix + '/'
                 stereoPage    = BeautifulSoup(urllib2.urlopen((stereoPageUrl)).read())
                 
                 # Pick out the link with the DEM
                 for line in stereoPage.findAll('a'):
                     fileName = line.string
                     if '.IMG' in fileName: # Only the DEM has a .IMG extension
-                        demUrl = stereoPageUrl + '/' + fileName
+                        demUrl = stereoPageUrl + fileName
                         dataAddFunctionCall(db, sensorCode, 'DEM', dataPrefix, demUrl)
 
 
@@ -205,7 +206,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             raise Exception('Unable to download from URL: ' + remoteURL)
     
         # Call code to fix the header information in the JP2 file!
-        cmd = FIX_JP@_TOOL +' '+ localFilePath
+        cmd = FIX_JP2_TOOL +' '+ localFilePath
         print cmd
         os.system(cmd)
 
@@ -223,16 +224,34 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             os.system(cmd)
         if not IrgFileFunctions.fileIsNonZero(localFilePath): # Make sure we got the file
             raise Exception('Unable to download from URL: ' + remoteURL)
+
+        # Generate a header file from the IMG file
+        localLabelPath = localFilePath[:-4] + '.LBL'
+        cmd = 'head -n 90 ' + localFilePath +' >  '+ localLabelPath
+        print cmd
+        os.system(cmd)
+
+        # Check if this is a polar stereographic image
+        f = open(localLabelPath)
+        for line in f:
+            if ("MAP_PROJECTION_TYPE" in line) and ("POLAR STEREOGRAPHIC" in line):
+                raise Exception('POLAR STEREOGRAPHIC DEMs on hold until Google fixes a bug!')
+        f.close()
             
         # Convert from IMG to TIF
-        tiffFilePath = localFilePath[:-3] + '.TIF'
+        tiffFilePath = localFilePath[:-4] + '.TIF'
         if not os.path.exists(tiffFilePath):
             cmd = 'gdal_translate -of GTiff ' + localFilePath +' '+ tiffFilePath
             print cmd
             os.system(cmd)
         
+            # Correct projected coordinates problems
+            cmd = 'python /home/pirl/smcmich1/repo/Tools/geoTiffTool.py --normalize-eqc-lon ' + tiffFilePath
+            print cmd
+            os.system(cmd)
+
         os.remove(localFilePath) # Clean up source image
-        return [tiffFilePath] 
+        return [tiffFilePath, localLabelPath] 
 
 
 #--------------------------------------------------------------------------------

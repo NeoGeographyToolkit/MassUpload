@@ -26,6 +26,8 @@ import multiprocessing
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgFileFunctions
 
+import common
+
 THIS_FOLDER  = os.path.dirname(os.path.abspath(__file__))
 FIX_JP2_TOOL = os.path.join(THIS_FOLDER, 'fix_jp2')
 
@@ -70,7 +72,7 @@ def getBoundingBox(fileList):
         return IrgGeoFunctions.getImageBoundingBox(fileList[0]) # This information is also available in the IMG file header
 
 
-def findAllDataSets(db, dataAddFunctionCall, sensorCode):
+def findAllDataSets(db, sensorCode):
     '''Add all known data sets to the SQL database'''
     
     print 'Updating HiRISE PDS data list...'
@@ -113,8 +115,8 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
                 colorUrl = orbPath + dataPrefix + '/' + dataPrefix + '_COLOR.JP2'
                 
                 # Add both the RED and COLOR files to the database.
-                dataAddFunctionCall(db, sensorCode, 'RED',   dataPrefix, redUrl)
-                dataAddFunctionCall(db, sensorCode, 'COLOR', dataPrefix, colorUrl)
+                common.addDataRecord(db, sensorCode, 'RED',   dataPrefix, redUrl)
+                common.addDataRecord(db, sensorCode, 'COLOR', dataPrefix, colorUrl)
 
 
         print 'Finding ' + missionCode + ' DEM files...'
@@ -154,7 +156,37 @@ def findAllDataSets(db, dataAddFunctionCall, sensorCode):
                     fileName = line.string
                     if '.IMG' in fileName: # Only the DEM has a .IMG extension
                         demUrl = stereoPageUrl + fileName
-                        dataAddFunctionCall(db, sensorCode, 'DEM', dataPrefix, demUrl)
+                        common.addDataRecord(db, sensorCode, 'DEM', dataPrefix, demUrl)
+
+
+MAX_POLAR_UPLOAD_WIDTH  = 20000 # TODO: What is this really?
+POLAR_WIDTH_CHUNK_SIZE  = 20000
+CHUNK_SETNAME_SEPERATOR = '___' # Appended to the setname field to indicate which chuck this is
+
+def getChunkNum(setName):
+    '''Determine which chunk number a DB entry is for'''
+    if CHUNK_SETNAME_SEPERATOR in setName:
+        # The chunk number is an integer after the seperator at the end of setName.
+        chunkNumPos = setName.rfind(CHUNK_SETNAME_SEPERATOR) + len(CHUNK_SETNAME_SEPERATOR)
+        chunkNum    = int(setName[chunkNumPos:])
+    else: # The main DB entry is associated with chunk index zero
+        chunkNum = 0
+    return chunkNum
+
+def makeChunkSetName(setName, chunkNum):
+    '''Returns the set name used for a given chunk'''
+    if chunkNum == 0:
+        return setName
+    else:
+        return setname + CHUNK_SETNAME_SEPERATOR + str(chunkNum)
+
+def getChunkAreaString(width, height, chunkNum):
+    # Each chunk is the full height of the image
+    y      = 0
+    yRange = height
+    x      = chunkNum*POLAR_WIDTH_CHUNK_SIZE
+    xRange = POLAR_WIDTH_CHUNK_SIZE # Don't need to get this exactly right since the crop tool clamps to the border
+    return  '%d,%d,%d,%d' % (x, y, xRange, yRange)
 
 
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
@@ -169,6 +201,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         localFilePath  = os.path.join(workDir, os.path.basename(remoteURL))
         localLabelPath = os.path.join(workDir, os.path.basename(remoteLabelURL))
 
+        # Retrieve the header file
         if not os.path.exists(localLabelPath):
             # Try to get the label locally!
             pdsStart     = remoteLabelURL.find('PDS')
@@ -184,12 +217,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         if not IrgFileFunctions.fileIsNonZero(localLabelPath):
             raise Exception('Unable to download from URL: ' + remoteLabelURL)
 
-        # Check the projection type
-        projType = IrgGeoFunctions.getProjectionFromIsisLabel(localLabelPath)
-        if projType == 'POLAR STEREOGRAPHIC':
-            os.remove(localLabelPath)
-            raise Exception('POLAR STEREOGRAPHIC images on hold until Google fixes a bug!')
-    
+        # Retrieve the image file
         if not os.path.exists(localFilePath): # Need to get it from somewhere
             # Try to get the image locally!
             pdsStart     = remoteURL.find('PDS')
@@ -201,7 +229,6 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             print cmd
             os.system(cmd)
 
-
         if not IrgFileFunctions.fileIsNonZero(localFilePath):
             raise Exception('Unable to download from URL: ' + remoteURL)
     
@@ -210,8 +237,68 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         print cmd
         os.system(cmd)
 
-        # First file is for upload, second contains the timestamp.
-        return [localFilePath, localLabelPath]
+
+        # Check the projection type
+        projType        = IrgGeoFunctions.getProjectionFromIsisLabel(localLabelPath)
+        (width, height) = IrgIsisFunctions.getImageSize(localFilePath)
+        if (projType == 'POLAR STEREOGRAPHIC') and (width < MAX_POLAR_UPLOAD_WIDTH):
+            # Google has trouble digesting these files so handle them differently.
+            
+            #os.remove(localLabelPath)
+            #raise Exception('POLAR STEREOGRAPHIC images on hold until Google fixes a bug!')
+            print 'Special handling for POLAR STEROGRAPHIC image!'
+            
+            # Compute how many chunks are needed for this image
+            numChunks = ceil(width / POLAR_WIDTH_CHUNK_SIZE)
+            
+            # Determine which chunk this DB entry is for
+            chunkNum = getChunkNum(setName)
+            print 'This is chunk number ' + str(chunkNum)
+            
+            if chunkNum >= numChunks: # Check for chunk number error
+                raise Exception('Illegal chunk number: ' + setName)
+                
+            # If this is the main DB entry, we need to make sure the other DB entries exist!
+            if chunkNum == 0:
+                # Go ahead and try to add each chunk, the call will only go through if it does not already exist.
+                for i in range(1,numChunks):
+                    chunkSetName = makeChunkSetName(setName, i)
+                    print 'Add chunk set name to DB: ' + chunkSetName
+                    #common.addDataRecord(db, common.SENSOR_TYPE_HiRISE, subtype, chunkSetName, remoteURL)
+                    
+            raise Exception('DEBUG')
+            
+            # Now actually generate the desired chunk
+            # - Need to use PIRL tools to extract a chunk to an IMG format, then convert that back to JP2 so that Google can read it.
+            fileBasePath    = os.path.splitext(localFilePath)[0]
+            localImgPath    = fileBasePath + '.IMG'
+            localChunkPath  = fileBasePath + '_' + str(chunkNum) + '.JP2'
+            chunkAreaString = getChunkAreaString(width, height, chunkNum)
+            cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/JP2_to_PDS -Force -Input '  + localFilePath +
+                                                                                               ' -Output ' + localImgPath +
+                                                                                               ' -LAbel '  + localLabelPath +
+                                                                                               ' -Area '   + chunkAreaString)
+            print cmd
+            os.system(cmd)
+            if not IrgFileFunctions.fileIsNonZero(localImgPath):
+                raise Exception('Failed to convert chunk to IMG file: ' + localFilePath)
+            
+            cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/PDS_to_JP2 -Force -Geotiff -Input '  + localImgPath +
+                                                                                                        ' -Output ' + localChunkPath)
+            print cmd
+            os.system(cmd)
+            if not IrgFileFunctions.fileIsNonZero(localChunkPath):
+                raise Exception('Failed to convert chunk to JP2 file: ' + localImgPath)
+            
+            # Just use the same label file, we don't care if the DB has per-chunk boundaries.
+            return [localChunkPath, localLabelPath]
+            
+        else:
+            # First file is for upload, second contains the timestamp.
+            return [localFilePath, localLabelPath]
+
+    
+    # TODO: Handle POLAR DEMS
 
     else: # Handle DEMs
         

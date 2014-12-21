@@ -189,6 +189,32 @@ def getChunkAreaString(width, height, chunkNum):
     return  '%d,%d,%d,%d' % (x, y, xRange, yRange)
 
 
+def jp2ToImgAndBack(jp2Path, labelPath, outputJp2Path, areaString=None):
+    '''Convert a Jp2 to an IMG and back.  Can crop and restore missing metadata.'''
+    
+    cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/JP2_to_PDS -Force -Input '  + jp2Path +
+                                                                                       ' -Output ' + tempImgPath +
+                                                                                       ' -LAbel '  + labelPath)
+    if areaString:
+        cmd += ' -Area ' + areaString
+    print cmd
+    os.system(cmd)
+    if not IrgFileFunctions.fileIsNonZero(tempImgPath):
+        raise Exception('Failed to convert chunk to IMG file: ' + jp2Path)
+    
+    cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/PDS_to_JP2 -Force -Geotiff -Input '  + tempImgPath +
+                                                                                                ' -Output ' + outputJp2Path)
+    print cmd
+    os.system(cmd)
+    if not IrgFileFunctions.fileIsNonZero(localChunkPath):
+        raise Exception('Failed to convert chunk to JP2 file: ' + outputJp2Path)
+    
+    os.remove(tempImgPath)
+    
+    return True
+
+
+
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
@@ -231,6 +257,16 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
 
         if not IrgFileFunctions.fileIsNonZero(localFilePath):
             raise Exception('Unable to download from URL: ' + remoteURL)
+
+
+        # Some images are missing geo information but we can add it from the label file
+        if not IrgGeoFunctions.doesImageHaveGeoData(localFilePath):
+            # Correct the local file, then remove the old (bad) file
+            tempPath = localFilePath + '.corrected'
+            jp2ToImgAndBack(localFilePath, localLabelPath, tempPath)
+            print 'Deleting JP2 file without metadata!'
+            os.remove(localFilePath)
+            os.mv(tempPath, localFilePath)
     
         # Call code to fix the header information in the JP2 file!
         cmd = FIX_JP2_TOOL +' '+ localFilePath
@@ -274,21 +310,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             localImgPath    = fileBasePath + '.IMG'
             localChunkPath  = fileBasePath + '_' + str(chunkNum) + '.JP2'
             chunkAreaString = getChunkAreaString(width, height, chunkNum)
-            cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/JP2_to_PDS -Force -Input '  + localFilePath +
-                                                                                               ' -Output ' + localImgPath +
-                                                                                               ' -LAbel '  + localLabelPath +
-                                                                                               ' -Area '   + chunkAreaString)
-            print cmd
-            os.system(cmd)
-            if not IrgFileFunctions.fileIsNonZero(localImgPath):
-                raise Exception('Failed to convert chunk to IMG file: ' + localFilePath)
-            
-            cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/PDS_to_JP2 -Force -Geotiff -Input '  + localImgPath +
-                                                                                                        ' -Output ' + localChunkPath)
-            print cmd
-            os.system(cmd)
-            if not IrgFileFunctions.fileIsNonZero(localChunkPath):
-                raise Exception('Failed to convert chunk to JP2 file: ' + localImgPath)
+            jp2ToImgAndBack(localFilePath, localLabelPath, localChunkPath, chunkAreaString=None)           
             
             # Just use the same label file, we don't care if the DB has per-chunk boundaries.
             return [localChunkPath, localLabelPath]

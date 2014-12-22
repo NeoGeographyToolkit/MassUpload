@@ -213,6 +213,34 @@ def jp2ToImgAndBack(jp2Path, labelPath, outputJp2Path, areaString=None):
     
     return True
 
+def writeFakeLabelFromJp2(jp2Path):
+    '''For JP2 files with no associated LBL file, create an artificial one.'''
+
+    # Read information about the input JP2 file
+    infoDict = getImageGeoInfo(jp2Path, False)
+
+    # Create the new label file
+    labelPath = os.path.splitext(jp2Path)[0] + '.LBL'
+    f = open(labelPath, 'w')
+    
+    # Add only the fields that we require
+    f.write('/*Fake label file for input file: ' + jp2Path + '*/')
+    
+    f.write('MAP_PROJECTION_TYPE          = "' + infoDict['Projection'] + '"')
+    
+    # We could get these but it is not worth the effort =)
+    f.write('MAXIMUM_LATITUDE             = 1.000000000000 <DEG>')
+    f.write('MINIMUM_LATITUDE             = 0.000000000000 <DEG>')
+    f.write('EASTERNMOST_LONGITUDE        = 1.000000000000 <DEG>')
+    f.write('WESTERNMOST_LONGITUDE        = 0.000000000000 <DEG>')
+    
+    # This one we can't get
+    f.write('STOP_TIME                    = 2008-08-24T08:08:08.000')
+    
+    f.close()
+    
+    return labelPath
+
 
 
 def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
@@ -240,9 +268,6 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             print cmd
             os.system(cmd)
 
-        if not IrgFileFunctions.fileIsNonZero(localLabelPath):
-            raise Exception('Unable to download from URL: ' + remoteLabelURL)
-
         # Retrieve the image file
         if not os.path.exists(localFilePath): # Need to get it from somewhere
             # Try to get the image locally!
@@ -258,9 +283,23 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         if not IrgFileFunctions.fileIsNonZero(localFilePath):
             raise Exception('Unable to download from URL: ' + remoteURL)
 
+        # Check if there is geo data in the JP2 file
+        jp2HasGeoData = IrgGeoFunctions.doesImageHaveGeoData(localFilePath)
+
+        # If there is no label file, try to generate an artificial one.
+        fakeLabelFile = False
+        if not IrgFileFunctions.fileIsNonZero(localLabelPath):
+            #raise Exception('Unable to download from URL: ' + remoteLabelURL)
+            print 'WARNING: Unable to download from URL: ' + remoteLabelURL
+            if not jp2HasGeoData:
+                raise Exception('No geo data in JP2 and no Label file!  Cannot handle this!')
+            print 'Generating a fake LBL file to proceed...'
+            localLabelPath = writeFakeLabelFromJp2(localFilePath)
+            fakeLabelFile  = True
+        # At this point we always have a label file but it may be fake
 
         # Some images are missing geo information but we can add it from the label file
-        if not IrgGeoFunctions.doesImageHaveGeoData(localFilePath):
+        if not jp2HasGeoData:
             # Correct the local file, then remove the old (bad) file
             tempPath = localFilePath + '.corrected'
             jp2ToImgAndBack(localFilePath, localLabelPath, tempPath)
@@ -279,10 +318,16 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         (width, height) = IrgIsisFunctions.getImageSize(localFilePath)
         if (projType == 'POLAR STEREOGRAPHIC') and (width < MAX_POLAR_UPLOAD_WIDTH):
             # Google has trouble digesting these files so handle them differently.
-            
+
             #os.remove(localLabelPath)
             #raise Exception('POLAR STEREOGRAPHIC images on hold until Google fixes a bug!')
             print 'Special handling for POLAR STEROGRAPHIC image!'
+
+            if fakeLabelFile:
+                print 'Cannot reprocess polar image without a label file!'
+                print 'All we can do is upload the file and hope for the best.'
+                # First file is for upload, second contains the timestamp.
+                return [localFilePath, localLabelPath]
             
             # Compute how many chunks are needed for this image
             numChunks = ceil(width / POLAR_WIDTH_CHUNK_SIZE)
@@ -315,7 +360,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             # Just use the same label file, we don't care if the DB has per-chunk boundaries.
             return [localChunkPath, localLabelPath]
             
-        else:
+        else: # A normal, non-polar file.
             # First file is for upload, second contains the timestamp.
             return [localFilePath, localLabelPath]
 
@@ -392,320 +437,3 @@ def generatePdsPaths(filePrefix, fileType):
     labelUrl  = baseUrl + missionCode +"/"+ orbDir +"/"+ filePrefix +"/"+ labelName
     
     return (imageUrl, labelUrl)
-#
-## missionCode should be ESP or PSP
-#def getDataList(outputFilePath, missionCode):
-#    """Populates a text file list of all available HiRISE RDR data"""
-#       
-#    print 'Updating HiRISE PDS data list...'
-#       
-#    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/<PSP or ESP>/<ORB_PATH>/<PSP or ESP PATH>/<FILE_NAME.JP2>
-#    #http://hirise-pds.lpl.arizona.edu/PDS/RDR/ESP/ORB_011900_011999/ESP_011984_1755/
-#    #http://hirise-pds.lpl.arizona.edu/download/PDS/RDR/PSP/ORB_001400_001499/PSP_001430_1815/PSP_001430_1815_RED.JP2
-#    
-#   
-#    # TODO: Do another loop for ESP!
-#    baseUrl = "http://hirise-pds.lpl.arizona.edu/PDS/RDR/"+missionCode+"/"
-#
-#    # Parse the top PDS level
-#    parsedIndexPage = BeautifulSoup(urllib2.urlopen((baseUrl)).read())
-#
-#    outputFile = open(outputFilePath, 'w')
-#
-#    # Loop through outermost directory
-#    for line in parsedIndexPage.findAll('a'):
-#        orbName = line.string
-#        if not 'ORB' in orbName: # Skip link up a directory
-#            continue
-#        orbPath = baseUrl + orbName
-#        
-#        #print 'Scanning directory ' + orbPath
-#        
-#        # Parse next directory level
-#        orbPage = BeautifulSoup(urllib2.urlopen((orbPath)).read())
-#        
-#        #print orbPage.prettify()
-#        
-#        # Loop through inner directory
-#        for line in orbPage.findAll('a'):
-#            pspName = line.string
-#            if not 'PSP' in pspName: # Skip link up a directory
-#                continue
-#            
-#            ## No need to loop through the next level; the file names are fixed.
-#            #pspPath = orbPath + pspName + pspName[:-1]
-#            
-#            # TODO: Don't store paths, just store the name.
-#            #outputFile.write(pspPath + '\n')
-#            outputFile.write(pspName[:-1] + '\n')
-#            
-#    outputFile.close()
-#    
-#    print 'Wrote updated data list to ' + outputFilePath
-#
-#
-#def uploadFile(filePrefix, remoteFilePath, remoteLabelPath, logQueue, tempDir):
-#    """Uploads a remote file to maps engine"""
-#    
-#    print 'Uploading file ' + remoteFilePath
-#    
-#    localFilePath  = os.path.join(tempDir, os.path.basename(remoteFilePath))
-#    localLabelPath = os.path.join(tempDir, os.path.basename(remoteLabelPath))
-#    
-#    
-#    if not os.path.exists(localFilePath):
-#        # Download the file
-#        cmd = 'wget ' + remoteFilePath + ' -O ' + localFilePath
-#        print cmd
-#        os.system(cmd)
-#
-#    if not os.path.exists(localLabelPath):
-#        # Download the file
-#        cmd = 'wget ' + remoteLabelPath + ' -O ' + localLabelPath
-#        print cmd
-#        os.system(cmd)
-#
-#
-#    timeString = getCreationTime(localLabelPath)
-#    
-#    # Upload the file
-#    cmdArgs = [localFilePath, '--sensor', '0', '--acqTime', timeString]
-#    print cmdArgs
-#    assetId = mapsEngineUpload.main(cmdArgs)
-#    #assetId = 12345
-#    
-#    #TODO: Check to make sure the file made it up!
-#
-#    # Find out the bounding box of the file and generate a log string
-#    fileBbox = IrgGeoFunctions.getImageBoundingBox(localFilePath)
-#    bboxString = ('Bbox: ' + str(fileBbox[0]) +' '+ str(fileBbox[1]) +' '+ str(fileBbox[2]) +' '+ str(fileBbox[3]))
-#    
-#    # Record that we uploaded the file
-#    logString = filePrefix +', '+ str(assetId) +', '+ bboxString + '\n' # Log path and the Maps Engine asset ID
-#    print logString
-#    logQueue.put(logString)
-#
-#        
-#    # Delete the file
-#    print 'rm ' + localFilePath
-#    #os.remove(localFilePath)
-#    
-#    print 'Finished uploading HiRISE data file'
-#    return assetId
-#
-#
-#def logWriter(logQueue, logPath):
-#    '''listens for messages on the q, writes to file. '''
-#
-#    print 'Starting writer'
-#    f = open(logPath, 'a') 
-#    while 1: # Run until the process is killed
-#        message = logQueue.get() # Wait for a new message
-#        if message == 'stop_queue': # Check for the quit signal
-#            break
-#        f.write(str(message))
-#        f.flush()
-#    f.close()
-#    print 'Writer stopped'
-#
-#
-## TODO: Select from different file types
-#def uploadNextFile(dataListPath, outputFolder, getColor=False, numFiles=1, numThreads=1):
-#    """Determines the next file to upload, uploads it, and logs it"""
-#    
-#    print 'Searching for next file to upload...'
-#    
-#    # Set up the output paths    
-#    #uploadedColorPath   = os.path.join(outputFolder, 'uploadedPatchFilesTest.txt')
-#    uploadedRedPath   = os.path.join(outputFolder, 'uploadedRed.csv')
-#    uploadedColorPath = os.path.join(outputFolder, 'uploadedColor.csv')
-#    
-#    logPath   = uploadedRedPath
-#    targetEnd = '_RED.JP2'
-#    if getColor:
-#        logPath   = uploadedColorPath
-#        targetEnd = '_COLOR.JP2'
-#    
-#    inFile = open(dataListPath,    'r')
-#
-#    # Get the last line read (could be more efficient)
-#    lastUploadedLine = ''
-#    if os.path.exists(logPath):
-#        outFile = open(logPath, 'r')
-#        for line in outFile:
-#            lastUploadedLine = line
-#        outFile.close()
-#    lastUploadedLine = lastUploadedLine.split(',')[0].strip() # Remove the asset ID from the string
-#    #print '#' + lastUploadedLine + '#'
-#    
-#    # Now find that line in the input file list
-#    linesToProcess = []
-#    breakNext = -1
-#    for line in inFile:
-#        line = line.strip() # Remove \n from the line
-#        #print '#' + line + '#'
-#        
-#        if breakNext > 0:
-#            linesToProcess.append(line) # Record this line and move on to the next
-#            breakNext = breakNext - 1
-#            continue
-#        if breakNext == 0: # No more lines to get!
-#            break
-#
-#        if (lastUploadedLine == ''): # This is the first file!
-#            linesToProcess.append(line)
-#            breakNext = numFiles - 1 # Still get the next N-1 files
-#            continue
-#        if (line == lastUploadedLine): # Found the last one downloaded
-#            breakNext = numFiles # Get the next N-1 files
-#            continue
-#    
-#    if linesToProcess == []: # Make sure we found the next lines
-#        raise Exception('Failed to find line that comes after: ' + lastUploadedLine)
-#    
-#    # Create processing pool
-#    print 'Spawning ' + str(numThreads) + ' worker threads'
-#    pool = multiprocessing.Pool(processes=numThreads+1) # One extra thread for the logWriter
-#
-#    # Create multiprocessing manager and a queue
-#    manager = multiprocessing.Manager()
-#    queue   = manager.Queue()    
-#
-#    # Start up the log writing thread
-#    print 'Writing output to file ' + logPath
-#    logResult = pool.apply_async(logWriter, args=(queue, logPath))
-#    
-#    # For each line generate the full download path
-#    jobResults = []
-#    for line in linesToProcess:
-#        remoteImagePath, remoteLabelPath = generatePdsPaths(line, targetEnd)
-#        jobResults.append(pool.apply_async(uploadFile, args=(line, remoteImagePath, remoteLabelPath, queue, outputFolder)))
-#    
-#    
-#    # Wait until all threads have finished
-#    print 'Waiting for all threads to complete...'
-#    for r in jobResults:
-#        r.get()
-#    
-#    # Stop the queue and all the threads
-#    print 'Cleaning up...'
-#    queue.put('stop_queue')
-#    pool.close()
-#    pool.join()
-#    
-#    print 'All threads finished!'
-#   
-#    
-#    return True
-#    
-#
-#
-#def checkUploads(logPath):
-#
-#    print 'Checking the status of uploaded files...'    
-#
-#    # Get server authorization and hold on to the token
-#    bearerToken = mapsEngineUpload.authorize()
-#
-#    if not os.path.exists(logPath):
-#        raise Exception('Input log file ' + logPath + ' does not exist!')
-#        
-#    outFile = open(logPath, 'r')
-#    for line in outFile:
-#        # Extract the asset ID
-#        prefix, assetId, bbox = line.split(',')
-#        
-#        # Check if this asset was uploaded
-#        status = mapsEngineUpload.checkIfFileIsLoaded(bearerToken, assetId)
-#        
-#        if not status:
-#            print 'Prefix ' + prefix + ' was not uploaded correctly!'
-#            # TODO: Do something about it!
-#        
-#    outFile.close()
-#
-#
-##--------------------------------------------------------------------------------
-#
-#def main():
-#
-#    print "Started hiriseDataLoader.py"
-#
-#    try:
-#        try:
-#            usage = "usage: hiriseDataLoader.py <output folder> [--help][--manual]\n  "
-#            parser = optparse.OptionParser(usage=usage)
-#            parser.add_option("-u", "--upload", dest="upload", type=int,
-#                              help="Upload this many files instead of fetching the list.")
-#            #parser.add_option("-o", "--output-folder", dest="outputFolder",
-#            #                  help="Specifies the folder to copy the data to.",
-#            #                  default='./')
-#            #parser.add_option("-n", "--name", dest="name",
-#            #                  help="Only get the data for the DTM with this name.",
-#            #                  default='')
-#            
-#            parser.add_option("--color", action="store_true", dest="getColor",
-#                              help="Retrieve COLOR image instead of RED images.")
-#
-#            parser.add_option("--checkUploads", action="store_true", default=False,
-#                                        dest="checkUploads",  help="Verify that all uploaded files actually made it up.")
-#
-#            parser.add_option("--threads", type="int", dest="numThreads", default=1,
-#                              help="Number of threads to use.")
-#                              
-#            parser.add_option("--manual", action="callback", callback=man,
-#                              help="Read the manual.")
-#            (options, args) = parser.parse_args()
-#
-#            if len(args) < 1:
-#                raise Exception('Missing output folder!')
-#                return 1;
-#            options.outputFolder = args[0]
-#
-#
-#        except optparse.OptionError, msg:
-#            raise Usage(msg)
-#
-#        print "Beginning processing....."
-#
-#        startTime = time.time()
-#
-#        if not os.path.exists(options.outputFolder):
-#            os.mkdir(options.outputFolder)
-#
-#        # These are input lists that just show the available images
-#        pspListPath = os.path.join(options.outputFolder, 'pspList.csv')
-#        espListPath = os.path.join(options.outputFolder, 'espList.csv')
-#        fullListFile = os.path.join(options.outputFolder, 'fullList.csv')
-#
-#        if options.checkUploads:
-#            checkUploads(os.path.join(options.outputFolder, 'uploadedPatchFilesTest.txt'))
-#        elif options.upload:
-#            uploadNextFile('hiriseImageList_smallPatch.txt', options.outputFolder, options.getColor, options.upload, options.numThreads)
-#            #uploadNextFile(fullListFile, options.getColor, options.upload, options.numThreads)
-#        else: # Update the data list
-#            # TODO: Clean up file paths!
-#            getDataList(pspListPath, 'PSP')
-#            getDataList(espListPath, 'ESP')
-#            # TODO: Concatenate files!!!
-#            #cmd = 'cat'
-#            #os.system(cmd)
-#
-#
-#        endTime = time.time()
-#
-#        print "Finished in " + str(endTime - startTime) + " seconds."
-#        return 0
-#
-#    except Usage, err:
-#        print >>sys.stderr, err.msg
-#        return 2
-#
-#	# To more easily debug this program, comment out this catch block.
-#    # except Exception, err:
-#    #     sys.stderr.write( str(err) + '\n' )
-#    #     return 1
-#
-#
-#if __name__ == "__main__":
-#    sys.exit(main())

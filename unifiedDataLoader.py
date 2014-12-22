@@ -127,7 +127,7 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         # In order for this to work, all modules must set the subtype consistently.
         isDem = (fileInfo.subtype() == 'DEM')
 
-        preppedFilePath = localFileList[0]
+        preppedFilePath = localFileList[0] # The first file returned is the primary image file
         print preppedFilePath
         
         if not os.path.exists(preppedFilePath):

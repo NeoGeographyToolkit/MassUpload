@@ -33,7 +33,7 @@ import common
 
 def getUploadList(fileList):
     '''Returns the subset of the fileList that needs to be uploaded to GME'''
-    return fileList[0] # Only the converted tif file needs to be uploaded
+    return [fileList[0]] # Only the converted tif file needs to be uploaded
 
 def getCreationTime(fileList):
     """Extract the file creation time and return in YYYY-MM-DDTHH:MM:SSZ format"""
@@ -106,12 +106,12 @@ def findAllDataSets(db, sensorCode):
     
     # Loop through outermost directory
     for line in parsedIndexPage.findAll('a'):
-        
+    
         # Skip links we are not interested in
         if len(line.string.strip()) != 4:
             continue
         
-        subFolderUrl   = baseUrl + line.string + '/'
+        subFolderUrl   = baseDemUrl + line.string + '/'
         parsedDataPage = BeautifulSoup(urllib2.urlopen((subFolderUrl)).read())
         
         # Loop through the data files and look for DEMs

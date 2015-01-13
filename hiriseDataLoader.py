@@ -24,7 +24,7 @@ import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing
 
-import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgFileFunctions
+import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions, IrgFileFunctions, IrgIsisFunctions
 
 import common
 
@@ -180,18 +180,25 @@ def makeChunkSetName(setName, chunkNum):
     else:
         return setname + CHUNK_SETNAME_SEPERATOR + str(chunkNum)
 
-def getChunkAreaString(width, height, chunkNum):
+def getChunkBoundingBox(width, height, chunkNum):
+    '''Return the BB of a chunk'''
+    return (chunkNum*POLAR_WIDTH_CHUNK_SIZE, 0, POLAR_WIDTH_CHUNK_SIZE, height)
+
+def getChunkAreaString(chunkBB):
+    '''Converts a chunk bounding box to a string read by JP2_TO_PDS'''
     # Each chunk is the full height of the image
-    y      = 0
-    yRange = height
-    x      = chunkNum*POLAR_WIDTH_CHUNK_SIZE
-    xRange = POLAR_WIDTH_CHUNK_SIZE # Don't need to get this exactly right since the crop tool clamps to the border
+    y      = chunkBB[1]
+    yRange = chunkBB[3]
+    x      = chunkBB[0]
+    xRange = chunkBB[2]
     return  '%d,%d,%d,%d' % (x, y, xRange, yRange)
 
 
-def jp2ToImgAndBack(jp2Path, labelPath, outputJp2Path, areaString=None):
+def jp2ToImgAndBack(jp2Path, labelPath, outputPrefix, areaString=None):
     '''Convert a Jp2 to an IMG and back.  Can crop and restore missing metadata.'''
     
+    # Convert from JP2 to IMG, possibly adding in missing metadata and cropping.
+    tempImgPath = outputPrefix + '.IMG'
     cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/JP2_to_PDS -Force -Input '  + jp2Path +
                                                                                        ' -Output ' + tempImgPath +
                                                                                        ' -LAbel '  + labelPath)
@@ -202,16 +209,60 @@ def jp2ToImgAndBack(jp2Path, labelPath, outputJp2Path, areaString=None):
     if not IrgFileFunctions.fileIsNonZero(tempImgPath):
         raise Exception('Failed to convert chunk to IMG file: ' + jp2Path)
     
+    # Convert back to JP2 format
+    outputPath = outputPrefix + '.JP2'
     cmd = ('/home/pirl/smcmich1/programs/PDS_JP2-3.17_Linux-x86_64/bin/PDS_to_JP2 -Force -Geotiff -Input '  + tempImgPath +
-                                                                                                ' -Output ' + outputJp2Path)
+                                                                                                ' -Output ' + outputPath)
     print cmd
     os.system(cmd)
-    if not IrgFileFunctions.fileIsNonZero(localChunkPath):
-        raise Exception('Failed to convert chunk to JP2 file: ' + outputJp2Path)
     
+    # If converting back to JP2 failed, try converting to TIF instead
+    if not IrgFileFunctions.fileIsNonZero(outputPath):
+        #raise Exception('Failed to convert chunk to JP2 file: ' + outputPath)
+        print 'WARNING: Failed to convert IMG file to JP2 file!  Trying to convert to TIF instead...'
+        outputPath = outputPrefix + '.TIF'
+        cmd = 'gdal_translate -of GTiff ' + tempImgPath +' '+ outputPath
+        print cmd
+        os.system(cmd)
+ 
+        # If we still failed, return an exception
+        if not IrgFileFunctions.fileIsNonZero(outputPath):
+           raise Exception('Could not convert IMG file to anything! ' + tempImgPath)
+
+    # Successfully created an output file
     os.remove(tempImgPath)
+    return outputPath
+
+
+
+def correctAndCropImage(inputPath, labelPath, outputPrefix, areaBB=None):
+    '''Can crop and restore missing metadata.'''
+
+    # At least one image was too tall and had to be split in half for this to work
+
+    inputIsJp2 = (inputPath[-4:] == ".JP2")
     
-    return True
+    if inputIsJp2: # Call the JP2 function 
+        if areaBB:
+            areaString = getChunkAreaString(areaBB)
+        else:
+            areaString = None
+        return jp2ToImgAndBack(inputPath, labelPath, outputPrefix, areaString)
+
+    else: # Input is a GeoTIFF
+        outputPath = outputPrefix + '.TIF'
+        # This is simpler, we just crop using gdal_translat
+        cmd = 'gdal_translate -of GTiff ' + inputPath  +''+ outputPath
+        if areaBB: # Handle crop
+            bbString = ' -srcwin %d %d %d %d ' % areaBB 
+            cmd += bbString
+        print cmd
+        os.system(cmd)
+
+        if not IrgFileFunctions.fileIsNonZero(outputPath):
+           raise Exception('Could not crop TIFF file: ' + inputPath)
+        return outputPath
+
 
 def writeFakeLabelFromJp2(jp2Path):
     '''For JP2 files with no associated LBL file, create an artificial one.'''
@@ -243,7 +294,7 @@ def writeFakeLabelFromJp2(jp2Path):
 
 
 
-def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
     #print 'Uploading file ' + setName
@@ -281,6 +332,9 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             os.system(cmd)
 
         if not IrgFileFunctions.fileIsNonZero(localFilePath):
+            if not IrgFileFunctions.fileIsNonZero(localLabelPath):
+                print 'Could not find label or image file, DELETING DATA RECORD!'
+                common.removeDataRecord(db, common.SENSOR_TYPE_HiRISE, subtype, setName)
             raise Exception('Unable to download from URL: ' + remoteURL)
 
         # Check if there is geo data in the JP2 file
@@ -299,24 +353,30 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         # At this point we always have a label file but it may be fake
 
         # Some images are missing geo information but we can add it from the label file
+        localImageIsTiff = False
+        localImagePath   = localFilePath
         if not jp2HasGeoData:
+            print 'Correcting JP2 file with no geo information!!!!'
             # Correct the local file, then remove the old (bad) file
-            tempPath = localFilePath + '.corrected'
-            jp2ToImgAndBack(localFilePath, localLabelPath, tempPath)
-            print 'Deleting JP2 file without metadata!'
-            os.remove(localFilePath)
-            os.mv(tempPath, localFilePath)
+            outputPrefix   = localFilePath[0:-4]
+            localImagePath = correctAndCropImage(localFilePath, localLabelPath, outputPrefix)
+            print 'Generated ' + localImagePath
+            if localFilePath != localImagePath:
+                print 'Deleting JP2 file without metadata!'
+                os.remove(localFilePath)
+            localImageIsTiff = (localImagePath[-4:] == ".TIF")
     
-        # Call code to fix the header information in the JP2 file!
-        cmd = FIX_JP2_TOOL +' '+ localFilePath
-        print cmd
-        os.system(cmd)
+        if not localImageIsTiff:
+            # Call code to fix the header information in the JP2 file!
+            cmd = FIX_JP2_TOOL +' '+ localImagePath
+            print cmd
+            os.system(cmd)
 
 
         # Check the projection type
         projType        = IrgGeoFunctions.getProjectionFromIsisLabel(localLabelPath)
-        (width, height) = IrgIsisFunctions.getImageSize(localFilePath)
-        if (projType == 'POLAR STEREOGRAPHIC') and (width < MAX_POLAR_UPLOAD_WIDTH):
+        (width, height) = IrgIsisFunctions.getImageSize(localImagePath)
+        if (projType == 'POLAR STEREOGRAPHIC') and False: #(width < MAX_POLAR_UPLOAD_WIDTH):
             # Google has trouble digesting these files so handle them differently.
 
             #os.remove(localLabelPath)
@@ -327,7 +387,7 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
                 print 'Cannot reprocess polar image without a label file!'
                 print 'All we can do is upload the file and hope for the best.'
                 # First file is for upload, second contains the timestamp.
-                return [localFilePath, localLabelPath]
+                return [localImagePath, localLabelPath]
             
             # Compute how many chunks are needed for this image
             numChunks = ceil(width / POLAR_WIDTH_CHUNK_SIZE)
@@ -345,24 +405,24 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
                 for i in range(1,numChunks):
                     chunkSetName = makeChunkSetName(setName, i)
                     print 'Add chunk set name to DB: ' + chunkSetName
-                    #common.addDataRecord(db, common.SENSOR_TYPE_HiRISE, subtype, chunkSetName, remoteURL)
+                    common.addDataRecord(db, common.SENSOR_TYPE_HiRISE, subtype, chunkSetName, remoteURL)
                     
             raise Exception('DEBUG')
             
             # Now actually generate the desired chunk
             # - Need to use PIRL tools to extract a chunk to an IMG format, then convert that back to JP2 so that Google can read it.
-            fileBasePath    = os.path.splitext(localFilePath)[0]
-            localImgPath    = fileBasePath + '.IMG'
-            localChunkPath  = fileBasePath + '_' + str(chunkNum) + '.JP2'
-            chunkAreaString = getChunkAreaString(width, height, chunkNum)
-            jp2ToImgAndBack(localFilePath, localLabelPath, localChunkPath, chunkAreaString=None)           
+            fileBasePath     = os.path.splitext(localImagePath)[0]
+            localImgPath     = fileBasePath + '.IMG'
+            localChunkPrefix = fileBasePath + '_' + str(chunkNum)
+            chunkBB = getChunkBoundingBox(width, height, chunkNum)
+            localChunkPath = correctAndCropImage(localImagePath, localLabelPath, localChunkPrefix, chunkBB)           
             
             # Just use the same label file, we don't care if the DB has per-chunk boundaries.
             return [localChunkPath, localLabelPath]
             
         else: # A normal, non-polar file.
             # First file is for upload, second contains the timestamp.
-            return [localFilePath, localLabelPath]
+            return [localImagePath, localLabelPath]
 
     
     # TODO: Handle POLAR DEMS
@@ -386,10 +446,16 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
         os.system(cmd)
 
         # Check if this is a polar stereographic image
+        isPolar = False 
         f = open(localLabelPath)
         for line in f:
             if ("MAP_PROJECTION_TYPE" in line) and ("POLAR STEREOGRAPHIC" in line):
-                raise Exception('POLAR STEREOGRAPHIC DEMs on hold until Google fixes a bug!')
+                isPolar = True
+                print 'WARNING: POLAR STEREOGRAPHIC DEM MAY NOT UPLOAD PROPERLY'
+                break
+                #os.remove(localFilePath)
+                #os.remove(localLabelPath)
+                #raise Exception('POLAR STEREOGRAPHIC DEMs on hold until Google fixes a bug!')
         f.close()
             
         # Convert from IMG to TIF
@@ -399,10 +465,11 @@ def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
             print cmd
             os.system(cmd)
         
-            # Correct projected coordinates problems
-            cmd = 'python /home/pirl/smcmich1/repo/Tools/geoTiffTool.py --normalize-eqc-lon ' + tiffFilePath
-            print cmd
-            os.system(cmd)
+            if not isPolar: # Only EQC files need to be corrected
+                # Correct projected coordinates problems
+                cmd = 'python /home/pirl/smcmich1/repo/Tools/geoTiffTool.py --normalize-eqc-lon ' + tiffFilePath
+                print cmd
+                os.system(cmd)
 
         os.remove(localFilePath) # Clean up source image
         return [tiffFilePath, localLabelPath] 

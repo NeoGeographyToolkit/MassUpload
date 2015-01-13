@@ -63,7 +63,7 @@ class Usage(Exception):
 #    '''Add all known data sets to the SQL database'''
 #    return False
 
-#def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+#def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
 #    '''Retrieves a remote file and prepares it for upload'''
 #    returns a list of created files with the first one being the one to upload
 
@@ -120,7 +120,7 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
         
         # Call sensor-specific function to fetch and prepare the file.
 
-        localFileList = fetchAndPrepFile(fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
+        localFileList = fetchAndPrepFile(db, fileInfo.setName(), fileInfo.subtype(), fileInfo.remoteURL(), workDir)
         if len(localFileList) == 0:
             raise Exception('Failed to retrieve any local files!')
 
@@ -285,6 +285,8 @@ def checkUploads(db, sensorType):
 
     # Query the data base for all sensor data files which have been uploaded but not confirmed 
     cursor.execute('SELECT * FROM Files WHERE sensor=? AND status=?', (str(sensorType), str(STATUS_UPLOADED)))
+    #cursor.execute('SELECT * FROM Files WHERE sensor=?', (str(sensorType))) # Check ALL uploads, for debugging.
+
     rows = cursor.fetchall()
     print 'Found ' + str(len(rows)) + ' entries'
     skip = 0
@@ -459,7 +461,7 @@ def checkForBadUploads(sensorCode, db = None):
 
     # TODO: Parse user inputs to get these!
     tag         = 'HiRISE'
-    cacheFolder = '/home/pirl/smcmich1/tempCache2' # Web API query results are backed up in to this folder as JSON files.
+    cacheFolder = '/home/pirl/smcmich1/tempCache3' # Web API query results are backed up in to this folder as JSON files.
     
     print 'Retrieving asset list for sensor ' + tag + ' in folder ' + cacheFolder
     if not os.path.exists(cacheFolder):

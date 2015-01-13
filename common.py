@@ -106,7 +106,7 @@ class TableRecord:
 #    '''Add all known data sets to the SQL database'''
 #    return False
 
-#def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+#def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
 #    '''Retrieves a remote file and prepares it for upload'''
 #    returns a list of created files with the first one being the one to upload
 
@@ -135,3 +135,16 @@ def addDataRecord(db, sensor, subType, setName, remoteURL):
                (str(sensor), subType, setName, remoteURL))
     db.commit()
     return True
+
+
+def removeDataRecord(db, sensor, subType, setName):
+    '''Removes a sensor data entry from the database'''
+
+    print 'DELETING RECORD ' + setName + ',  ' + subType
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM Files WHERE sensor=? AND subtype=? AND setname=?",
+                      (str(sensor), subType, setName))
+    db.commit()
+    return True
+
+

@@ -198,7 +198,7 @@ def findAllDataSets(db, sensorCode):
     
     
 
-def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     
     #print 'Uploading file ' + setName

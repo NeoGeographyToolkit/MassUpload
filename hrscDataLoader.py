@@ -126,7 +126,7 @@ def findAllDataSets(db, sensorCode):
             common.addDataRecord(db, sensorCode, 'DEM', setName, url)
             
     
-def fetchAndPrepFile(setName, subtype, remoteURL, workDir):
+def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
     '''Retrieves a remote file and prepares it for upload'''
     # The same code here works for images and DEMs
     

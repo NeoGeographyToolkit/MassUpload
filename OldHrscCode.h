@@ -7,7 +7,85 @@
 #include <vw/Math/RANSAC.h>
 #include <vw/InterestPoint/InterestData.h>
 
-#include <HrscCommon.h>
+/**
+  Program to compute the transform between an HRSC image and a base image using OpenCV
+*/
+
+/*
+cv::Point templateMatchPoint(const cv::Mat &findImage, const cv::Mat &templateImage, 
+                             const int      centerX,   const int      centerY)
+{
+
+//SQDIFF
+//SQDIFF NORMED
+//TM CCORR
+//TM CCORR NORMED
+//TM COEFF
+//TM COEFF NORMED
+
+  const int TEMPLATE_SIZE = 7;
+  const int radius = (TEMPLATE_SIZE - 1) / 2;
+
+  // Create the template image
+  cv::Rect roi(centerX-radius, centerY-radius, TEMPLATE_SIZE, TEMPLATE_SIZE);
+  cv::Mat templ(templateImage, roi);
+  
+  // Create the result matrix
+  cv::Mat result;
+  int result_cols = findImage.cols - templ.cols + 1;
+  int result_rows = findImage.rows - templ.rows + 1;
+  result.create( result_cols, result_rows, CV_32FC1 );  
+  
+  
+  matchTemplate(findImage, templ, result, CV_TM_SQDIFF_NORMED );
+  normalize( result, result, 0, 1, NORM_MINMAX, -1, Mat() );
+
+
+  // Localizing the best match with minMaxLoc
+  double    minVal, maxVal; 
+  cv::Point minLoc, maxLoc, matchLoc;
+
+  minMaxLoc( result, &minVal, &maxVal, &minLoc, &maxLoc, Mat() );
+
+  // For SQDIFF and SQDIFF_NORMED, the best matches are lower values. 
+  //   For all the other methods, the higher the better
+  if( match_method  == CV_TM_SQDIFF || match_method == CV_TM_SQDIFF_NORMED )
+    matchLoc = minLoc;
+  else
+    matchLoc = maxLoc;
+
+  return matchLoc;
+}
+*/
+/*
+bool matchByTemplate(const cv::Mat &imageA, const cv::Mat &imageB, 
+                     const std::vector<cv::KeyPoint> &keypointsA, 
+                           std::vector<cv::KeyPoint> &keypointsB)
+{
+
+  // TODO: Handle edge cases?
+  keypointsB.resize(keypointsA.size());
+  for (size_t i=0; i<keypointsA.size(); ++i)
+  {
+    
+    // Search for a match for keypoint A
+    cv::Point foundPtB = templateMatchPoint(imageB, imageA, 
+                                            keypointsA[i].pt.x, keypointsA[i].pt.y);
+
+
+}
+*/
+
+/*
+struct L2NormErrorMetric {
+  double operator() (vw::math::TranslationFittingFunctor::result_type  const& H,
+                     vw::Vector3 const& p1,
+                     vw::Vector3 const& p2) const {
+    std::cout<< "h = " << H << std::endl;
+    return vw::math::norm_2( p2 - H * p1 );
+  }
+};
+*/
 
 /// Compute an affine transform for the given feature points using
 ///  the Vision Workbench RANSAC implementation
@@ -209,10 +287,123 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
 }
 
 
+template <typename T>
+T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool &gotValue)
+{
+    const int BORDER_SIZE = 1; // Stay away from border artifacts
+
+    gotValue = false;
+    int x = (int)xF;
+    int y = (int)yF;
+
+    // Get the bordering pixel coordinates, replacing out of bounds with zero.
+    int minX = BORDER_SIZE;
+    int minY = BORDER_SIZE;
+    int maxX = img.cols-BORDER_SIZE;
+    int maxY = img.rows-BORDER_SIZE;
+    int x0 = x;
+    int x1 = x+1;
+    int y0 = y;
+    int y1 = y+1;
+    if ((x0 < minX) || (x0 >= maxX)) return 0;
+    if ((x1 < minX) || (x1 >= maxX)) return 0;
+    if ((y0 < minY) || (y0 >= maxY)) return 0;
+    if ((y1 < minY) || (y1 >= maxY)) return 0;
+    
+    // - Don't interpolate if any mask inputs are zero, this might indicate 
+    //    that we are at a projection border.
+    unsigned char i00 = mask.at<unsigned char>(y0, x0);
+    unsigned char i01 = mask.at<unsigned char>(y0, x1);
+    unsigned char i10 = mask.at<unsigned char>(y1, x0);
+    unsigned char i11 = mask.at<unsigned char>(y1, x1);
+    if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
+      return 0;
+
+
+    float a = xF - (float)x;
+    float c = yF - (float)y;
+    
+    float v00 = static_cast<float>(img.at<T>(y0, x0));
+    float v01 = static_cast<float>(img.at<T>(y0, x1));
+    float v10 = static_cast<float>(img.at<T>(y1, x0));
+    float v11 = static_cast<float>(img.at<T>(y1, x1));
+
+    T val = static_cast<short>( v00*(1-a)*(1-c)  + v10*a*(1-c) + v01*(1-a)*c + v11*a*c );
+
+    gotValue = true;
+    return val;
+}
+
+/// Sharpen the reference image using an aligned match image
+bool sharpenReferenceImage(const cv::Mat &refImageIn, const cv::Mat &matchImageIn,
+                           const cv::Mat &transform)
+{
+
+  // TODO: Try contrast enhancing the match image before generating sharp mask?
+
+  // Compute the unsharp mask of the match image
+  const float UNSHARP_SCALING = 4.0f; // Control strength of the enhancement
+  const float MIN_ENHANCE     = 15;      // Only enhance pixels over this amount (keep out noise)
+  cv::Mat blurredMatch, temp, sharpMask;
+  cv::GaussianBlur( matchImageIn, blurredMatch, cv::Size(5,5), 0, 0, cv::BORDER_DEFAULT ); 
+  cv::subtract(matchImageIn, blurredMatch, sharpMask, cv::noArray(), CV_16S);
+  
+  double min, max;
+  cv::minMaxIdx(sharpMask, &min, &max);
+  printf("min = %lf, max = %lf\n", min, max);
+  cv::Mat displaySharp = (sharpMask + 128);
+  //cv::convertScaleAbs(sharpMask, displaySharp, UNSHARP_SCALING);//255.0/(0.2*max));
+  cv::imwrite("sharpMask.jpeg", displaySharp);
+    
+  // Now sharpen the input image
+  cv::Mat outputImage, outputMask;
+  bool gotValue;
+  outputImage = refImageIn;
+  for (int r=0; r<refImageIn.rows; ++r)
+  {
+    for (int c=0; c<refImageIn.cols; ++c)
+    {     
+      float matchX = c*transform.at<float>(0,0) + r*transform.at<float>(0,1) + transform.at<float>(0,2);
+      float matchY = c*transform.at<float>(1,0) + r*transform.at<float>(1,1) + transform.at<float>(1,2);
+      //printf("%d, %d  =>  %lf, %lf\n", r, c, matchY, matchX);
+      
+      short temp = interpPixel<short>(sharpMask, matchImageIn, matchX, matchY, gotValue);
+      float sharpVal = static_cast<float>(temp)*UNSHARP_SCALING;
+      if (abs(sharpVal) < MIN_ENHANCE)
+        continue; // Skip small values
+      // Enforce limits
+      short oldVal   = static_cast<short>(outputImage.at<unsigned char>(r,c));
+      short newVal   = oldVal + (short)sharpVal;
+      if (temp > max)
+      {
+        printf("%d, %d  =>  %lf, %lf\n", r, c, matchY, matchX);
+        printf("%d, %d, %f\n", oldVal, temp, sharpVal);
+        return false;
+      }
+      if (newVal > 255)
+        newVal = 255;
+      if (newVal < 0)
+        newVal = 0;
+      outputImage.at<unsigned char>(r,c) = (unsigned char)newVal;
+    }
+  }
+  
+  cv::imwrite("sharpened_image.jpeg", outputImage);
+  
+  //cv::namedWindow("Display Image", cv::WINDOW_AUTOSIZE );
+  //cv::imshow("Display Image", outputImage);
+  //cv::waitKey(0);
+  
+  printf("Finished sharpening\n");
+  return true;
+
+}
+
+
+
 /// Replace the Value channel of the input HSV image
-bool computeColorTransform(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, const cv::Mat &red, 
-                           const cv::Mat &blue, const cv::Mat &green, const cv::Mat &nir, const cv::Mat &nadir,
-                           const std::string &outputPairPath)
+bool replaceValue(const cv::Mat &refImageRgb, const cv::Mat &matchImageIn,
+                  const cv::Mat &transform, cv::Mat &outputImage)
 {
   printf("Converting image...\n");
   

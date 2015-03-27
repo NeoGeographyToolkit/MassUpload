@@ -3,6 +3,24 @@ import os
 import sys
 import IrgGeoFunctions
 
+"""
+TODO:
+- Replicate EE test processing.
+    - Split input images up into tiles.
+        - Future option: Multi-resolution tiles.
+    - Load all inputs for a tile.
+    - Compute matrix transform from HRSC colors to basemap colors for this tile.
+    - Apply transform matrix to tile.
+    - Apply blur if there are artifacts.
+    - Pansharp the color image with the nadir channel.
+    - Write the output tile.
+    
+- Algorithm to smooth out transitions.
+- Generate a good result image.
+- Generate a list of features Earth Engine would need to replicate all steps.
+"""
+
+fullBasemapPath    = '/home/smcmich1/data/hrscMapTest/noel_basemap.tif'
 redBasemapPath     = '/home/smcmich1/data/hrscMapTest/noel_basemap_red.tif'
 redCroppedPath     = '/home/smcmich1/data/hrscMapTest/red_crop.tif'
 redCropHighResPath = '/home/smcmich1/data/hrscMapTest/red_crop_highRes.tif'
@@ -34,8 +52,10 @@ maxY = maxLat*DEGREES_TO_PROJECTION_METERS
 
 # Crop out the correct section of the base map
 projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
-if not os.path.exists(redCroppedPath):
-    cmd = (GDAL_DIR+'gdal_translate ' + redBasemapPath +' '+ redCroppedPath
+if True:#not os.path.exists(redCroppedPath):
+    #cmd = (GDAL_DIR+'gdal_translate ' + redBasemapPath +' '+ redCroppedPath
+    #                         +' -projwin '+ projCoordString)
+    cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ redCroppedPath
                              +' -projwin '+ projCoordString)
     print cmd
     os.system(cmd)
@@ -43,7 +63,7 @@ if not os.path.exists(redCroppedPath):
 # Increase the resolution of the cropped image
 # TODO: Can this be done in one step?
 RESOLUTION_INCREASE = 200 # In percent
-if not os.path.exists(redCropHighResPath):
+if True:#not os.path.exists(redCropHighResPath):
     cmd = (GDAL_DIR+'gdal_translate ' + redCroppedPath +' '+ redCropHighResPath
                              +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
     print cmd
@@ -129,6 +149,9 @@ Iterate through the base tile and for each pixel use the transform to find the m
 
 
 """
+DB command to find a list of overlapping HRSC files:
+select setname from Files where sensor=1 and minLon<102.64 and maxLon>98.2023 and minLat<-18.6077 and maxLat>-50.1955 and subtype="nd3";
+
 
 Alignment target = /byss/mars/themis/dayir_100m/
 - Noel's map goes down to +/-90 degrees lat, but matching will gets very hard outside 60 degrees!
@@ -194,6 +217,60 @@ OUTSTANDING ISSUES
       mosaic is hard to get right (see http://maps.planet.fu-berlin.de/)
 
 
+- Can we do everything in OpenCV?
+    - The largest file is 13,500x150,000
+    - Image alignment is done at a lower resolution so no problem.
+    - Everything else can be done in dumb tiles.
+
+
+List of overlapping images for h0022_0000_nd3:
+
+Use these:
+h0506_0000_nd3 <-- Feels like there should be overlap =)
+h2411_0000_nd3 <-- Lots of overlap!
+h6419_0000_nd3 <-- Higher resolution shot of middle of image
+
+
+h0248_0000_nd3
+h0300_0000_nd3
+h0440_0000_nd3 <-- Big image, but no overlap =(
+h0451_0000_nd3 <-- Messed up top!
+h0462_0000_nd3
+h0506_0000_nd3 <-- Feels like there should be overlap =)
+h0637_0000_nd3
+h0648_0000_nd3
+h1592_0000_nd3 <-- Weird polar image
+h1774_0000_nd3
+h1786_0001_nd3
+h1942_0000_nd3 <-- Small image in the center
+h2345_0000_nd3
+h2389_0000_nd3
+h2400_0001_nd3 <-- Lots of overlap, but not all components =()
+h2411_0000_nd3 <-- Lots of overlap!
+h2466_0000_nd3 
+h2510_0001_nd3
+h2619_0000_nd3
+h2652_0000_nd3
+h2663_0001_nd3
+h2726_0000_nd3
+h2729_0000_nd3
+h4261_0000_nd3 <-- Maybe aligned?
+h4272_0000_nd3
+h4294_0000_nd3
+h4469_0001_nd3
+h4642_0000_nd3
+h4817_0000_nd3
+h6411_0000_nd3
+h6419_0000_nd3 <-- Higher resolution shot of middle of image
+h6437_0000_nd3
+h8429_0000_nd3
+h8474_0000_nd3
+h8562_0000_nd3
+h8990_0000_nd3
+ha526_0000_nd3
+ha688_0000_nd3
+ha776_0000_nd3
+hc598_0017_nd3
 
 """
 

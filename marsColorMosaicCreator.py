@@ -5,27 +5,42 @@ import IrgGeoFunctions
 
 """
 TODO:
-- Replicate EE test processing.
-    - Split input images up into tiles.
-        - Future option: Multi-resolution tiles.
-    - Load all inputs for a tile.
-    - Compute matrix transform from HRSC colors to basemap colors for this tile.
-    - Apply transform matrix to tile.
-    - Apply blur if there are artifacts.
-    - Pansharp the color image with the nadir channel.
-    - Write the output tile.
+
+- Test out the current tool chain on the current low res HRSC image
+- 
     
 - Algorithm to smooth out transitions.
 - Generate a good result image.
 - Generate a list of features Earth Engine would need to replicate all steps.
+
+Existing tools:
+- RegisterHrsc.cpp
+    - Input  = Basemap, HRSC
+    - Output = spatialTransform
+- writeHrscColorPairs.cpp
+    - Input  = Basemap, HRSC, spatialTransform
+    - Output = File containing pixel color pairs
+- transformHrscImageColor.cpp
+    - Input  = HRSC, colorTransform
+    - Output = Color transformed HRSC image
+    - TODO   = Add cleanup/pansharp
+
+
 """
 
 fullBasemapPath    = '/home/smcmich1/data/hrscMapTest/noel_basemap.tif'
-redBasemapPath     = '/home/smcmich1/data/hrscMapTest/noel_basemap_red.tif'
-redCroppedPath     = '/home/smcmich1/data/hrscMapTest/red_crop.tif'
-redCropHighResPath = '/home/smcmich1/data/hrscMapTest/red_crop_highRes.tif'
-hrscNadirPath      = '/home/smcmich1/data/hrscMapTest/h0022_0000_nd3.tif'
-hrscWarpedPath     = '/home/smcmich1/data/hrscMapTest/h0022_0000_nd3_resample.tif'
+cropBasemapPath = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'
+hrscInputPaths = ['/home/smcmich1/data/hrscMapTest/h0022_0000_re3.tif',
+                  '/home/smcmich1/data/hrscMapTest/h0022_0000_gr3.tif',
+                  '/home/smcmich1/data/hrscMapTest/h0022_0000_bl3.tif',
+                  '/home/smcmich1/data/hrscMapTest/h0022_0000_ir3.tif',
+                  '/home/smcmich1/data/hrscMapTest/h0022_0000_nd3.tif']
+HRSC_RED   = 0
+HRSC_GREEN = 1
+HRSC_BLUE  = 2
+HRSC_NIR   = 3
+HRSC_NADIR = 4
+
 
 GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
 
@@ -33,7 +48,7 @@ print 'Starting basemap enhancement script...'
 
 # Get the HRSC bounding box and expand it
 HRSC_BB_EXPAND_DEGREES = 1.5
-(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscNadirPath)
+(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscInputPaths[4])
 minLon -= HRSC_BB_EXPAND_DEGREES
 maxLon += HRSC_BB_EXPAND_DEGREES
 minLat -= HRSC_BB_EXPAND_DEGREES
@@ -52,7 +67,7 @@ maxY = maxLat*DEGREES_TO_PROJECTION_METERS
 
 # Crop out the correct section of the base map
 projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
-if True:#not os.path.exists(redCroppedPath):
+if False:#not os.path.exists(redCroppedPath):
     #cmd = (GDAL_DIR+'gdal_translate ' + redBasemapPath +' '+ redCroppedPath
     #                         +' -projwin '+ projCoordString)
     cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ redCroppedPath
@@ -63,21 +78,60 @@ if True:#not os.path.exists(redCroppedPath):
 # Increase the resolution of the cropped image
 # TODO: Can this be done in one step?
 RESOLUTION_INCREASE = 200 # In percent
-if True:#not os.path.exists(redCropHighResPath):
+if False:#not os.path.exists(redCropHighResPath):
     cmd = (GDAL_DIR+'gdal_translate ' + redCroppedPath +' '+ redCropHighResPath
                              +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
     print cmd
     os.system(cmd)
 
 
+
+def warpHrscFile(sourcePath, metersPerPixel):
+    warpedPath = sourcePath[:-4] + '_resample.tif'
+    if not os.path.exists(warpedPath):
+        cmd = (GDAL_DIR+'gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
+                 ' -t_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -tr '
+                 + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
+        print cmd
+        os.system(cmd)
+    return warpedPath
+
 # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
 highResMetersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-if True:#not os.path.exists(hrscWarpedPath):
-    cmd = (GDAL_DIR+'gdalwarp ' + hrscNadirPath +' '+ hrscWarpedPath + ' -r cubicspline '
-             ' -t_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -tr '
-             + str(highResMetersPerPixel)+' '+str(highResMetersPerPixel)+' -overwrite')
+hrscWarpedPaths       = [warpHrscFile(path, highResMetersPerPixel) for path in hrscInputPaths]
+
+
+hrscPathString = ''
+for path in hrscWarpedPaths:
+    hrscPathString += path + ' '
+
+# TODO: Don't hardcode this
+spatialTransformPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_spatial_transform.csv'
+
+# Generate the color pairs
+colorPairPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_color_pairs.csv'
+if not os.path.exists(colorPairPath):
+    cmd = './writeHrscColorPairs ' + cropBasemapPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ colorPairPath
     print cmd
     os.system(cmd)
+
+
+# Compute the color transform
+colorTransformPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_color_transform.csv'
+if not os.path.exists(colorTransformPath):
+    cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + colorTransformPath +' '+ colorPairPath 
+    print cmd
+    os.system(cmd)
+
+
+# Transform the HRSC image color
+hrscNewColorPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_new_color.tif'
+if True:#not os.path.exists(hrscNewColorPath):
+    cmd = './transformHrscImageColor ' + cropBasemapPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ hrscNewColorPath
+    print cmd
+    os.system(cmd)
+
+raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

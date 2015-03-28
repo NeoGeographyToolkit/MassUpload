@@ -210,15 +210,13 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
 
 
 /// Replace the Value channel of the input HSV image
-bool computeColorTransform(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, const cv::Mat &red, 
-                           const cv::Mat &blue, const cv::Mat &green, const cv::Mat &nir, const cv::Mat &nadir,
-                           const std::string &outputPairPath)
+bool replaceValue(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, const cv::Mat &nadir, cv::Mat &outputImage)
 {
   printf("Converting image...\n");
   
   // Convert the input image to HSV
   cv::Mat hsvImage;
-  cv::cvtColor(refImageRgb, hsvImage, cv::COLOR_BGR2HSV);
+  cv::cvtColor(baseImageRgb, hsvImage, cv::COLOR_BGR2HSV);
  
   printf("Replacing value channel...\n");
  
@@ -226,14 +224,14 @@ bool computeColorTransform(const cv::Mat &baseImageRgb, const cv::Mat &spatialTr
   // Replace the value channel
   //cv::Mat outputMask;
   bool gotValue;
-  for (int r=0; r<refImageRgb.rows; ++r)
+  for (int r=0; r<baseImageRgb.rows; ++r)
   {
-    for (int c=0; c<refImageRgb.cols; ++c)
+    for (int c=0; c<baseImageRgb.cols; ++c)
     {     
-      float matchX = c*transform.at<float>(0,0) + r*transform.at<float>(0,1) + transform.at<float>(0,2);
-      float matchY = c*transform.at<float>(1,0) + r*transform.at<float>(1,1) + transform.at<float>(1,2);
+      float matchX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
+      float matchY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
       
-      unsigned char newVal = interpPixel<unsigned char>(matchImageIn, matchImageIn, matchX, matchY, gotValue);
+      unsigned char newVal = interpPixel<unsigned char>(nadir, nadir, matchX, matchY, gotValue);
       //hsvImage.at<unsigned char>(r,c, 2) = newVal;
       if (gotValue)
         hsvImage.at<cv::Vec3b>(r,c)[2] = newVal;
@@ -260,13 +258,14 @@ bool computeColorTransform(const cv::Mat &baseImageRgb, const cv::Mat &spatialTr
 int main(int argc, char** argv )
 {
   
-  if (argc < 3)
+  if (argc != 4)
   {
-    printf("usage: DisplayImage.out <Ref Image Path> <Match Image Path>\n");
+    printf("usage: RegisterHrsc <Base map path> <HRSC path> <Output path>\n");
     return -1;
   }
   std::string refImagePath   = argv[1];
   std::string matchImagePath = argv[2];
+  std::string outputPath     = argv[3];
   
   const int LOAD_GRAY = 0;
   const int LOAD_RGB  = 1;
@@ -286,11 +285,6 @@ int main(int argc, char** argv )
     return -1;
   }
 
-  // Display the input image
-  //namedWindow("Display Image", WINDOW_AUTOSIZE );
-  //imshow("Display Image", image);
-  //waitKey(0);
-  
   // First compute the transform between the two images
   // - This could be moved to a seperate tool!
   cv::Mat transform(3, 3, CV_32FC1);
@@ -312,12 +306,9 @@ int main(int argc, char** argv )
   cv::Mat invTransform(transform);
   double check = cv::invert(transform, invTransform);
   std::cout << "H_inv = \n" << invTransform << std::endl;
+
+  writeTransform(outputPath, invTransform);
   
-  //sharpenReferenceImage(refImageIn, matchImageIn, invTransform);
-  cv::Mat newImage;
-  replaceValue(refImageIn, matchImageIn, invTransform, newImage);
-
-
   return 0;
 }
 

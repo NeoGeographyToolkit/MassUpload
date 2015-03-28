@@ -18,11 +18,11 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
 {
   std::vector<std::string> hrscPaths(NUM_HRSC_CHANNELS);
   std::string baseImagePath = argv[1];
-  hrscPaths[0] = argv[2];
-  hrscPaths[1] = argv[3];
-  hrscPaths[2] = argv[4];
-  hrscPaths[3] = argv[5];
-  hrscPaths[4] = argv[6];
+  hrscPaths[0] = argv[2]; // R
+  hrscPaths[1] = argv[3]; // G
+  hrscPaths[2] = argv[4]; // B
+  hrscPaths[3] = argv[5]; // NIR
+  hrscPaths[4] = argv[6]; // NADIR
   std::string spatialTransformPath = argv[7];
   outputPath  = argv[8];
   
@@ -31,7 +31,7 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   const int LOAD_RGB  = 1;
   
   // Load the base map
-  cv::Mat basemapImage = cv::imread(baseImagePath, LOAD_RGB);
+  basemapImage = cv::imread(baseImagePath, LOAD_RGB);
   if (!basemapImage.data)
   {
     printf("Failed to load base map image!\n");
@@ -56,7 +56,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   return true;
 }
 
-
+/// Generate a list of matched pixels for the base map and HRSC images
+/// --> Format is "baseR, baseG, baseB, R, G, B, NIR, NADIR" 
 bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform, const std::vector<cv::Mat> hrscChannels,
                      const std::string outputPath)
 {
@@ -64,30 +65,38 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
   const int SAMPLE_DIST = 10;
  
 
-  std::ofstream outputFile(outputPath,c_str());
+  std::ofstream outputFile(outputPath.c_str());
 
   // Iterate over the pixels of the HRSC image
   bool gotValue;
-  std::vector<unsigned char> baseValues(NUM_BASE_CHANNELS);
+  cv::Vec3b baseValues;
   for (int r=0; r<hrscChannels[0].rows; r+=SAMPLE_DIST)
   {
     for (int c=0; c<hrscChannels[0].cols; c+=SAMPLE_DIST)
     {     
+      // TODO: Do we need to check all channels?
+      // Skip empty pixels in the HRSC images
+      if (hrscChannels[0].at<unsigned char>(r,c) == 0)
+        continue;
+    
       // Compute the equivalent location in the basemap image
-      float baseX = c*transform.at<float>(0,0) + r*transform.at<float>(0,1) + transform.at<float>(0,2);
-      float baseY = c*transform.at<float>(1,0) + r*transform.at<float>(1,1) + transform.at<float>(1,2);
+      float baseX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
+      float baseY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
       
-      // Extract all of the basewap values at that location
-      for (size_t i=0; i<NUM_BASE_CHANNELS; ++i)
-        baseValues[i] = interpPixel<unsigned char>(basemapImage, basemapImage, baseX, baseY, gotValue);
+      // Extract all of the basemap values at that location
+      baseValues = interpPixelRgb(basemapImage, baseX, baseY, gotValue);
            
       if (gotValue) // Write all the values to a line in the file
       {
         for (size_t i=0; i<NUM_BASE_CHANNELS; ++i)
-          outputFile << baseValues[i] <<", ";
+        {
+          outputFile << static_cast<int>(baseValues[i]) <<", ";
+        }
         for (size_t i=0; i<NUM_HRSC_CHANNELS-1; ++i)
-          outputFile << hrscChannel[i].get<unsigned char>(r,c) <<", "<<
-        outputFile << hrscChannel[NUM_HRSC_CHANNELS-1].get<unsigned char>(r,c) << std::endl;
+        {
+          outputFile << static_cast<int>(hrscChannels[i].at<unsigned char>(r,c)) <<", ";
+        }
+        outputFile << static_cast<int>(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c)) << std::endl;
       }
     } // End col loop
   } // End row loop
@@ -110,7 +119,8 @@ int main(int argc, char** argv)
   }
   
   // Load the input images  
-  cv::Mat basemapImage, spatialTransform, outputPath;
+  cv::Mat basemapImage, spatialTransform;
+  std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
   if (!loadInputImages(argc, argv, basemapImage, hrscChannels, spatialTransform, outputPath))
     return -1;

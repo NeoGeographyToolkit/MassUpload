@@ -3,10 +3,6 @@
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
 
-#include <vw/Math/Geometry.h>
-#include <vw/Math/RANSAC.h>
-#include <vw/InterestPoint/InterestData.h>
-
 #include <HrscCommon.h>
 
 
@@ -68,17 +64,37 @@ bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransfo
 
   // Iterate over the pixels of the HRSC image
   cv::Vec3b outputPixel;
+  std::vector<unsigned char> hrscPixel(NUM_HRSC_CHANNELS);
   for (int r=0; r<numRows; r+=1)
   {
     for (int c=0; c<numCols; c+=1)
-    {     
+    {  
+      // Check to see if this pixel should be masked out   
+      bool maskOut = false;
+      for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
+      {
+        hrscPixel[i] = hrscChannels[i].at<unsigned char>(r,c);
+        if (hrscPixel[i] == 0)
+        {
+          maskOut = true;
+          break;
+        }
+      }
+      // If any of input HRSC pixels are black, the output pixel is black.
+      // TODO: A smarter mask method!
+      if (maskOut)
+      {
+        outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);
+        continue;
+      }
+    
       // Compute the output pixel values      
       for (int j=0; j<NUM_BASE_CHANNELS; ++j)
       {
         outputPixel[j] = 0;
         float temp = 0.0;
-        for (int i=0; i<NUM_HRSC_CHANNELS; ++i) // TODO: Check indices        
-           temp += static_cast<float>(hrscChannels[i].at<unsigned char>(r,c))*colorTransform.at<float>(i,j);
+        for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
+           temp += static_cast<float>(hrscPixel[i])*colorTransform.at<float>(i,j);
          if (temp < 0.0)
            temp = 0;
          if (temp > 255.0)

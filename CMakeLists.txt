@@ -110,12 +110,13 @@ add_executable( RegisterHrsc RegisterHrsc.cpp )
 target_link_libraries( RegisterHrsc ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
 
 add_executable( writeHrscColorPairs writeHrscColorPairs.cpp )
-target_link_libraries( writeHrscColorPairs ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
+target_link_libraries( writeHrscColorPairs ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
 add_executable( transformHrscImageColor transformHrscImageColor.cpp )
-target_link_libraries( transformHrscImageColor ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
+target_link_libraries( transformHrscImageColor ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
-
+add_executable( hrscMosaic hrscMosaic.cpp )
+target_link_libraries( hrscMosaic ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
 
 

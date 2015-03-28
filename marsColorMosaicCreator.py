@@ -6,12 +6,14 @@ import IrgGeoFunctions
 """
 TODO:
 
-- Test out the current tool chain on the current low res HRSC image
-- 
-    
+
+
+- Generate an image 
 - Algorithm to smooth out transitions.
 - Generate a good result image.
 - Generate a list of features Earth Engine would need to replicate all steps.
+
+- Better mask handling
 
 Existing tools:
 - RegisterHrsc.cpp
@@ -126,10 +128,18 @@ if not os.path.exists(colorTransformPath):
 
 # Transform the HRSC image color
 hrscNewColorPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_new_color.tif'
-if True:#not os.path.exists(hrscNewColorPath):
+if not os.path.exists(hrscNewColorPath):
     cmd = './transformHrscImageColor ' + cropBasemapPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ hrscNewColorPath
     print cmd
     os.system(cmd)
+
+
+mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
+if True:#not os.path.exists(mosaicPath):
+    cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
+    print cmd
+    os.system(cmd)
+
 
 raise Exception('DEBUG')
 

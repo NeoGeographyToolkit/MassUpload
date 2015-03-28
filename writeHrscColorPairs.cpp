@@ -3,10 +3,6 @@
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
 
-#include <vw/Math/Geometry.h>
-#include <vw/Math/RANSAC.h>
-#include <vw/InterestPoint/InterestData.h>
-
 #include <HrscCommon.h>
 
 

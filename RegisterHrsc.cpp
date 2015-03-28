@@ -288,9 +288,9 @@ int main(int argc, char** argv )
   // First compute the transform between the two images
   // - This could be moved to a seperate tool!
   cv::Mat transform(3, 3, CV_32FC1);
-  //computeImageTransform(refImageIn, matchImageIn, transform);
+  computeImageTransform(refImageIn, matchImageIn, transform);
   
-  
+  /*
   transform.at<float>(0, 0) = 1;  // Skip registration for now!
   transform.at<float>(0, 1) = 0;
   transform.at<float>(0, 2) = 229-147;//49.44;//24.38;
@@ -300,14 +300,18 @@ int main(int argc, char** argv )
   transform.at<float>(2, 0) = 0;
   transform.at<float>(2, 1) = 0;
   transform.at<float>(2, 2) = 1;
+  */
+  std::cout << "H = \n" << transform << std::endl;
   
-  
+  /*
   // For the next step the transform needs to be from reference to match!
   cv::Mat invTransform(transform);
   double check = cv::invert(transform, invTransform);
   std::cout << "H_inv = \n" << invTransform << std::endl;
-
-  writeTransform(outputPath, invTransform);
+  */
+  
+  // The output transform is from the HRSC image to the base map
+  writeTransform(outputPath, transform);
   
   return 0;
 }

@@ -13,6 +13,9 @@ const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
 
+
+
+
 template <typename T>
 T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool &gotValue)
 {
@@ -107,6 +110,7 @@ cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
 
 
 
+
 /// Write a small matrix to a text file
 bool writeTransform(const std::string &outputPath, const cv::Mat &transform)
 {
@@ -147,6 +151,54 @@ bool readTransform(const std::string &inputPath, cv::Mat &transform)
 }
 
 
+
+
+
+
+
+
+
+
+/// Replace the Value channel of the input HSV image
+bool replaceValue(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, const cv::Mat &nadir, cv::Mat &outputImage)
+{
+  printf("Converting image...\n");
+  
+  // Convert the input image to HSV
+  cv::Mat hsvImage;
+  cv::cvtColor(baseImageRgb, hsvImage, cv::COLOR_BGR2HSV);
+ 
+  printf("Replacing value channel...\n");
+ 
+  // TODO: There must be a better way to do this using OpenCV!
+  // Replace the value channel
+  //cv::Mat outputMask;
+  bool gotValue;
+  for (int r=0; r<baseImageRgb.rows; ++r)
+  {
+    for (int c=0; c<baseImageRgb.cols; ++c)
+    {     
+      float matchX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
+      float matchY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
+      
+      unsigned char newVal = interpPixel<unsigned char>(nadir, nadir, matchX, matchY, gotValue);
+      //hsvImage.at<unsigned char>(r,c, 2) = newVal;
+      if (gotValue)
+        hsvImage.at<cv::Vec3b>(r,c)[2] = newVal;
+    }
+  }
+  cv::cvtColor(hsvImage, outputImage, cv::COLOR_HSV2BGR);
+  
+  cv::imwrite("value_replaced_image.jpeg", outputImage);
+  
+  //cv::namedWindow("Display Image", cv::WINDOW_AUTOSIZE );
+  //cv::imshow("Display Image", outputImage);
+  //cv::waitKey(0);
+  
+  printf("Finished replacing value\n");
+  return true;
+
+}
 
 
 

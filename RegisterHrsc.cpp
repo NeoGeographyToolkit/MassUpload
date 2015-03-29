@@ -2,12 +2,28 @@
 
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
+//#include <opencv2/xfeatures2d.hpp>
 
 #include <vw/Math/Geometry.h>
 #include <vw/Math/RANSAC.h>
 #include <vw/InterestPoint/InterestData.h>
 
 #include <HrscCommon.h>
+
+
+
+struct ErrorMetric {
+  double operator() (vw::math::TranslationFittingFunctor::result_type  const& H,
+                     vw::Vector3 const& p1,
+                     vw::Vector3 const& p2) const {
+    double temp =  vw::math::norm_2( p2 - H * p1 );
+    //printf("%lf   ", temp);
+    return temp;
+  }
+};
+
+
+
 
 /// Compute an affine transform for the given feature points using
 ///  the Vision Workbench RANSAC implementation
@@ -29,12 +45,13 @@ bool vwRansacAffine(const std::vector<cv::Point2f> &keypointsA,
     //printf("Pair: (%lf, %lf) ==> (%lf, %lf) \n", vwPtsA[i][0], vwPtsA[i][1], vwPtsB[i][0], vwPtsB[i][1]);
   }
 
-  // Call VW RANSAC function
+  // Call VW RANSAC function --> WTF is wrong with VW's RANSAC code??
   typedef vw::math::TranslationFittingFunctor FittingFunctorType;
-  typedef vw::math::InterestPointErrorMetric  ErrorFunctorType;
+  //typedef vw::math::InterestPointErrorMetric  ErrorFunctorType;
+  typedef ErrorMetric  ErrorFunctorType;
   int    num_iterations         = 100;
-  double inlier_threshold       = 30; // Max point distance in pixels
-  int    min_num_output_inliers = 10; // Min pixels to count as a match.
+  double inlier_threshold       = 10; // Max point distance in pixels
+  int    min_num_output_inliers = 20; // Min pixels to count as a match.
   bool   reduce_min_num_output_inliers_if_no_fit = true;
   vw::math::RandomSampleConsensus<FittingFunctorType, ErrorFunctorType> 
       ransac_instance(FittingFunctorType(), ErrorFunctorType(), 
@@ -75,8 +92,13 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
   std::vector<cv::KeyPoint> keypointsA, keypointsB;
   cv::Mat descriptorsA, descriptorsB;  
 
-  cv::Ptr<cv::FeatureDetector    > detector  = cv::BRISK::create();
-  cv::Ptr<cv::DescriptorExtractor> extractor = cv::BRISK::create();
+  // TODO: May need to adaptively play around with this module!
+  //cv::Ptr<cv::FeatureDetector    > detector  = cv::BRISK::create();
+  //cv::Ptr<cv::DescriptorExtractor> extractor = cv::BRISK::create();
+  cv::Ptr<cv::FeatureDetector    > detector  = cv::ORB::create();
+  cv::Ptr<cv::DescriptorExtractor> extractor = cv::ORB::create();
+  //cv::Ptr<cv::FeatureDetector    > detector  = cv::xfeatures2d::SIFT::create();
+  //cv::Ptr<cv::DescriptorExtractor> extractor = cv::xfeatures2d::SIFT::create();
 
   detector->detect(  refImage, keypointsA);
   extractor->compute(refImage, keypointsA, descriptorsA);
@@ -126,12 +148,12 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
   printf("-- Max dist : %f \n", max_dist );
   printf("-- Min dist : %f \n", min_dist );
 
-  //-- Pick out "good" matches
-  float goodDist = 110;
+  //-- Pick out "good" matches --> May need to adaptively set this one!
+  float goodDist = 100;
   //if (argc > 3)
   //  goodDist = atof(argv[3]);
   std::vector< cv::DMatch > good_matches;
-  for (int i=0; i<descriptorsA.rows; i++)
+  for (int i=0; i<matches.size(); i++)
   { 
     // First verify that the match is valid
     if ( (matches[i].queryIdx < 0) ||
@@ -146,11 +168,12 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
     }
   }
   //good_matches = matches;
+  printf("Found %d good matches\n", good_matches.size());
 
   // Compute a transform between the images using RANSAC
   std::vector<cv::Point2f> refPts;
   std::vector<cv::Point2f> matchPts;
-  for( int i = 0; i < good_matches.size(); i++ )
+  for(size_t i = 0; i < good_matches.size(); i++ )
   {
     // Get the keypoints from the good matches
     refPts.push_back  (keypointsA[good_matches[i].queryIdx].pt);
@@ -160,11 +183,9 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
     //        refPts[i].x-matchPts[i].x, refPts[i].y-matchPts[i].y);
   }
   // Compute a transform using the Vision Workbench RANSAC tool
-  cv::Mat H;
-  vwRansacAffine(matchPts, refPts, H);
-  std::cout << "H = \n" << H << std::endl;
+  vwRansacAffine(matchPts, refPts, transform);
    
-  cv::perspectiveTransform(matchPts, refPts, H);
+  cv::perspectiveTransform(matchPts, refPts, transform);
   for( int i = 0; i < good_matches.size(); i++ )
   {
     //printf("Pair: HRSC(%lf, %lf) ==> NOEL(%lf, %lf),  DIFF = (%lf, %lf)\n", 
@@ -182,20 +203,20 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
   std::vector<cv::Point2f> ptsIn, ptsOut;
   for (int r=25; r<matchImage.rows; r+=400)
   {
-    for (int c=25; c<matchImage.cols; c+=160)
+    for (int c=25; c<matchImage.cols; c+=150)
     {
       cv::Point2f ptIn(c,r); // Point in the HRSC image
       ptsIn.push_back(ptIn);
     }
   }
-  cv::perspectiveTransform(ptsIn, ptsOut, H);
-  for (size_t i=0; i<matchPts.size(); i+=4)
+  cv::perspectiveTransform(ptsIn, ptsOut, transform);
+  for (size_t i=0; i<ptsIn.size(); i+=4)
   {
-    cv::Point2f matchPt(matchPts[i] + cv::Point2f(refImage.cols, 0));
-    cv::Point2f refPt(refPts[i]); // Point in the reference image
+    cv::Point2f matchPt(ptsIn[i] + cv::Point2f(refImage.cols, 0));
+    cv::Point2f refPt(ptsOut[i]); // Point in the reference image
     //printf("OUT Pair: HRSC(%lf, %lf) ==> NOEL(%lf, %lf) \n", ptsIn[i].x, ptsIn[i].y, ptsOut[i].x, ptsOut[i].y);
     //std::cout << "RefPt = " << refPt << std::endl;
-    cv::line(matches_image, matchPt, refPt, cv::Scalar(0, 255, 0), 1);
+    cv::line(matches_image, matchPt, refPt, cv::Scalar(0, 255, 0), 3);
   }
                        
   //cv::imshow( "BRISK All Matches", matches_image );
@@ -209,46 +230,6 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
 }
 
 
-/// Replace the Value channel of the input HSV image
-bool replaceValue(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, const cv::Mat &nadir, cv::Mat &outputImage)
-{
-  printf("Converting image...\n");
-  
-  // Convert the input image to HSV
-  cv::Mat hsvImage;
-  cv::cvtColor(baseImageRgb, hsvImage, cv::COLOR_BGR2HSV);
- 
-  printf("Replacing value channel...\n");
- 
-  // TODO: There must be a better way to do this using OpenCV!
-  // Replace the value channel
-  //cv::Mat outputMask;
-  bool gotValue;
-  for (int r=0; r<baseImageRgb.rows; ++r)
-  {
-    for (int c=0; c<baseImageRgb.cols; ++c)
-    {     
-      float matchX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
-      float matchY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
-      
-      unsigned char newVal = interpPixel<unsigned char>(nadir, nadir, matchX, matchY, gotValue);
-      //hsvImage.at<unsigned char>(r,c, 2) = newVal;
-      if (gotValue)
-        hsvImage.at<cv::Vec3b>(r,c)[2] = newVal;
-    }
-  }
-  cv::cvtColor(hsvImage, outputImage, cv::COLOR_HSV2BGR);
-  
-  cv::imwrite("value_replaced_image.jpeg", outputImage);
-  
-  //cv::namedWindow("Display Image", cv::WINDOW_AUTOSIZE );
-  //cv::imshow("Display Image", outputImage);
-  //cv::waitKey(0);
-  
-  printf("Finished replacing value\n");
-  return true;
-
-}
 
 //=============================================================
 

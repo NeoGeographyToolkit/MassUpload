@@ -6,13 +6,13 @@ import IrgGeoFunctions
 """
 TODO:
 
-
-
-- Generate an image 
+- Break out python tool for doing all the steps for a single HRSC image.
+- Make sure the same set HRSC images line up properly!
+- Update main python tool to paste all four test images on to the basemap.
 - Algorithm to smooth out transitions.
 - Generate a good result image.
 - Generate a list of features Earth Engine would need to replicate all steps.
-
+- Switch the code to a real tiling scheme.
 - Better mask handling
 
 Existing tools:
@@ -30,33 +30,122 @@ Existing tools:
 
 """
 
-fullBasemapPath    = '/home/smcmich1/data/hrscMapTest/noel_basemap.tif'
-cropBasemapPath = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'
-hrscInputPaths = ['/home/smcmich1/data/hrscMapTest/h0022_0000_re3.tif',
-                  '/home/smcmich1/data/hrscMapTest/h0022_0000_gr3.tif',
-                  '/home/smcmich1/data/hrscMapTest/h0022_0000_bl3.tif',
-                  '/home/smcmich1/data/hrscMapTest/h0022_0000_ir3.tif',
-                  '/home/smcmich1/data/hrscMapTest/h0022_0000_nd3.tif']
+#----------------------------------------------------------------------------
+
+# The proj4 string defining the space the base map is projected in
+PROJ4_STRING = "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
+
+# The order that HRSC channel images are stored
 HRSC_RED   = 0
 HRSC_GREEN = 1
 HRSC_BLUE  = 2
 HRSC_NIR   = 3
 HRSC_NADIR = 4
 
+def getHrscChannelPaths(hrscBasePath):
+    '''Get the list of all HRSC channel paths from the base path'''
+    return [hrscBasePath+'_re3.tif', # TODO: Take out these space things later
+            hrscBasePath+'_gr3.tif',
+            hrscBasePath+'_bl3.tif',
+            hrscBasePath+'_ir3.tif',
+            hrscBasePath+'_nd3.tif']
+
+def cmdRunner(cmd, outputPath, force=False):
+    '''Executes a command if the output file does not exist and
+       throws if the output file is not created'''
+
+    if not os.path.exists(outputPath) or force:
+        print cmd
+        os.system(cmd)
+    if not os.path.exists(outputPath):
+        raise Exception('Failed to create output file: ' + outputPath)
+    return True
+
+def warpHrscFile(sourcePath, outputFolder, metersPerPixel):
+    '''Warps an HRSC file into the same projection space as the base map'''
+    fileName   = sourcePath[sourcePath.rfind('/')+1:]
+    warpedPath = os.path.join(outputFolder, fileName)[:-4] + '_resample.tif'
+    cmd = (GDAL_DIR+'gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
+             ' -t_srs "'+PROJ4_STRING+'" -tr '
+             + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
+    cmdRunner(cmd, warpedPath)
+    return warpedPath
+
+
+def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, outputFolder, metersPerPixel):
+    '''Convert from HRSC color channels to an RGB image that matches the basemap colors'''
+
+    # Set up all of the paths for this HRSC data set
+    setName              = hrscBasePathIn[hrscBasePathIn.rfind('/')+1:]
+    hrscBasePathOut      = os.path.join(outputFolder, setName)
+    spatialTransformPath = hrscBasePathOut+'_spatial_transform.csv'
+    colorPairPath        = hrscBasePathOut+'_color_pairs.csv'
+    colorTransformPath   = hrscBasePathOut+'_color_transform.csv'
+    hrscNewColorPath     = hrscBasePathOut+'_new_color.tif'
+    hrscInputPaths       = getHrscChannelPaths(hrscBasePathIn)
+   
+    # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
+    hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), metersPerPixel) for path in hrscInputPaths]
+       
+    # For convenience generate a string containing all the input channel files
+    hrscPathString = ''
+    for path in hrscWarpedPaths:
+        hrscPathString += path + ' '
+    
+    # Generate the spatial transform
+    cmd = './RegisterHrsc ' + basemapGrayPath +' '+ hrscWarpedPaths[HRSC_NADIR] +' '+ spatialTransformPath
+    cmdRunner(cmd, spatialTransformPath)
+
+    #raise Exception('DEBUG')
+    
+    # Generate the color pairs
+    cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ colorPairPath
+    cmdRunner(cmd, colorPairPath)
+    
+    # Compute the color transform
+    cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + colorTransformPath +' '+ colorPairPath 
+    cmdRunner(cmd, colorTransformPath)
+    
+    
+    # Transform the HRSC image color
+    cmd = './transformHrscImageColor ' + basemapCropPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ hrscNewColorPath
+    cmdRunner(cmd, hrscNewColorPath)
+
+    return hrscNewColorPath, spatialTransformPath
+
+
+
+
+
+
+#-------------------------------------------------------------------
+
+
+fullBasemapPath      = '/home/smcmich1/data/hrscMapTest/noel_basemap.tif'
+cropBasemapSmallPath = '/home/smcmich1/data/hrscMapTest/basemap_crop_small.tif'
+cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'
+cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_red.tif'
+
+#hrscBasePathIn  = '/home/smcmich1/data/hrscMapTest/h0022_0000'
+#hrscBasePathOut = '/home/smcmich1/data/hrscMapTest/h0022_0000'
+hrscBasePathIn  = '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000'
+outputFolder    = '/home/smcmich1/data/hrscMapTest/'
 
 GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
 
 print 'Starting basemap enhancement script...'
 
+# TODO: Clean up and restore this top section
+
 # Get the HRSC bounding box and expand it
 HRSC_BB_EXPAND_DEGREES = 1.5
-(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscInputPaths[4])
+(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathIn+'_nd3.tif')
 minLon -= HRSC_BB_EXPAND_DEGREES
 maxLon += HRSC_BB_EXPAND_DEGREES
 minLat -= HRSC_BB_EXPAND_DEGREES
 maxLat += HRSC_BB_EXPAND_DEGREES
 
-print str((minLon, maxLon, minLat, maxLat))
+print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
 
 
 # Convert the bounding box from degrees to the projected coordinate system (meters)
@@ -69,77 +158,30 @@ maxY = maxLat*DEGREES_TO_PROJECTION_METERS
 
 # Crop out the correct section of the base map
 projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
-if False:#not os.path.exists(redCroppedPath):
-    #cmd = (GDAL_DIR+'gdal_translate ' + redBasemapPath +' '+ redCroppedPath
-    #                         +' -projwin '+ projCoordString)
-    cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ redCroppedPath
-                             +' -projwin '+ projCoordString)
-    print cmd
-    os.system(cmd)
+cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ cropBasemapSmallPath
+                         +' -projwin '+ projCoordString)
+cmdRunner(cmd, cropBasemapSmallPath)
 
 # Increase the resolution of the cropped image
 # TODO: Can this be done in one step?
 RESOLUTION_INCREASE = 200 # In percent
-if False:#not os.path.exists(redCropHighResPath):
-    cmd = (GDAL_DIR+'gdal_translate ' + redCroppedPath +' '+ redCropHighResPath
-                             +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
-    print cmd
-    os.system(cmd)
+cmd = (GDAL_DIR+'gdal_translate ' + cropBasemapSmallPath +' '+ cropBasemapPath
+       +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
+cmdRunner(cmd, cropBasemapPath)
 
 
-
-def warpHrscFile(sourcePath, metersPerPixel):
-    warpedPath = sourcePath[:-4] + '_resample.tif'
-    if not os.path.exists(warpedPath):
-        cmd = (GDAL_DIR+'gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
-                 ' -t_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -tr '
-                 + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
-        print cmd
-        os.system(cmd)
-    return warpedPath
+# Generate the grayscale version of the cropped basemap
+cmd = (GDAL_DIR+'gdal_translate -b 1 ' + cropBasemapPath +' '+ cropBasemapGrayPath)
+cmdRunner(cmd, cropBasemapGrayPath)
 
 # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
-highResMetersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-hrscWarpedPaths       = [warpHrscFile(path, highResMetersPerPixel) for path in hrscInputPaths]
-
-
-hrscPathString = ''
-for path in hrscWarpedPaths:
-    hrscPathString += path + ' '
-
-# TODO: Don't hardcode this
-spatialTransformPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_spatial_transform.csv'
-
-# Generate the color pairs
-colorPairPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_color_pairs.csv'
-if not os.path.exists(colorPairPath):
-    cmd = './writeHrscColorPairs ' + cropBasemapPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ colorPairPath
-    print cmd
-    os.system(cmd)
-
-
-# Compute the color transform
-colorTransformPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_color_transform.csv'
-if not os.path.exists(colorTransformPath):
-    cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + colorTransformPath +' '+ colorPairPath 
-    print cmd
-    os.system(cmd)
-
-
-# Transform the HRSC image color
-hrscNewColorPath = '/home/smcmich1/data/hrscMapTest/h0022_0000_new_color.tif'
-if not os.path.exists(hrscNewColorPath):
-    cmd = './transformHrscImageColor ' + cropBasemapPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ hrscNewColorPath
-    print cmd
-    os.system(cmd)
+metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
+hrscNewColorPath, spatialTransformPath = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscBasePathIn, outputFolder, metersPerPixel)
 
 
 mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
-if True:#not os.path.exists(mosaicPath):
-    cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
-    print cmd
-    os.system(cmd)
-
+cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
+cmdRunner(cmd, mosaicPath)
 
 raise Exception('DEBUG')
 

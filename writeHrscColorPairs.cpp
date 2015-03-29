@@ -58,7 +58,7 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
                      const std::string outputPath)
 {
   // Control what percentage of the pixel pairs we use
-  const int SAMPLE_DIST = 10;
+  const int SAMPLE_DIST = 25;
  
 
   std::ofstream outputFile(outputPath.c_str());
@@ -78,6 +78,7 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
       // Compute the equivalent location in the basemap image
       float baseX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
       float baseY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
+      //printf("%d, %d --> %lf, %lf\n", r, c, baseX, baseY);
       
       // Extract all of the basemap values at that location
       baseValues = interpPixelRgb(basemapImage, baseX, baseY, gotValue);
@@ -114,7 +115,7 @@ int main(int argc, char** argv)
     return -1;
   }
   
-  // Load the input images  
+  printf("Loading input images...\n");
   cv::Mat basemapImage, spatialTransform;
   std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
@@ -124,6 +125,7 @@ int main(int argc, char** argv)
   // TODO: The spatial transform should be from HRSC to BASEMAP
 
   // Generate the list of color pairs
+  printf("Writing pixel pairs...\n");
   writeColorPairs(basemapImage, spatialTransform, hrscChannels, outputPath);
 
   return 0;

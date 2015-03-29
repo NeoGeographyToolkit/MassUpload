@@ -126,27 +126,32 @@ cropBasemapSmallPath = '/home/smcmich1/data/hrscMapTest/basemap_crop_small.tif'
 cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'
 cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_red.tif'
 
-#hrscBasePathIn  = '/home/smcmich1/data/hrscMapTest/h0022_0000'
-#hrscBasePathOut = '/home/smcmich1/data/hrscMapTest/h0022_0000'
-hrscBasePathIn  = '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000'
+
+hrscBasePathInList = ['/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
+
 outputFolder    = '/home/smcmich1/data/hrscMapTest/'
 
 GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
 
 print 'Starting basemap enhancement script...'
 
-# TODO: Clean up and restore this top section
+
+#---------------------------
+# Prep the base map
+# - For now we extract an arbitrary chunk, later this will be tiled.
 
 # Get the HRSC bounding box and expand it
 HRSC_BB_EXPAND_DEGREES = 1.5
-(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathIn+'_nd3.tif')
+(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
 minLon -= HRSC_BB_EXPAND_DEGREES
 maxLon += HRSC_BB_EXPAND_DEGREES
 minLat -= HRSC_BB_EXPAND_DEGREES
 maxLat += HRSC_BB_EXPAND_DEGREES
 
 print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
-
 
 # Convert the bounding box from degrees to the projected coordinate system (meters)
 DEGREES_TO_PROJECTION_METERS = 59274.9
@@ -169,19 +174,27 @@ cmd = (GDAL_DIR+'gdal_translate ' + cropBasemapSmallPath +' '+ cropBasemapPath
        +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
 cmdRunner(cmd, cropBasemapPath)
 
-
 # Generate the grayscale version of the cropped basemap
 cmd = (GDAL_DIR+'gdal_translate -b 1 ' + cropBasemapPath +' '+ cropBasemapGrayPath)
 cmdRunner(cmd, cropBasemapGrayPath)
 
-# Transform the HRSC image to the same projection/resolution as the upsampled base map crop
-metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-hrscNewColorPath, spatialTransformPath = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscBasePathIn, outputFolder, metersPerPixel)
+
+#------------------------------------
+# Process the individual HRSC images and add them to the mosaic
+
+for hrscPath in hrscBasePathInList:
+
+    # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
+    metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
+    hrscNewColorPath, spatialTransformPath = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscPath, outputFolder, metersPerPixel)
 
 
-mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
-cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
-cmdRunner(cmd, mosaicPath)
+    mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
+    if os.path.exists(mosaicPath):
+        cmd = './hrscMosaic ' + mosaicPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
+    else:
+        cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
+    cmdRunner(cmd, mosaicPath, True)
 
 raise Exception('DEBUG')
 
@@ -247,7 +260,12 @@ Iterate through the base tile and for each pixel use the transform to find the m
 
 
 
-
+Manually checked spatial transforms:
+h0022 = 282, 1190
+h0506 = 80.6, 1323
+h2411 = 243, 2389
+h6419 = 295, 1829
+---> Need to be able to compute these automatically!
 
 
 """

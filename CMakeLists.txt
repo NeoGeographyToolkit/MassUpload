@@ -118,5 +118,8 @@ target_link_libraries( transformHrscImageColor ${OpenCV_LIBS} ${Boost_LIBRARIES}
 add_executable( hrscMosaic hrscMosaic.cpp )
 target_link_libraries( hrscMosaic ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
+add_executable( computeBrightnessCorrection computeBrightnessCorrection.cpp )
+target_link_libraries( computeBrightnessCorrection ${OpenCV_LIBS} ${Boost_LIBRARIES})
+
 
 

@@ -6,13 +6,14 @@ import IrgGeoFunctions
 """
 TODO:
 
-- Break out python tool for doing all the steps for a single HRSC image.
-- Make sure the same set HRSC images line up properly!
-- Update main python tool to paste all four test images on to the basemap.
 - Algorithm to smooth out transitions.
 - Generate a good result image.
 - Generate a list of features Earth Engine would need to replicate all steps.
 - Switch the code to a real tiling scheme.
+- Make sure the same set HRSC images line up properly
+    - This will become apparent at higher resolutions!
+    - We can't just treat them as perfectly aligned!
+    --> Treat Nadir image as the standard and align other images to it.
 - Better mask handling
 
 Existing tools:
@@ -79,6 +80,7 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
     setName              = hrscBasePathIn[hrscBasePathIn.rfind('/')+1:]
     hrscBasePathOut      = os.path.join(outputFolder, setName)
     spatialTransformPath = hrscBasePathOut+'_spatial_transform.csv'
+    brightnessGainsPath  = hrscBasePathOut+'_brightness_gains.csv'
     colorPairPath        = hrscBasePathOut+'_color_pairs.csv'
     colorTransformPath   = hrscBasePathOut+'_color_transform.csv'
     hrscNewColorPath     = hrscBasePathOut+'_new_color.tif'
@@ -96,20 +98,22 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
     cmd = './RegisterHrsc ' + basemapGrayPath +' '+ hrscWarpedPaths[HRSC_NADIR] +' '+ spatialTransformPath
     cmdRunner(cmd, spatialTransformPath)
 
-    #raise Exception('DEBUG')
+    # Compute the brightness scaling gains
+    cmd = './computeBrightnessCorrection ' + basemapGrayPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ brightnessGainsPath
+    cmdRunner(cmd, brightnessGainsPath, True)
     
     # Generate the color pairs
-    cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ colorPairPath
-    cmdRunner(cmd, colorPairPath)
+    cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ brightnessGainsPath +' '+ colorPairPath
+    cmdRunner(cmd, colorPairPath, True)
     
     # Compute the color transform
     cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + colorTransformPath +' '+ colorPairPath 
-    cmdRunner(cmd, colorTransformPath)
+    cmdRunner(cmd, colorTransformPath, True)
     
     
     # Transform the HRSC image color
-    cmd = './transformHrscImageColor ' + basemapCropPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ hrscNewColorPath
-    cmdRunner(cmd, hrscNewColorPath)
+    cmd = './transformHrscImageColor ' + basemapCropPath +' '+ hrscPathString +' '+ colorTransformPath +' '+ brightnessGainsPath +' '+ hrscNewColorPath
+    cmdRunner(cmd, hrscNewColorPath, True)
 
     return hrscNewColorPath, spatialTransformPath
 
@@ -142,41 +146,41 @@ print 'Starting basemap enhancement script...'
 #---------------------------
 # Prep the base map
 # - For now we extract an arbitrary chunk, later this will be tiled.
-
-# Get the HRSC bounding box and expand it
-HRSC_BB_EXPAND_DEGREES = 1.5
-(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
-minLon -= HRSC_BB_EXPAND_DEGREES
-maxLon += HRSC_BB_EXPAND_DEGREES
-minLat -= HRSC_BB_EXPAND_DEGREES
-maxLat += HRSC_BB_EXPAND_DEGREES
-
-print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
-
-# Convert the bounding box from degrees to the projected coordinate system (meters)
+#
+## Get the HRSC bounding box and expand it
+#HRSC_BB_EXPAND_DEGREES = 1.5
+#(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
+#minLon -= HRSC_BB_EXPAND_DEGREES
+#maxLon += HRSC_BB_EXPAND_DEGREES
+#minLat -= HRSC_BB_EXPAND_DEGREES
+#maxLat += HRSC_BB_EXPAND_DEGREES
+#
+#print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
+#
+## Convert the bounding box from degrees to the projected coordinate system (meters)
 DEGREES_TO_PROJECTION_METERS = 59274.9
 NOEL_MAP_METERS_PER_PIXEL = 1852.4
-minX = minLon*DEGREES_TO_PROJECTION_METERS
-maxX = maxLon*DEGREES_TO_PROJECTION_METERS
-minY = minLat*DEGREES_TO_PROJECTION_METERS
-maxY = maxLat*DEGREES_TO_PROJECTION_METERS
-
-# Crop out the correct section of the base map
-projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
-cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ cropBasemapSmallPath
-                         +' -projwin '+ projCoordString)
-cmdRunner(cmd, cropBasemapSmallPath)
-
-# Increase the resolution of the cropped image
-# TODO: Can this be done in one step?
+#minX = minLon*DEGREES_TO_PROJECTION_METERS
+#maxX = maxLon*DEGREES_TO_PROJECTION_METERS
+#minY = minLat*DEGREES_TO_PROJECTION_METERS
+#maxY = maxLat*DEGREES_TO_PROJECTION_METERS
+#
+## Crop out the correct section of the base map
+#projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
+#cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ cropBasemapSmallPath
+#                         +' -projwin '+ projCoordString)
+#cmdRunner(cmd, cropBasemapSmallPath)
+#
+## Increase the resolution of the cropped image
+## TODO: Can this be done in one step?
 RESOLUTION_INCREASE = 200 # In percent
-cmd = (GDAL_DIR+'gdal_translate ' + cropBasemapSmallPath +' '+ cropBasemapPath
-       +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
-cmdRunner(cmd, cropBasemapPath)
-
-# Generate the grayscale version of the cropped basemap
-cmd = (GDAL_DIR+'gdal_translate -b 1 ' + cropBasemapPath +' '+ cropBasemapGrayPath)
-cmdRunner(cmd, cropBasemapGrayPath)
+#cmd = (GDAL_DIR+'gdal_translate ' + cropBasemapSmallPath +' '+ cropBasemapPath
+#       +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
+#cmdRunner(cmd, cropBasemapPath)
+#
+## Generate the grayscale version of the cropped basemap
+#cmd = (GDAL_DIR+'gdal_translate -b 1 ' + cropBasemapPath +' '+ cropBasemapGrayPath)
+#cmdRunner(cmd, cropBasemapGrayPath)
 
 
 #------------------------------------
@@ -196,7 +200,7 @@ for hrscPath in hrscBasePathInList:
         cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ hrscNewColorPath +' '+ spatialTransformPath
     cmdRunner(cmd, mosaicPath, True)
 
-raise Exception('DEBUG')
+    #raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

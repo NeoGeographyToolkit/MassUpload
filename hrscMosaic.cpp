@@ -70,8 +70,8 @@ bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &s
     for (int c=0; c<outputImage.cols; c++)
     {        
       // Compute the equivalent location in the basemap image
-      float interpX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
-      float interpY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
+      float interpX, interpY;
+      affineTransform(spatialTransform, c, r, interpX, interpY);
       
       // Extract all of the basemap values at that location
       pastePixel = interpPixelRgb(imageToAdd, interpX, interpY, gotValue);

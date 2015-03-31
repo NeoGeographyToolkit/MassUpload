@@ -12,9 +12,11 @@
 const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
-
-
-
+void affineTransform(const cv::Mat &transform, float xIn, float yIn, float &xOut, float &yOut)
+{
+  xOut = xIn*transform.at<float>(0,0) + yIn*transform.at<float>(0,1) + transform.at<float>(0,2);
+  yOut = xIn*transform.at<float>(1,0) + yIn*transform.at<float>(1,1) + transform.at<float>(1,2);
+}
 
 template <typename T>
 T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool &gotValue)
@@ -109,7 +111,41 @@ cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
 }
 
 
+/// Computes the ROI of one image in another given the transform with bounds checking.
+cv::Rect_<int> getboundsInOtherImage(const cv::Mat &imageA, const cv::Mat &imageB, const cv::Mat &transB_to_A)
+{
+  // Transform the four corners of imageB
+  float x[4], y[4];
+  affineTransform(transB_to_A, 0,             0,             x[0], y[0]);
+  affineTransform(transB_to_A, imageB.cols-1, 0,             x[1], y[1]);
+  affineTransform(transB_to_A, imageB.cols-1, imageB.rows-1, x[2], y[2]);
+  affineTransform(transB_to_A, 0,             imageB.rows-1, x[3], y[3]);
+  
+  // Get the bounding box of the transformed points
+  float xMin = x[0];
+  float xMax = x[0];
+  float yMin = y[0];
+  float yMax = y[0];
+  for (size_t i=0; i<4; ++i)
+  {
+    if (x[i] < xMin) xMin = x[i];
+    if (x[i] > xMax) xMax = x[i];
+    if (y[i] < yMin) yMin = y[i];
+    if (y[i] > yMax) yMax = y[i];
+  }
+  
+  if (xMin < 0) xMin = 0;
+  if (yMin < 0) yMin = 0;
+  if (xMax > imageA.cols-1) xMax = imageA.cols-1;
+  if (yMax > imageA.rows-1) yMax = imageA.rows-1;
 
+  // Return the results expanded to the nearest integer
+  cv::Rect_<int> boundsInA(static_cast<int>(floor(xMin)), 
+                           static_cast<int>(floor(yMin)),
+                           static_cast<int>(ceil(xMax-xMin)), 
+                           static_cast<int>(ceil(yMax-yMin)));
+  return boundsInA;
+}
 
 /// Write a small matrix to a text file
 bool writeTransform(const std::string &outputPath, const cv::Mat &transform)
@@ -136,7 +172,7 @@ bool readTransform(const std::string &inputPath, cv::Mat &transform)
   char   comma;
   size_t numRows, numCols;
   file >> numRows >> comma >> numCols;
-  transform = cv::Mat(numRows, numCols, CV_32FC1);
+  transform.create(numRows, numCols, CV_32FC1);
   for (size_t r=0; r<transform.rows; ++r)
   {
     for (size_t c=0; c<transform.cols-1; ++c)
@@ -151,9 +187,60 @@ bool readTransform(const std::string &inputPath, cv::Mat &transform)
 }
 
 
+/// Helper class for working with brightness information
+class BrightnessCorrector
+{
+public:
 
+  /// Data loading options
+  BrightnessCorrector() {}
+  BrightnessCorrector(cv::Mat &gain, cv::Mat &offset) : _gain(gain), _offset(offset) { }
+  void set(cv::Mat &gain, cv::Mat &offset) { _gain = gain; _offset = offset; }
 
+  /// Write a gain/offset pair to a CSV file
+  bool writeProfileCorrection(const std::string &outputPath) const
+  {
+    std::ofstream file(outputPath.c_str());
+    file << _gain.rows << std::endl;
+    for (size_t r=0; r<_gain.rows; ++r)
+    {
+      file << _gain.at<float>(r,0) << ", " << _offset.at<float>(r,0) << std::endl;
+    }
+    file.close();
+    return (!file.fail());
+  }
 
+  /// Write a gain/offset pair to a CSV file
+  bool readProfileCorrection(const std::string &inputPath)
+  {
+    std::ifstream file(inputPath.c_str());
+    char   comma;
+    size_t numRows;
+    file >> numRows;
+    _gain.create(numRows, 1, CV_32FC1);
+    _offset.create(numRows, 1, CV_32FC1);
+    for (size_t r=0; r<numRows; ++r)
+    {
+      file >> _gain.at<float>(r,0) >> comma >> _offset.at<float>(r,0);
+    }
+    file.close();   
+    return (!file.fail());
+  }
+
+  /// Get the corrected value of a single pixel
+  unsigned char correctPixel(unsigned char inputPixel, int row) const
+  {
+    float result = static_cast<float>(inputPixel) * _gain.at<float>(row,0);
+    if (result <   0.0) result = 0.0;  // Clamp the output value
+    if (result > 255.0) result = 255.0;
+    return static_cast<unsigned char>(result);
+  }
+  
+private:
+
+  cv::Mat _gain;
+  cv::Mat _offset;
+};
 
 
 

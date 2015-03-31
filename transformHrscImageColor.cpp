@@ -10,7 +10,7 @@
 
 
 bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<cv::Mat> &hrscChannels, 
-                     cv::Mat &transform, std::string &outputPath)
+                     cv::Mat &transform, BrightnessCorrector &corrector, std::string &outputPath)
 {
   std::vector<std::string> hrscPaths(NUM_HRSC_CHANNELS);
   std::string baseImagePath = argv[1];
@@ -20,7 +20,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   hrscPaths[3] = argv[5]; // NIR
   hrscPaths[4] = argv[6]; // NADIR
   std::string colorTransformPath = argv[7];
-  outputPath  = argv[8];
+  std::string brightnessPath     = argv[8];
+  outputPath  = argv[9];
   
 
   const int LOAD_GRAY = 0;
@@ -49,13 +50,17 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   if (!readTransform(colorTransformPath, transform))
     return false;
 
+  // Load brightness correction data
+  if (!corrector.readProfileCorrection(brightnessPath))
+    return false;
+
   return true;
 }
 
 /// Apply a color transform matrix to the HRSC bands.
 /// - This is a 5x3 matrix.
 bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransform, const std::vector<cv::Mat> hrscChannels,
-                        cv::Mat &outputImage)
+                        const BrightnessCorrector &corrector, cv::Mat &outputImage)
 {
   // Initialize the output image
   const size_t numRows = hrscChannels[0].rows;
@@ -70,6 +75,7 @@ bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransfo
     for (int c=0; c<numCols; c+=1)
     {  
       // Check to see if this pixel should be masked out   
+      // - Apply the brightness correction while we are at it.
       bool maskOut = false;
       for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
       {
@@ -79,6 +85,7 @@ bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransfo
           maskOut = true;
           break;
         }
+        hrscPixel[i] = corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r); // Correct brightness
       }
       // If any of input HRSC pixels are black, the output pixel is black.
       // TODO: A smarter mask method!
@@ -94,11 +101,13 @@ bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransfo
         outputPixel[j] = 0;
         float temp = 0.0;
         for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
-           temp += static_cast<float>(hrscPixel[i])*colorTransform.at<float>(i,j);
-         if (temp < 0.0)
-           temp = 0;
-         if (temp > 255.0)
-           temp = 255.0;
+        {
+          temp += static_cast<float>(hrscPixel[i])*colorTransform.at<float>(i,j);
+        }
+        if (temp < 0.0)
+          temp = 0;
+        if (temp > 255.0)
+          temp = 255.0;
         outputPixel[j] = static_cast<unsigned char>(temp);
       }
       // Store in output image
@@ -116,9 +125,9 @@ bool transformHrscColor(const cv::Mat &basemapImage, const cv::Mat &colorTransfo
 int main(int argc, char** argv)
 {
   // Check input arguments
-  if (argc < 9)
+  if (argc < 10)
   {
-    printf("usage: transformHrscImageColor <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Color Transform File Path> <Output Path>\n");
+    printf("usage: transformHrscImageColor <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Color Transform File Path> <Brightness File Path> <Output Path>\n");
     return -1;
   }
   
@@ -126,14 +135,15 @@ int main(int argc, char** argv)
   cv::Mat basemapImage, colorTransform;
   std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
-  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, colorTransform, outputPath))
+  BrightnessCorrector corrector;
+  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, colorTransform, corrector, outputPath))
     return -1;
 
   // The color transform is from HRSC to the basemap.
 
   // Generate the transformed color image
   cv::Mat newColorImage;
-  transformHrscColor(basemapImage, colorTransform, hrscChannels, newColorImage);
+  transformHrscColor(basemapImage, colorTransform, hrscChannels, corrector, newColorImage);
 
 
   // TODO: Apply unsharp masking to the color image

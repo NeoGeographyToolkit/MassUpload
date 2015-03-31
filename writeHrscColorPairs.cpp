@@ -10,7 +10,7 @@
 
 
 bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<cv::Mat> &hrscChannels, 
-                     cv::Mat &transform, std::string &outputPath)
+                     cv::Mat &transform, BrightnessCorrector &corrector, std::string &outputPath)
 {
   std::vector<std::string> hrscPaths(NUM_HRSC_CHANNELS);
   std::string baseImagePath = argv[1];
@@ -20,7 +20,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   hrscPaths[3] = argv[5]; // NIR
   hrscPaths[4] = argv[6]; // NADIR
   std::string spatialTransformPath = argv[7];
-  outputPath  = argv[8];
+  std::string brightnessPath = argv[8];
+  outputPath  = argv[9];
   
 
   const int LOAD_GRAY = 0;
@@ -49,13 +50,17 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   if (!readTransform(spatialTransformPath, transform))
     return false;
 
+  // Load brightness correction data
+  if (!corrector.readProfileCorrection(brightnessPath))
+    return false;
+
   return true;
 }
 
 /// Generate a list of matched pixels for the base map and HRSC images
 /// --> Format is "baseR, baseG, baseB, R, G, B, NIR, NADIR" 
-bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform, const std::vector<cv::Mat> hrscChannels,
-                     const std::string outputPath)
+bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform, const BrightnessCorrector &corrector,
+                     const std::vector<cv::Mat> hrscChannels, const std::string outputPath)
 {
   // Control what percentage of the pixel pairs we use
   const int SAMPLE_DIST = 25;
@@ -68,6 +73,7 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
   cv::Vec3b baseValues;
   for (int r=0; r<hrscChannels[0].rows; r+=SAMPLE_DIST)
   {
+  
     for (int c=0; c<hrscChannels[0].cols; c+=SAMPLE_DIST)
     {     
       // TODO: Do we need to check all channels?
@@ -76,9 +82,8 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
         continue;
     
       // Compute the equivalent location in the basemap image
-      float baseX = c*spatialTransform.at<float>(0,0) + r*spatialTransform.at<float>(0,1) + spatialTransform.at<float>(0,2);
-      float baseY = c*spatialTransform.at<float>(1,0) + r*spatialTransform.at<float>(1,1) + spatialTransform.at<float>(1,2);
-      //printf("%d, %d --> %lf, %lf\n", r, c, baseX, baseY);
+      float baseX, baseY;
+      affineTransform(spatialTransform, c, r, baseX, baseY);
       
       // Extract all of the basemap values at that location
       baseValues = interpPixelRgb(basemapImage, baseX, baseY, gotValue);
@@ -87,13 +92,14 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
       {
         for (size_t i=0; i<NUM_BASE_CHANNELS; ++i)
         {
-          outputFile << static_cast<int>(baseValues[i]) <<", ";
+          outputFile << static_cast<int>(baseValues[i]) <<", "; // Cast to int so we don't print ASCII
         }
+        // The HRSC values have a brightness correction applied
         for (size_t i=0; i<NUM_HRSC_CHANNELS-1; ++i)
         {
-          outputFile << static_cast<int>(hrscChannels[i].at<unsigned char>(r,c)) <<", ";
+          outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r))  <<", ";
         }
-        outputFile << static_cast<int>(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c)) << std::endl;
+        outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c), r)) << std::endl;
       }
     } // End col loop
   } // End row loop
@@ -109,24 +115,25 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
 int main(int argc, char** argv)
 {
   // Check input arguments
-  if (argc < 9)
+  if (argc != 10)
   {
-    printf("usage: WriteColorPairs <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Transform File Path> <Output Path>\n");
+    printf("usage: WriteColorPairs <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Transform File Path> <Brightness File Path> <Output Path>\n");
     return -1;
   }
   
   printf("Loading input images...\n");
-  cv::Mat basemapImage, spatialTransform;
+  cv::Mat basemapImage, spatialTransform, gain;
   std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
-  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, spatialTransform, outputPath))
+  BrightnessCorrector corrector;
+  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, spatialTransform, corrector, outputPath))
     return -1;
 
   // TODO: The spatial transform should be from HRSC to BASEMAP
 
   // Generate the list of color pairs
   printf("Writing pixel pairs...\n");
-  writeColorPairs(basemapImage, spatialTransform, hrscChannels, outputPath);
+  writeColorPairs(basemapImage, spatialTransform, corrector, hrscChannels, outputPath);
 
   return 0;
 }

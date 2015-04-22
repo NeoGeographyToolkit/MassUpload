@@ -60,7 +60,7 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
   cv::Rect_<int> baseBounds =  getboundsInOtherImage(inputImage, hrscChannels[0], spatialTransform);
 
   // Allocate the output storage
-  outputProfile.create(baseBounds.height, 1, CV_8UC1);
+  outputProfile.create(baseBounds.height, 1, CV_32FC1);
 
   // Loop through the input image
   for (int r=baseBounds.y; r<baseBounds.y+baseBounds.height; r++)
@@ -77,7 +77,7 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
     
     // Store the mean value for this row in the output image
     int i = r - baseBounds.y;
-    outputProfile.at<unsigned char>(i,0) = static_cast<unsigned char>(thisRowMean);
+    outputProfile.at<float>(i,0) = static_cast<float>(thisRowMean);
   } // End row loop
   
   return true;
@@ -90,7 +90,7 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, cv::Mat &outputPro
   // Allocate the output storage
   const int numRows = hrscChannels[0].rows;
   const int numCols = hrscChannels[0].cols;
-  outputProfile.create(numRows, 1, CV_8UC1);
+  outputProfile.create(numRows, 1, CV_32FC1);
   
   // Loop through the input image
   for (int r=0; r<numRows; r++)
@@ -110,7 +110,7 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, cv::Mat &outputPro
     thisRowMean /= static_cast<float>(numCols);
     
     // Store the mean value for this row in the output image
-    outputProfile.at<unsigned char>(r,0) = static_cast<unsigned char>(thisRowMean);
+    outputProfile.at<float>(r,0) = static_cast<float>(thisRowMean);
   } // End row loop
   
   return true; 
@@ -134,10 +134,12 @@ void computeGainOffsets(const cv::Mat &baseProfile, const cv::Mat &hrscProfile,
   {
     // Compute the row in the base profile, it should be close to r.
     int baseRow = static_cast<int>((float)r*rowGain);
+    //printf("HRSC row = %d --> Base row = %d\n", r, baseRow);
+    
     
     // For now we don't use the offset.
-    gains.at<  float>(r,0)  = (float)baseProfile.at<unsigned char>(baseRow,0) / 
-                              (float)hrscProfile.at<unsigned char>(r,0);
+    gains.at<  float>(r,0)  = (float)baseProfile.at<float>(baseRow,0) / 
+                              (float)hrscProfile.at<float>(r,0);
     offsets.at<float>(r,0) = 0.0;
   }
   brightness.set(gains, offsets);
@@ -169,11 +171,27 @@ int main(int argc, char** argv)
   rgbVertProfile(hrscChannels, spatialTransform, basemapImage,  basemapProfile);
   hrscVertProfile(hrscChannels, hrscProfile);
   
+  
+  //printf("/n/nInput basemapProfile profile\n");
+  //for (size_t r=0; r<30; ++r)
+  //{
+  //  std::cout << basemapProfile.at<float>(r,0) << std::endl;
+  //}
+  
   printf("Smoothing profiles...\n");
-  const int PROFILE_SMOOTHING_SIZE = 11;
+  const int    PROFILE_SMOOTHING_SIZE = 31;
+  const double SMOOTHING_SIGMA        = 21;  // TODO: Play with these values to improve quality
   cv::Mat basemapSmoothProfile, hrscSmoothProfile;
-  cv::GaussianBlur(basemapProfile, basemapSmoothProfile, cv::Size(PROFILE_SMOOTHING_SIZE, 1), 0, 0);
-  cv::GaussianBlur(hrscProfile,    hrscSmoothProfile,    cv::Size(PROFILE_SMOOTHING_SIZE, 1), 0, 0);
+  
+ 
+  cv::GaussianBlur(basemapProfile, basemapSmoothProfile, cv::Size(PROFILE_SMOOTHING_SIZE, PROFILE_SMOOTHING_SIZE), SMOOTHING_SIGMA, 0);
+  cv::GaussianBlur(hrscProfile,    hrscSmoothProfile,    cv::Size(PROFILE_SMOOTHING_SIZE, PROFILE_SMOOTHING_SIZE), SMOOTHING_SIGMA, 0);
+  
+  //printf("/n/nInput basemapProfile profile -- Smoothed: \n");
+  //for (size_t r=0; r<30; ++r)
+  //{
+  //  std::cout << basemapProfile.at<float>(r,0) << " --  " <<  basemapSmoothProfile.at<float>(r,0) << std::endl;
+  //}
 
   // Compute a gain/offset to equalize the profiles
   printf("Computing gains...\n");

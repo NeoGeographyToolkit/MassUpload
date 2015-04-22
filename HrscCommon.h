@@ -18,6 +18,7 @@ void affineTransform(const cv::Mat &transform, float xIn, float yIn, float &xOut
   yOut = xIn*transform.at<float>(1,0) + yIn*transform.at<float>(1,1) + transform.at<float>(1,2);
 }
 
+/// Single channel image interpolation
 template <typename T>
 T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool &gotValue)
 {
@@ -28,15 +29,15 @@ T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool 
   int y = (int)yF;
 
   // Get the bordering pixel coordinates, replacing out of bounds with zero.
-  int minX = BORDER_SIZE;
+  int minX = BORDER_SIZE; // Max legal pixel boundaries with the specified border.
   int minY = BORDER_SIZE;
   int maxX = img.cols-BORDER_SIZE;
   int maxY = img.rows-BORDER_SIZE;
-  int x0 = x;
+  int x0 = x;   // The coordinates of the four bordering pixels
   int x1 = x+1;
   int y0 = y;
   int y1 = y+1;
-  if ((x0 < minX) || (x0 >= maxX)) return 0;
+  if ((x0 < minX) || (x0 >= maxX)) return 0; // Quit if we exceed any of the borders.
   if ((x1 < minX) || (x1 >= maxX)) return 0;
   if ((y0 < minY) || (y0 >= maxY)) return 0;
   if ((y1 < minY) || (y1 >= maxY)) return 0;
@@ -65,7 +66,7 @@ T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool 
   return val;
 }
 
-
+/// As interpPixel but specialized for RGB
 cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
 {
   const size_t NUM_RGB_CHANNELS = 3;
@@ -89,7 +90,54 @@ cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
   if ((y0 < minY) || (y0 >= maxY)) return 0;
   if ((y1 < minY) || (y1 >= maxY)) return 0;
 
-  // Now interpolate each   
+  // Now interpolate each pixel channel
+
+  float a = xF - (float)x;
+  float c = yF - (float)y;
+  
+  cv::Vec3b outputPixel;
+  for (size_t i=0; i<NUM_RGB_CHANNELS; ++i)
+  {
+    float v00 = static_cast<float>(img.at<cv::Vec3b>(y0, x0)[i]);
+    float v01 = static_cast<float>(img.at<cv::Vec3b>(y0, x1)[i]);
+    float v10 = static_cast<float>(img.at<cv::Vec3b>(y1, x0)[i]);
+    float v11 = static_cast<float>(img.at<cv::Vec3b>(y1, x1)[i]);
+
+    outputPixel[i] = static_cast<unsigned char>( v00*(1-a)*(1-c)  + v10*a*(1-c) + v01*(1-a)*c + v11*a*c );
+
+  }
+
+  gotValue = true;
+  return outputPixel;
+}
+
+/// As interpPixelRgb but with pixels near the edges handled by mirroring
+cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
+{
+  const size_t NUM_RGB_CHANNELS = 3;
+
+  // Get the bounding pixel coordinates
+  gotValue = false;
+  int x = (int)xF;
+  int y = (int)yF;
+  int x0 = x;
+  int x1 = x+1;
+  int y0 = y;
+  int y1 = y+1;
+  
+  // Mirror a border of one by adjusting the bounding coordinates
+  if (x0 == -1)       x0 = 0;
+  if (y0 == -1)       y0 = 0;
+  if (x1 == img.cols) x1 = img.cols-1;
+  if (y1 == img.cols) y1 = img.rows-1;
+  
+  // Pixels past the border are still rejected
+  if ((x0 < 0) || (x0 >= img.cols)) return 0;
+  if ((x1 < 0) || (x1 >= img.cols)) return 0;
+  if ((y0 < 0) || (y0 >= img.rows)) return 0;
+  if ((y1 < 0) || (y1 >= img.rows)) return 0;
+
+  // Now interpolate each pixel channel
 
   float a = xF - (float)x;
   float c = yF - (float)y;

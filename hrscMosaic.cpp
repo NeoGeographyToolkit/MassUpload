@@ -6,9 +6,18 @@
 #include <HrscCommon.h>
 
 
+
+/**
+  Program to generate a mosaic by adding new images to a base image.
+  
+  Currently the images are just pasted on but we can do something
+  fancier in the future.
+ 
+ */
+
 //=============================================================
 
-
+/// Load all the input files
 bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<cv::Mat> &hrscImages, 
                      std::vector<cv::Mat> &spatialTransforms, std::string &outputPath)
 {
@@ -59,6 +68,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   return true;
 }
 
+//TODO: We need a mask image to handle the borders properly!
+
 /// Just do a simple paste of one image on to another.
 bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform)
 {
@@ -73,8 +84,9 @@ bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &s
       float interpX, interpY;
       affineTransform(spatialTransform, c, r, interpX, interpY);
       
-      // Extract all of the basemap values at that location
-      pastePixel = interpPixelRgb(imageToAdd, interpX, interpY, gotValue);
+      // Extract all of the basemap values at that location.
+      // - Call the mirror version of the function so we retain all edges.
+      pastePixel = interpPixelMirrorRgb(imageToAdd, interpX, interpY, gotValue);
 
       //TODO: Handle masks better!
       // Skip masked pixels and out of bounds pixels

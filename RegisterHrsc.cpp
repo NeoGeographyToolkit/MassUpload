@@ -45,7 +45,7 @@ bool vwRansacAffine(const std::vector<cv::Point2f> &keypointsA,
     //printf("Pair: (%lf, %lf) ==> (%lf, %lf) \n", vwPtsA[i][0], vwPtsA[i][1], vwPtsB[i][0], vwPtsB[i][1]);
   }
 
-  // Call VW RANSAC function --> WTF is wrong with VW's RANSAC code??
+  // Call VW RANSAC function
   typedef vw::math::TranslationFittingFunctor FittingFunctorType;
   //typedef vw::math::InterestPointErrorMetric  ErrorFunctorType;
   typedef ErrorMetric  ErrorFunctorType;
@@ -108,7 +108,7 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
 
   // Rule out obviously bad matches based on the known starting alignment accuracy
   cv::Mat mask(keypointsA.size(), keypointsB.size(), CV_8UC1);
-  const float MAX_MATCH_PIXEL_DISTANCE = 3000; // Tune this for the base map resolution!
+  const float MAX_MATCH_PIXEL_DISTANCE = 3000; // TODO: Tune this for the base map resolution!
   cv::Point2f centerA(refImage.cols/2,   refImage.rows/2  );
   cv::Point2f centerB(matchImage.cols/2, matchImage.rows/2);
   for (size_t i=0; i<keypointsA.size(); ++i)

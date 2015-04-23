@@ -73,6 +73,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
 /// Just do a simple paste of one image on to another.
 bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform)
 {
+  const int tileSize = outputImage.rows; // Currently the code requires square tiles
+    
   // Iterate over the pixels of the output image
   bool gotValue;
   cv::Vec3b pastePixel;

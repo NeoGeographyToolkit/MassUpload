@@ -71,6 +71,7 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
   // Iterate over the pixels of the HRSC image
   bool gotValue;
   cv::Vec3b baseValues;
+  size_t numPairs = 0;
   for (int r=0; r<hrscChannels[0].rows; r+=SAMPLE_DIST)
   {
   
@@ -100,13 +101,16 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
           outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r))  <<", ";
         }
         outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c), r)) << std::endl;
+        numPairs++;
       }
     } // End col loop
   } // End row loop
   
   outputFile.close();
 
-  return true;
+  std::cout << "numPairs = " << numPairs << std::endl;
+  
+  return (numPairs > 0);
 }
 
 //============================================================================
@@ -133,8 +137,10 @@ int main(int argc, char** argv)
 
   // Generate the list of color pairs
   printf("Writing pixel pairs...\n");
-  writeColorPairs(basemapImage, spatialTransform, corrector, hrscChannels, outputPath);
+  if (!writeColorPairs(basemapImage, spatialTransform, corrector, hrscChannels, outputPath))
+      printf("Failed to detect any color pairs!!!\n");
 
+  
   return 0;
 }
 

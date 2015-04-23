@@ -59,14 +59,14 @@ def getHrscChannelPaths(hrscBasePath):
             hrscBasePath+'_ir3.tif',
             hrscBasePath+'_nd3.tif']
 
-def cmdRunner(cmd, outputPath, force=False):
+def cmdRunner(cmd, outputPath=None, force=False):
     '''Executes a command if the output file does not exist and
        throws if the output file is not created'''
 
     if not os.path.exists(outputPath) or force:
         print cmd
         os.system(cmd)
-    if not os.path.exists(outputPath):
+    if outputPath and (not os.path.exists(outputPath)):
         raise Exception('Failed to create output file: ' + outputPath)
     return True
 
@@ -92,6 +92,29 @@ def getImageSize(imagePath):
     
     return (rows, cols)
 
+def countBlackPixels(imagePath, isGray=True):
+    '''Returns the number of black pixels in an image'''
+    
+    # Call imageMagick to print out the results
+    if isGray:
+        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'gray(0)', '-format', '%c', 'histogram:info:']
+    else: # RGB
+        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'rgb(0,0,0)', '-format', '%c', 'histogram:info:']
+    #print cmd
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    text, err = p.communicate()
+    
+    # Output looks like this:
+    #     257066: (  0,  0,  0) #000000 black
+    #     317182: (255,255,255) #FFFFFF white
+
+    lines = text.split('\n')
+    blackLine = lines[0].strip()
+    otherLine = lines[1].strip()
+    blackCount = int(blackLine[:blackLine.find(':')])
+    #otherCount = int(otherLine[:otherLine.find(':')])
+    return blackCount
+
 # TODO: Stuff up here should come from common files
 #======================================================================
 
@@ -106,6 +129,11 @@ def warpHrscFile(sourcePath, outputFolder, metersPerPixel):
              + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
     cmdRunner(cmd, warpedPath)
     return warpedPath
+
+
+def getTilePrefix(tileRow, tileCol):
+    '''Return a standard string representation of a tile index'''
+    return (str(tileRow)+'_'+str(tileCol))
 
 
 def splitImage(imagePath, outputFolder, tileSize=512):
@@ -133,19 +161,28 @@ def splitImage(imagePath, outputFolder, tileSize=512):
             continue
         thisPath = os.path.join(outputFolder, f)
         numbers  =  re.findall(r"[\d']+", f) # Extract all numbers from the file name
-        tileRow  = int(numbers[3])
+        
+        # Figure out the position of the tile
+        tileRow  = int(numbers[3]) # In the tile grid
         tileCol  = int(numbers[4])
-        pixelRow = tileRow * tileSize
+        pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
         pixelCol = tileCol * tileSize
-        height, width = getImageSize(thisPath)
-        thisTileInfo = {'path'    : thisPath,
-                        'tileRow' : tileRow,
-                        'tileCol' : tileCol,
-                        'pixelRow': pixelRow,
-                        'pixelCol': pixelCol,
-                        'height'  : height,
-                        'width'   : width,
-                        'prefix'  : str(tileRow)+'_'+str(tileCol)
+        
+        # Get other tile information
+        height, width   = getImageSize(thisPath)
+        totalNumPixels  = height*width
+        blackPixelCount = countBlackPixels(thisPath)
+        validPercentage = 1.0 - (blackPixelCount / totalNumPixels)
+        
+        thisTileInfo = {'path'        : thisPath,
+                        'tileRow'     : tileRow,
+                        'tileCol'     : tileCol,
+                        'pixelRow'    : pixelRow,
+                        'pixelCol'    : pixelCol,
+                        'height'      : height,
+                        'width'       : width,
+                        'percentValid': validPercentage,
+                        'prefix'      : getTilePrefix(tileRow, tileCol)
                        }
         outputTileInfoList.append(thisTileInfo)
 
@@ -196,6 +233,30 @@ def writeSubBrightnessGains(fullPath, outputPath, pixelRow, tileHeight):
     fIn.close()
     fOut.close()
     
+
+def getAdjancentTiles(tile, tileDict):
+    '''Gets a list containing all the tiles which are adjacent to the provided tile'''
+    
+    tileRow = tile['tileRow'] # The location of the input tile
+    tileCol = tile['tileCol']
+    
+    # Build a list of the adjacent tiles
+    adjacentTileList = []
+    for r in range(-1,2):
+        for c in range(-1,2):
+            if (r==0) and (c==0): # Skip the main tile
+                continue
+            try:
+                prefix  = getTilePrefix(tileRow+r, tileCol+c)
+                adjTile = tileDict[prefix]
+                adjTile['rowOffset'] = r
+                adjTile['colOffset'] = c
+                adjacentTileList.append(adjTile)
+            except:
+                pass # This means this tile does not actually exist
+    
+    return adjacentTileList
+
 
 def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, outputFolder, metersPerPixel):
     '''Convert from HRSC color channels to an RGB image that matches the basemap colors'''
@@ -251,7 +312,7 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         channelOutputFolder = os.path.join(tileFolder, channelString)
         if not os.path.exists(channelOutputFolder):
             os.mkdir(channelOutputFolder)
-        tileInfoLists[c]    = splitImage(warpedPath, channelOutputFolder, TILE_SIZE)
+        tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, TILE_SIZE)
         
     # Verify that each channel generated the same number of tiles
     numTiles = len(tileInfoLists[0])
@@ -261,7 +322,7 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
 
 
     # Loop through each of the tiles we created and consolidate information across channels
-    consolidatedTileInfo = []
+    tileDict = {}
     for i in range(numTiles):
 
         # Start with the tile info from the first channel
@@ -288,14 +349,12 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         writeSubBrightnessGains(brightnessGainsPath, thisTileInfo['brightnessGainsPath'],
                                 thisTileInfo['pixelRow'], thisTileInfo['height'])
     
-        #print '\n\n'
-        #print thisTileInfo
-        #
-        consolidatedTileInfo.append(thisTileInfo)
+        key = thisTileInfo['prefix']
+        tileDict[key] = thisTileInfo
         
     
     # Now that we have all the per-tile info, compute the spatial transform for each tile.
-    for tile in consolidatedTileInfo:    
+    for tile in tileDict.itervalues():    
         
         # Generate the color pairs
         # - HRSC colors are written with the brightness correction already applied
@@ -306,21 +365,40 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
         cmdRunner(cmd, tile['colorTransformPath'], False)
 
+# TODO: Be robust to tile failures -> Some will definately lie outside the image!
+
     # Now that we have all the spatial transforms, generate the new color image for each tile.
-    for tile in consolidatedTileInfo:
+    for tile in tileDict.itervalues():
             
         # TODO:  Weight each pixel's transform by distance to adjacent tiles
         
+        # Get a list af adjacent tiles to pass in to the color transformer
+        adjacentTiles = getAdjancentTiles(tile, tileDict)
+        # Compute a weighting for each tile based on the pixel count
+        totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
+        for adjTile in adjacentTiles:
+            totalWeight += (adjTile['percentValid'] / tile['percentValid'])
+        # Generate the parameter sequence for the next program call
+        adjacentTileString = ''
+        for adjTile in adjacentTiles:
+            tileWeight     = (adjTile['percentValid'] / tile['percentValid']) / totalWeight
+            thisTileString = adjTile['colorTransformPath'] +' '+ str(tileWeight) +' '+ str(adjTile['colOffset']) +' '+ str(adjTile['rowOffset'])
+            adjacentTileString += (thisTileString + ' ')
+        mainWeight = 1.0/totalWeight # Normalize the main weight too
+        
         # Transform the HRSC image color
         # - Brightness correction is applied before color transform
-        cmd = './transformHrscImageColor ' + basemapCropPath +' '+ tile['allTilesString'] +' '+ tile['colorTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['newColorPath']
+        cmd = ('./transformHrscImageColor ' + tile['allTilesString'] +' '+ tile['brightnessGainsPath'] +' '+ tile['newColorPath'] +' '+
+                                              tile['colorTransformPath'] +' '+ str(mainWeight) +' '+ adjacentTileString
+                                              )
         cmdRunner(cmd, tile['newColorPath'], False)
+        #raise Exception('DEBUG')
 
     #raise Exception('DEBUG')
 
 
     # Return all of the generated tile information!
-    return consolidatedTileInfo
+    return tileDict
 
 
 
@@ -400,12 +478,12 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
     metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-    allTileInfo = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscPath, outputFolder, metersPerPixel)
+    tileDict = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscPath, outputFolder, metersPerPixel)
 
     # TODO: Need to handle tiling of the output mosaic also!
     # TODO: This C++ program can do multiple tiles in one call.
     mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
-    for tile in allTileInfo:
+    for tile in tileDict.itervalues():
     
         if os.path.exists(mosaicPath):
             cmd = './hrscMosaic ' + mosaicPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
@@ -413,7 +491,7 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
             cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
         cmdRunner(cmd, mosaicPath, True)
 
-    raise Exception('DEBUG')
+    #raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

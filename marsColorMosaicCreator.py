@@ -59,6 +59,10 @@ def getHrscChannelPaths(hrscBasePath):
             hrscBasePath+'_ir3.tif',
             hrscBasePath+'_nd3.tif']
 
+class CmdRunException(Exception):
+    '''Exception type indicating an error with a cmd call'''
+    pass
+
 def cmdRunner(cmd, outputPath=None, force=False):
     '''Executes a command if the output file does not exist and
        throws if the output file is not created'''
@@ -67,7 +71,7 @@ def cmdRunner(cmd, outputPath=None, force=False):
         print cmd
         os.system(cmd)
     if outputPath and (not os.path.exists(outputPath)):
-        raise Exception('Failed to create output file: ' + outputPath)
+        raise CmdRunException('Failed to create output file: ' + outputPath)
     return True
 
 
@@ -235,7 +239,7 @@ def writeSubBrightnessGains(fullPath, outputPath, pixelRow, tileHeight):
     
 
 def getAdjancentTiles(tile, tileDict):
-    '''Gets a list containing all the tiles which are adjacent to the provided tile'''
+    '''Gets a list containing all the (still valid) tiles which are adjacent to the provided tile'''
     
     tileRow = tile['tileRow'] # The location of the input tile
     tileCol = tile['tileCol']
@@ -249,9 +253,10 @@ def getAdjancentTiles(tile, tileDict):
             try:
                 prefix  = getTilePrefix(tileRow+r, tileCol+c)
                 adjTile = tileDict[prefix]
-                adjTile['rowOffset'] = r
-                adjTile['colOffset'] = c
-                adjacentTileList.append(adjTile)
+                if adjTile['stillValid']:
+                    adjTile['rowOffset'] = r
+                    adjTile['colOffset'] = c
+                    adjacentTileList.append(adjTile)
             except:
                 pass # This means this tile does not actually exist
     
@@ -343,6 +348,8 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         thisTileInfo['spatialTransformPath'] = os.path.join(tileFolder, filePrefix+'_spatial_transform.csv')
         thisTileInfo['brightnessGainsPath' ] = os.path.join(tileFolder, filePrefix+'_brightness_gains.csv')
         
+        thisTileInfo['stillValid'] = True # Set this to false if there is an error processing this tile
+        
         # Generate individual tile versions of the spatial transform and brightness gains
         writeSubSpatialTransform(spatialTransformPath, thisTileInfo['spatialTransformPath'],
                                  thisTileInfo['pixelRow'], thisTileInfo['pixelCol'])
@@ -356,42 +363,53 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
     # Now that we have all the per-tile info, compute the spatial transform for each tile.
     for tile in tileDict.itervalues():    
         
-        # Generate the color pairs
-        # - HRSC colors are written with the brightness correction already applied
-        cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ tile['allTilesString'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
-        cmdRunner(cmd, tile['colorPairPath'], False)
+        try:
         
-        # Compute the color transform
-        cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
-        cmdRunner(cmd, tile['colorTransformPath'], False)
+            # Generate the color pairs
+            # - HRSC colors are written with the brightness correction already applied
+            cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ tile['allTilesString'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
+            cmdRunner(cmd, tile['colorPairPath'], False)
+            
+            # Compute the color transform
+            cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
+            cmdRunner(cmd, tile['colorTransformPath'], False)
+            
+        except CmdRunException: # Flag errors with this tile
+            tile['stillValid'] = False
 
 # TODO: Be robust to tile failures -> Some will definately lie outside the image!
 
     # Now that we have all the spatial transforms, generate the new color image for each tile.
     for tile in tileDict.itervalues():
+        if not tile['stillValid']: # Skip tiles which have already failed
+            continue
             
-        # TODO:  Weight each pixel's transform by distance to adjacent tiles
-        
-        # Get a list af adjacent tiles to pass in to the color transformer
-        adjacentTiles = getAdjancentTiles(tile, tileDict)
-        # Compute a weighting for each tile based on the pixel count
-        totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
-        for adjTile in adjacentTiles:
-            totalWeight += (adjTile['percentValid'] / tile['percentValid'])
-        # Generate the parameter sequence for the next program call
-        adjacentTileString = ''
-        for adjTile in adjacentTiles:
-            tileWeight     = (adjTile['percentValid'] / tile['percentValid']) / totalWeight
-            thisTileString = adjTile['colorTransformPath'] +' '+ str(tileWeight) +' '+ str(adjTile['colOffset']) +' '+ str(adjTile['rowOffset'])
-            adjacentTileString += (thisTileString + ' ')
-        mainWeight = 1.0/totalWeight # Normalize the main weight too
-        
-        # Transform the HRSC image color
-        # - Brightness correction is applied before color transform
-        cmd = ('./transformHrscImageColor ' + tile['allTilesString'] +' '+ tile['brightnessGainsPath'] +' '+ tile['newColorPath'] +' '+
-                                              tile['colorTransformPath'] +' '+ str(mainWeight) +' '+ adjacentTileString
-                                              )
-        cmdRunner(cmd, tile['newColorPath'], False)
+        try:
+
+            # TODO:  Weight each pixel's transform by distance to adjacent tiles
+            
+            # Get a list af adjacent tiles to pass in to the color transformer
+            adjacentTiles = getAdjancentTiles(tile, tileDict)
+            # Compute a weighting for each tile based on the pixel count
+            totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
+            for adjTile in adjacentTiles:
+                totalWeight += (adjTile['percentValid'] / tile['percentValid'])
+            # Generate the parameter sequence for the next program call
+            adjacentTileString = ''
+            for adjTile in adjacentTiles:
+                tileWeight     = (adjTile['percentValid'] / tile['percentValid']) / totalWeight
+                thisTileString = adjTile['colorTransformPath'] +' '+ str(tileWeight) +' '+ str(adjTile['colOffset']) +' '+ str(adjTile['rowOffset'])
+                adjacentTileString += (thisTileString + ' ')
+            mainWeight = 1.0/totalWeight # Normalize the main weight too
+            
+            # Transform the HRSC image color
+            # - Brightness correction is applied before color transform
+            cmd = ('./transformHrscImageColor ' + tile['allTilesString'] +' '+ tile['brightnessGainsPath'] +' '+ tile['newColorPath'] +' '+
+                                                  tile['colorTransformPath'] +' '+ str(mainWeight) +' '+ adjacentTileString
+                                                  )
+            cmdRunner(cmd, tile['newColorPath'], False)
+        except CmdRunException:
+            tile['stillValid'] = False
         #raise Exception('DEBUG')
 
     #raise Exception('DEBUG')
@@ -485,11 +503,18 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
     mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
     for tile in tileDict.itervalues():
     
-        if os.path.exists(mosaicPath):
-            cmd = './hrscMosaic ' + mosaicPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
-        else: # Only the first call
-            cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
-        cmdRunner(cmd, mosaicPath, True)
+        if not tile['stillValid']: # Skip tiles which have already failed
+            continue
+    
+        try:
+            if os.path.exists(mosaicPath):
+                cmd = './hrscMosaic ' + mosaicPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
+            else: # Only the first call
+                cmd = './hrscMosaic ' + cropBasemapPath +' '+ mosaicPath +' '+ tile['newColorPath'] +' '+ tile['spatialTransformPath']
+            cmdRunner(cmd, mosaicPath, True)
+            
+        except CmdRunException:
+            tile['stillValid'] = False
 
     #raise Exception('DEBUG')
 

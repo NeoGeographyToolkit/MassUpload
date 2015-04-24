@@ -39,14 +39,11 @@ for path in inputPaths: # Loop through input files
         hrscPixelList.append(hrscPixel)
     fileHandle.close()
 
-
 targets  = numpy.matrix(basePixelList) # Strip last semicolons
 inputs = numpy.matrix(hrscPixelList)
 
-print inputs.shape
-print targets.shape
-
-
+if (inputs.shape[1] == 0) or (inputs.shape != targe.shape):
+    raise Exception('Error: Invalid input pixel pair files!')
 
 
 print 'Computing transform...'

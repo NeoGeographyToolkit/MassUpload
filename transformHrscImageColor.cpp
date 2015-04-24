@@ -41,7 +41,7 @@ bool loadInputData(int argc, char** argv,
   // Load all of the HRSC images
   for (size_t i=0; i<NUM_HRSC_CHANNELS; ++i)
   {
-    //std::cout << "Reading image from: " << hrscPaths[i] << std::endl;
+    std::cout << "Reading image from: " << hrscPaths[i] << std::endl;
     hrscChannels[i] = cv::imread(hrscPaths[i], LOAD_GRAY);
     if (!hrscChannels[i].data)
     {
@@ -55,7 +55,7 @@ bool loadInputData(int argc, char** argv,
     return false;
   
   // Load the main spatial transform
-  //std::cout << "Reading transform from: " << mainTransformPath << std::endl;
+  std::cout << "Reading transform from: " << mainTransformPath << std::endl;
   if (!readTransform(mainTransformPath, mainTransform))
     return false;
 
@@ -70,7 +70,7 @@ bool loadInputData(int argc, char** argv,
   for (int i=0; i<numOtherTiles; ++i)
   {
     int baseIndex = 10+4*i;
-    //std::cout << "Reading transform from: " << argv[baseIndex] << std::endl;
+    std::cout << "Reading transform from: " << argv[baseIndex] << std::endl;
     if (!readTransform(argv[baseIndex], otherTransforms[i]))
       return false;
     otherWeights[i]    = atof(argv[baseIndex+1]);
@@ -83,65 +83,21 @@ bool loadInputData(int argc, char** argv,
 
 
 
-/*
-/// Generate weighted blend of input pixels
-/// - Each adjacent tile (4-connectivity) has a fixed weight.
-/// - Absent tiles have zero weight.
-/// - There is also a positional weight based on distance.
-bool determineBlendedPixel(int tileSize, int row, int col,
-                           const cv::Vec3b &mainPixel,   double mainWeightIn,
-                           const cv::Vec3b &leftPixel,   double leftWeightIn,
-                           const cv::Vec3b &topPixel,    double topWeightIn,
-                           const cv::Vec3b &rightPixel,  double rightWeightIn,
-                           const cv::Vec3b &bottomPixel, double bottomWeightIn,
-                           cv::Vec3b &outputPixel)
+
+/// Debugging output - Use this to determine the best tile weighting method!
+double computeMainWeight(int height, int width, int row, int col)
 {
   // Compute a distance from the center
-  double tileCenter = (double)tileSize / 2.0;
-  double mainDistY  = abs((double)row-tileCenter);
-  double mainDistX  = abs((double)col-tileCenter);
-  double mainDist   = min(tileDistY, tileDistX);
-  
-  // At the edges of a tile, that tile's pixel has 50% weight.
-  double otherTileWeight = (mainDist/tileCenter)/2.0;
-  double mainWeight      = 1.0 - otherTileWeight
-  
-  // Compute the relative contribution of the other tiles
-  // - There are never more than two other contributors
-  double leftWeight   = tileCenter - (double)col; // Get other weights in 0-1 range
-  double rightWeight  = -leftWeight;
-  double topWeight    = tileCenter - (double)row;
-  double bottomWeight = -topWeight;
-  if (leftWeight   < 0) leftWeight   = 0; // Clamp to minimum weight of zero.
-  if (rightWeight  < 0) rightWeight  = 0;
-  if (topWeight    < 0) topWeight    = 0;
-  if (bottomWeight < 0) bottomWeight = 0;
-  
-  // Normalize the weights
-  double totalOtherWeight = leftWeight + rightWeight + topWeight + bottomWeight;
-  if (totalOtherWeight > 0) // Handle case where the pixel is right on the tile center
-  {
-    leftWeight   /= totalOtherWeight;
-    rightWeight  /= totalOtherWeight;
-    topWeight    /= totalOtherWeight;
-    bottomWeight /= totalOtherWeight;
-  }
-  
-  // Compute the final value
-  const size_t NUM_RGB_CHANNELS = 3;
-  for (size_t i=0; i<NUM_RGB_CHANNELS; ++i)
-  {
-    outputPixel[i] = mainWeight      * mainPixel[i] +
-                     otherTileWeight * (leftPixel  [i]*leftWeight   +
-                                        rightPixel [i]*rightWeight  +
-                                        topPixel   [i]*topWeight    +
-                                        bottomPixel[i]*bottomWeight  );
-  }
-  
-  return true;
+  double tileCenterY = static_cast<double>(height) / 2.0;
+  double tileCenterX = static_cast<double>(width)  / 2.0;
+  double mainDistY   = abs((double)row-tileCenterY);
+  double mainDistX   = abs((double)col-tileCenterX);
+  double otherTileWeight = std::max((mainDistX/tileCenterX),
+                                    (mainDistY/tileCenterY))/2.0; // This could be improved
+  double mainWeight = 1.0 - otherTileWeight;
+  //printf("%d, %d, %d, %d, %lf, %lf, %lf, %lf\n", height, width, row, col, mainDistY, mainDistX, otherTileWeight, mainWeight);
+  return mainWeight;
 }
-*/
-
 
 /// Generate weighted blend of input pixels
 /// - Each adjacent tile (4-connectivity) has a fixed weight.
@@ -155,8 +111,8 @@ bool determineBlendedPixel(int height, int width, int row, int col,
                            cv::Vec3b &outputPixel)
 {
   // Compute a distance from the center
-  double tileCenterY = static_cast<double>(width) / 2.0;
-  double tileCenterX = static_cast<double>(height) / 2.0;
+  double tileCenterY = static_cast<double>(height) / 2.0;
+  double tileCenterX = static_cast<double>(width)  / 2.0;
   double mainDistY   = abs((double)row-tileCenterY);
   double mainDistX   = abs((double)col-tileCenterX);
   double otherTileWeight = ((mainDistX/tileCenterX)+(mainDistY/tileCenterY))/4.0; // This could be improved
@@ -166,8 +122,6 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   
   //printf("row = %d, col = %d\n", row, col);
   //printf("tileCenterX = %lf, tileCenterY = %lf\n", tileCenterX, tileCenterY);
-  
-  
   
   // Compute the relative contribution of the other tiles
   // - There are never more than two other contributors
@@ -277,13 +231,18 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels,
 
   //printf("numRows = %d, numCols = %d\n", numRows, numCols);
   
+  //cv::Mat weightImage(numRows, numCols, CV_8UC1);
+  
   // Iterate over the pixels of the HRSC image
   cv::Vec3b mainPixel, outputPixel;
   std::vector<unsigned char> hrscPixel(NUM_HRSC_CHANNELS);
   for (int r=0; r<numRows; r+=1)
   {
     for (int c=0; c<numCols; c+=1)
-    {  
+    {
+      //weightImage.at<unsigned char>(r, c) = 0.0f; //DEBUG
+        
+        
       // Check to see if this pixel should be masked out   
       // - Apply the brightness correction while we are at it.
       bool maskOut = false;
@@ -325,12 +284,22 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels,
                             outputPixel);
       
       
+      //double calcWeight = computeMainWeight(numRows, numCols, r, c);
+      //double a = calcWeight*255.0;
+      //unsigned char b = static_cast<unsigned char>(a);
+      //weightImage.at<unsigned char>(r, c) = b;
+      //printf("%lf, %lf, %d ", calcWeight, a, b);
+      //printf("%lf\n", calcWeight);
+      
       // Store the result in output image
       outputImage.at<cv::Vec3b>(r, c) = outputPixel;
 
     } // End col loop
   } // End row loop
 
+  //printf("Writing weightImage.tif\n");
+  //cv::imwrite("weightImage.jpg", weightImage);
+  
   return true;
 }
 

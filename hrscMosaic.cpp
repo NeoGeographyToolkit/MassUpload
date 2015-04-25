@@ -18,43 +18,48 @@
 //=============================================================
 
 /// Load all the input files
-bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<cv::Mat> &hrscImages, 
+bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
+                     std::vector<cv::Mat> &hrscImages,
+                     std::vector<cv::Mat> &hrscMasks,
                      std::vector<cv::Mat> &spatialTransforms, std::string &outputPath)
 {
   // Parse the input arguments
-  const size_t numHrscImages = (argc - 3)/2;
-  std::vector<std::string> hrscPaths(numHrscImages), spatialTransformPaths(numHrscImages);
+  const size_t numHrscImages = (argc - 3)/3;
+  std::vector<std::string> hrscPaths(numHrscImages),
+                           hrscMaskPaths(numHrscImages),
+                           spatialTransformPaths(numHrscImages);
   std::string baseImagePath = argv[1];
   outputPath = argv[2];
   
   for (size_t i=0; i<numHrscImages; ++i)
   {
     hrscPaths[i]             = argv[3 + 2*i];
-    spatialTransformPaths[i] = argv[4 + 2*i];
+    hrscMaskPaths[i]         = argv[4 + 2*i];
+    spatialTransformPaths[i] = argv[5 + 2*i];
   }
 
+  const int LOAD_GRAY = 0;
   const int LOAD_RGB  = 1;
   
   // Load the base map
-  basemapImage = cv::imread(baseImagePath, LOAD_RGB);
-  if (!basemapImage.data)
-  {
-    printf("Failed to load base map image!\n");
-    return false;
-  }
-
+  if (!readOpenCvImage(baseImagePath, basemapImage, LOAD_RGB))
+      return false;
+  
   // Load all of the HRSC images and their spatial transforms
   cv::Mat tempTransform;
   hrscImages.resize(numHrscImages);
+  hrscMasks.resize(numHrscImages);
   spatialTransforms.resize(numHrscImages);
   for (size_t i=0; i<numHrscImages; ++i)
   {
-    hrscImages[i] = cv::imread(hrscPaths[i], LOAD_RGB);
-    if (!hrscImages[i].data)
+    if (!readOpenCvImage(hrscPaths[i], hrscImages[i], LOAD_RGB))
+      return false;
+    if (!readOpenCvImage(hrscMaskPaths[i], hrscMasks[i], LOAD_GRAY))
     {
-      printf("Failed to load HRSC image: %s\n", hrscPaths[i].c_str());
+      printf("Mask read error!\n");
       return false;
     }
+    
     if (!readTransform(spatialTransformPaths[i], tempTransform))
     {
       printf("Failed to load HRSC spatial transform: %s\n", spatialTransformPaths[i].c_str());
@@ -71,7 +76,8 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
 //TODO: We need a mask image to handle the borders properly!
 
 /// Just do a simple paste of one image on to another.
-bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform)
+bool pasteImage(cv::Mat &outputImage,
+                const cv::Mat imageToAdd, const cv::Mat imageMask, const cv::Mat &spatialTransform)
 {
   const int tileSize = outputImage.rows; // Currently the code requires square tiles
     
@@ -86,13 +92,13 @@ bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &s
       float interpX, interpY;
       affineTransform(spatialTransform, c, r, interpX, interpY);
       
+      
       // Extract all of the basemap values at that location.
       // - Call the mirror version of the function so we retain all edges.
-      pastePixel = interpPixelMirrorRgb(imageToAdd, interpX, interpY, gotValue);
+      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);
 
-      //TODO: Handle masks better!
       // Skip masked pixels and out of bounds pixels
-      if ( (!gotValue) || (pastePixel == cv::Vec3b(0,0,0)) )
+      if (!gotValue)
         continue;
 
       // If the interpolated pixel is good just overwrite the current value in the output image
@@ -110,9 +116,9 @@ bool pasteImage(cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &s
 int main(int argc, char** argv)
 {
   // Check input arguments
-  if ((argc - 3) % 2 != 0 )
+  if ((argc - 3) % 3 != 0 )
   {
-    printf("usage: hrscMosaic <Base Image Path> <Output Path> [<Hrsc Rgb Path> <Spatial transform path>]... \n");
+    printf("usage: hrscMosaic <Base Image Path> <Output Path> [<Hrsc Rgb Path> <HrscMaskPath> <Spatial transform path>]... \n");
     return -1;
   }
 
@@ -121,9 +127,12 @@ int main(int argc, char** argv)
   // Load the input images  
   cv::Mat basemapImage;
   std::string outputPath;
-  std::vector<cv::Mat> hrscImages, spatialTransforms;
-  if (!loadInputImages(argc, argv, basemapImage, hrscImages, spatialTransforms, outputPath))
+  std::vector<cv::Mat> hrscImages, hrscMasks, spatialTransforms;
+  if (!loadInputImages(argc, argv, basemapImage, hrscImages, hrscMasks, spatialTransforms, outputPath))
+  {
+    printf("Error reading input arguments!\n");
     return -1;
+  }
 
   // The spatial transform is from the base map to HRSC
 
@@ -137,7 +146,7 @@ int main(int argc, char** argv)
   const size_t numHrscImages = hrscImages.size();
   for (size_t i=0; i<numHrscImages; ++i)
   {
-    pasteImage(outputImage, hrscImages[i], spatialTransforms[i]);
+    pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
   }
 
   printf("Writing output file...\n");

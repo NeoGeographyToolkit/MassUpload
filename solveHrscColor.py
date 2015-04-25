@@ -42,7 +42,9 @@ for path in inputPaths: # Loop through input files
 targets  = numpy.matrix(basePixelList) # Strip last semicolons
 inputs = numpy.matrix(hrscPixelList)
 
-if (inputs.shape[1] == 0) or (inputs.shape != targe.shape):
+if (inputs.shape[1] == 0) or (inputs.shape[0] != targets.shape[0]):
+    print targets.shape
+    print inputs.shape
     raise Exception('Error: Invalid input pixel pair files!')
 
 

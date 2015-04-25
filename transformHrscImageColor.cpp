@@ -10,14 +10,14 @@
 
 
 bool loadInputData(int argc, char** argv,
-                   std::vector<cv::Mat> &hrscChannels,
+                   std::vector<cv::Mat> &hrscChannels, cv::Mat &hrscMask,
                    BrightnessCorrector &corrector, std::string &outputPath,
                    cv::Mat &mainTransform, double &mainWeight,
                    std::vector<cv::Mat>   &otherTransforms,
                    std::vector<double>    &otherWeights,
                    std::vector<cv::Vec2i> &otherOffsets)
 {
-  if (argc < 10)
+  if (argc < 11)
   {
     printf("Not enough input arguments passed in!\n");
     return false;
@@ -29,26 +29,26 @@ bool loadInputData(int argc, char** argv,
   hrscPaths[2] = argv[3]; // B
   hrscPaths[3] = argv[4]; // NIR
   hrscPaths[4] = argv[5]; // NADIR
-  std::string brightnessPath = argv[6];
-  outputPath = argv[7];
+  std::string hrscMaskPath   = argv[6];
+  std::string brightnessPath = argv[7];
+  outputPath = argv[8];
   
-  std::string mainTransformPath = argv[8];
-  mainWeight = atof(argv[9]);
+  std::string mainTransformPath = argv[9];
+  mainWeight = atof(argv[10]);
   
   const int LOAD_GRAY = 0;
   const int LOAD_RGB  = 1;
   
+  
   // Load all of the HRSC images
   for (size_t i=0; i<NUM_HRSC_CHANNELS; ++i)
   {
-    std::cout << "Reading image from: " << hrscPaths[i] << std::endl;
-    hrscChannels[i] = cv::imread(hrscPaths[i], LOAD_GRAY);
-    if (!hrscChannels[i].data)
-    {
-      printf("Failed to load HRSC image: %s\n", hrscPaths[i].c_str());
+    if (!readOpenCvImage(hrscPaths[i], hrscChannels[i], LOAD_GRAY))
       return false;
-    }
   }
+  // Read in the mask
+  if (!readOpenCvImage(hrscMaskPath, hrscMask, LOAD_GRAY))
+      return false;
 
   // Load brightness correction data
   if (!corrector.readProfileCorrection(brightnessPath))
@@ -60,8 +60,8 @@ bool loadInputData(int argc, char** argv,
     return false;
 
   // Compute the number of neighboring tiles
-  const int numOtherTiles = (argc - 10) / 4;
-  //printf("Loading information for %d neighboring tiles.\n", numOtherTiles);
+  const int numOtherTiles = (argc - 11) / 4;
+  printf("Loading information for %d neighboring tiles.\n", numOtherTiles);
     
   // Load all the information for neighboring tiles
   otherTransforms.resize(numOtherTiles);
@@ -69,7 +69,7 @@ bool loadInputData(int argc, char** argv,
   otherOffsets.resize(numOtherTiles);
   for (int i=0; i<numOtherTiles; ++i)
   {
-    int baseIndex = 10+4*i;
+    int baseIndex = 11+4*i;
     std::cout << "Reading transform from: " << argv[baseIndex] << std::endl;
     if (!readTransform(argv[baseIndex], otherTransforms[i]))
       return false;
@@ -215,7 +215,7 @@ cv::Vec3b transformPixel(const std::vector<unsigned char> &hrscPixel, const cv::
 
 /// Apply a color transform matrix to the HRSC bands.
 /// - This is a 5x3 matrix.
-bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels,
+bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Mat &hrscMask,
                         const BrightnessCorrector &corrector, cv::Mat &outputImage,
                         const cv::Mat                &colorTransform,        double mainWeight,
                         const std::vector<cv::Mat>   &otherColorTransforms,  const std::vector<double> &otherWeights,
@@ -240,29 +240,17 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels,
   {
     for (int c=0; c<numCols; c+=1)
     {
+      // Handle masked pixels
       //weightImage.at<unsigned char>(r, c) = 0.0f; //DEBUG
-        
-        
-      // Check to see if this pixel should be masked out   
-      // - Apply the brightness correction while we are at it.
-      bool maskOut = false;
-      for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
-      {
-        hrscPixel[i] = hrscChannels[i].at<unsigned char>(r,c);
-        if (hrscPixel[i] == 0)
-        {
-          maskOut = true;
-          break;
-        }
-        hrscPixel[i] = corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r); // Correct brightness
-      }
-      // If any of input HRSC pixels are black, the output pixel is black.
-      // TODO: A smarter mask method!
-      if (maskOut)
+      if (hrscMask.at<unsigned char>(r, c) == 0)
       {
         outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);
         continue;
       }
+        
+      // Build the HRSC pixel from the seperate channels with brightness correction
+      for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
+        hrscPixel[i] = corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r); // Correct brightness
     
       // Compute the main pixel transform
       mainPixel = transformPixel(hrscPixel, colorTransform);
@@ -311,7 +299,7 @@ int main(int argc, char** argv)
   // Check input arguments
   if (argc < 10)
   {
-    printf("usage: transformHrscImageColor <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Brightness File Path> <Output Path> <Main Color Transform File Path> <Main Weight> [<Color Transform Path> <Weight> <xOffset> <yOffset>]...\n");
+    printf("usage: transformHrscImageColor <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <HRSC Mask> <Brightness File Path> <Output Path> <Main Color Transform File Path> <Main Weight> [<Color Transform Path> <Weight> <xOffset> <yOffset>]...\n");
     return -1;
   }
   
@@ -319,14 +307,14 @@ int main(int argc, char** argv)
   
   // Load the input images  
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
-  cv::Mat colorTransform;
+  cv::Mat colorTransform, hrscMask;
   double  mainWeight;
   std::vector<cv::Mat>   otherColorTransforms;
   std::vector<double>    otherWeights;
   std::vector<cv::Vec2i> otherOffsets;
   BrightnessCorrector corrector;
   std::string outputPath;
-  if (!loadInputData(argc, argv, hrscChannels, corrector, outputPath,
+  if (!loadInputData(argc, argv, hrscChannels, hrscMask, corrector, outputPath,
                      colorTransform, mainWeight,
                      otherColorTransforms, otherWeights, otherOffsets))
     return -1;
@@ -337,7 +325,7 @@ int main(int argc, char** argv)
   
   // Generate the transformed color image
   cv::Mat newColorImage;
-  transformHrscColor(hrscChannels,
+  transformHrscColor(hrscChannels, hrscMask,
                      corrector, newColorImage,
                      colorTransform, mainWeight,
                      otherColorTransforms, otherWeights, otherOffsets);

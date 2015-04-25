@@ -112,7 +112,8 @@ cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
 }
 
 /// As interpPixelRgb but with pixels near the edges handled by mirroring
-cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
+cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
+                               float xF, float yF, bool &gotValue)
 {
   const size_t NUM_RGB_CHANNELS = 3;
 
@@ -137,6 +138,17 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img, float xF, float yF, bool &got
   if ((y0 < 0) || (y0 >= img.rows)) return 0;
   if ((y1 < 0) || (y1 >= img.rows)) return 0;
 
+  // Check the mask
+  // - Don't interpolate if any mask inputs are zero, this might indicate 
+  //    that we are at a projection border.
+  unsigned char i00 = mask.at<unsigned char>(y0, x0);
+  unsigned char i01 = mask.at<unsigned char>(y0, x1);
+  unsigned char i10 = mask.at<unsigned char>(y1, x0);
+  unsigned char i11 = mask.at<unsigned char>(y1, x1);
+  if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
+    return 0;
+  
+  
   // Now interpolate each pixel channel
 
   float a = xF - (float)x;
@@ -151,9 +163,15 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img, float xF, float yF, bool &got
     float v11 = static_cast<float>(img.at<cv::Vec3b>(y1, x1)[i]);
 
     outputPixel[i] = static_cast<unsigned char>( v00*(1-a)*(1-c)  + v10*a*(1-c) + v01*(1-a)*c + v11*a*c );
-
   }
-
+  /*
+  if (outputPixel == cv::Vec3b(0,0,0))
+  {
+    printf("xy's: %d, %d, %d, %d\n", x0, x1, y0, y1);
+    printf("i's: %d, %d, %d, %d\n", i00, i01, i10, i11);
+  }
+*/
+  
   gotValue = true;
   return outputPixel;
 }
@@ -232,6 +250,20 @@ bool readTransform(const std::string &inputPath, cv::Mat &transform)
   file.close();
   
   return (!file.fail());
+}
+
+/// Try to load the image and then make sure we got valid data.
+/// - The type must by 0 (gray) or 1 (RGB)
+bool readOpenCvImage(const std::string &imagePath, cv::Mat &image, const int imageType)
+{
+  //printf("Reading image file: %s\n", imagePath.c_str());
+  image = cv::imread(imagePath, imageType);
+  if (!image.data)
+  {
+    printf("Failed to load image %s!\n", imagePath.c_str());
+    return false;
+  }
+  return true;
 }
 
 

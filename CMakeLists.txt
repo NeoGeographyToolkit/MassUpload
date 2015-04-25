@@ -121,5 +121,7 @@ target_link_libraries( hrscMosaic ${OpenCV_LIBS} ${Boost_LIBRARIES})
 add_executable( computeBrightnessCorrection computeBrightnessCorrection.cpp )
 target_link_libraries( computeBrightnessCorrection ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
+add_executable( makeSimpleImageMask makeSimpleImageMask.cpp )
+target_link_libraries( makeSimpleImageMask ${OpenCV_LIBS} ${Boost_LIBRARIES})
 
 

@@ -27,22 +27,14 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   const int LOAD_RGB  = 1;
   
   // Load the base map
-  basemapImage = cv::imread(baseImagePath, LOAD_RGB);
-  if (!basemapImage.data)
-  {
-    printf("Failed to load base map image!\n");
-    return false;
-  }
+  if (!readOpenCvImage(baseImagePath, basemapImage, LOAD_RGB))
+      return false;
 
   // Load all of the HRSC images
   for (size_t i=0; i<NUM_HRSC_CHANNELS; ++i)
   {
-    hrscChannels[i] = cv::imread(hrscPaths[i], LOAD_GRAY);
-    if (!hrscChannels[i].data)
-    {
-      printf("Failed to load HRSC image: %s\n", hrscPaths[i].c_str());
+    if (!readOpenCvImage(hrscPaths[i], hrscChannels[i], LOAD_GRAY))
       return false;
-    }
   }
 
   // Load the spatial transform

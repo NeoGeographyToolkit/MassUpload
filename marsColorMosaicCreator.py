@@ -428,7 +428,7 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
     for tile in tileDict.itervalues():
         
         # New color generation is handled in this function
-        generateNewHrscColor(tile, tileDict, True)
+        generateNewHrscColor(tile, tileDict, False)
         
         #raise Exception('DEBUG')
 
@@ -457,7 +457,7 @@ hrscBasePathInList = ['/home/smcmich1/data/hrscMapTest/external_data/h0022_0000'
                       '/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
                       '/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
 
-outputFolder    = '/home/smcmich1/data/hrscMapTest/'
+outputFolder = '/home/smcmich1/data/hrscMapTest/'
 
 GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
 

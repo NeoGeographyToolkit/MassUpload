@@ -83,7 +83,7 @@ bool loadInputData(int argc, char** argv,
 
 
 
-
+/*
 /// Debugging output - Use this to determine the best tile weighting method!
 double computeMainWeight(int height, int width, int row, int col)
 {
@@ -99,6 +99,7 @@ double computeMainWeight(int height, int width, int row, int col)
   return mainWeight;
 }
 
+--> This version still produces artifacts!
 /// Generate weighted blend of input pixels
 /// - Each adjacent tile (4-connectivity) has a fixed weight.
 /// - Absent tiles have zero weight.
@@ -111,12 +112,12 @@ bool determineBlendedPixel(int height, int width, int row, int col,
                            cv::Vec3b &outputPixel)
 {
   // Compute a distance from the center
-  double tileCenterY = static_cast<double>(height) / 2.0;
-  double tileCenterX = static_cast<double>(width)  / 2.0;
-  double mainDistY   = abs((double)row-tileCenterY);
-  double mainDistX   = abs((double)col-tileCenterX);
-  double otherTileWeight = ((mainDistX/tileCenterX)+(mainDistY/tileCenterY))/4.0; // This could be improved
-  double mainWeight = 1.0 - otherTileWeight;
+  double tileCenterY      = static_cast<double>(height) / 2.0;
+  double tileCenterX      = static_cast<double>(width)  / 2.0;
+  double mainDistY        = abs((double)row-tileCenterY);
+  double mainDistX        = abs((double)col-tileCenterX);
+  double otherTilesWeight = std::max((mainDistX/tileCenterX), (mainDistY/tileCenterY))/2.0;
+  double mainWeight       = 1.0 - otherTilesWeight;
   //std::cout << "Main distance weight = " << mainWeight << std::endl;
   // At the edges of a tile, that tile's pixel has 50% weight.
   
@@ -130,24 +131,42 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   std::vector<double> otherPositionWeights(numOtherTiles);
   for (size_t i=0; i<numOtherTiles; ++i) // Loop through the other tiles
   {
-    // Compute a 0 to 1 fraction of the position relative to this tile
-    double xDist    = ((double)col - tileCenterX) * offsets[i][0];
-    double yDist    = ((double)row - tileCenterY) * offsets[i][1];
+    int xTileOffset = offsets[i][0];
+    int yTileOffset = offsets[i][1];
+    double tileCloseness;
+    if ((xTileOffset!=0) && (yTileOffset!=0)) // Diagonal tile offset
+    {
+      double xDist = ((double)col - tileCenterX) * xTileOffset;
+      double yDist = ((double)row - tileCenterY) * yTileOffset;
+      // Will range from -1.0 to 1.0, the closest distance to the edge is used.
+      tileCloseness = std::max(xDist/tileCenterX, yDist/tileCenterY); 
+    }
+    if ((xTileOffset==0) && (yTileOffset!=0)) // Vertical tile offset
+    {
+      double dist   = ((double)row - tileCenterY) * yTileOffset;
+      tileCloseness = dist/tileCenterY;
+    }
+    if ((xTileOffset!=0) && (yTileOffset==0)) // Horizontal tile offset
+    {
+      // Compute a 0 to 1 fraction of the position relative to this tile
+      double dist   = ((double)col - tileCenterX) * xTileOffset;
+      tileCloseness = dist/tileCenterX;    
+    }
+    // Negative closeness = opposite side of the center
+      // - Tile weight reduces rapidly past the center of the main tile.
     
-    //printf("Position %d, xDist = %lf, yDist = %lf\n", i, xDist, yDist);
+    const double CENTER_WEIGHT = 0.5;
+    double thisPositionWeight = CENTER_WEIGHT + tileCloseness; // Weight is 0.5 in the center and increases at slope of 2
+    if (thisPositionWeight > 1.0) thisPositionWeight = 1.0; // Restrict the positional weight to the 0 to 1 range
+    if (thisPositionWeight < 0.0) thisPositionWeight = 0.0;
     
-    // TODO: Probably need to tweak this to handle diagonals better
-    // Negative distances = zero weight!
-    // - Tile weight does not carry past the center of the main tile.
-    double thisWeight;
-    if (xDist > yDist) // Use the closest distance to compute weight
-      thisWeight = xDist / tileCenterX;
-    else
-      thisWeight = yDist / tileCenterY;
-    //printf("This weight = %lf\n", thisWeight);
-    if (thisWeight <= 0) // If on the opposite side of the tile center, no weight
-      thisWeight = 0;
-    thisWeight *= weightsIn[i]; // Incorporate the input weight for this tile
+    if (col == 120) //DEBUG 
+    {
+      //printf("xDist/tileCenterX = %lf,  yDist/tileCenterY = %lf\n", xDist/tileCenterX, yDist/tileCenterY);
+      printf("tileCloseness = %lf,  thisPositionWeight = %lf\n", tileCloseness, thisPositionWeight);
+    }
+    
+    double thisWeight = thisPositionWeight* weightsIn[i]; // Incorporate the input weight for this pixel
     otherPositionWeights[i]   = thisWeight;
     totalOtherPositionWeight += thisWeight;
   }
@@ -158,10 +177,11 @@ bool determineBlendedPixel(int height, int width, int row, int col,
     return true;
   }
   
-  // Normalize the position weighting of the other tiles
+  // Normalize the position weighting of the other tiles so that their total weight
+  // is equal to the total other tiles weight we calculated earlier
   for (size_t i=0; i<numOtherTiles; ++i) // Loop through the other tiles
   {
-    otherPositionWeights[i] /= totalOtherPositionWeight;
+    otherPositionWeights[i] *= otherTilesWeight / totalOtherPositionWeight;
     //std::cout << "Normalized position weight " << i << " = " << otherPositionWeights[i] << std::endl;
   }
   
@@ -170,17 +190,26 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   const size_t NUM_RGB_CHANNELS = 3;
   for (size_t c=0; c<NUM_RGB_CHANNELS; ++c)
   {
-    double otherWeight = 0; // Accumulate value of the other tiles
+    double otherPixelContribution = 0; // Accumulate value of the other tiles
     for (size_t i=0; i<numOtherTiles; ++i)
     {
       //std::cout << "Adding other weight: " << otherPositionWeights[i] << std::endl;
-      otherWeight += pixels[i][c] * otherPositionWeights[i]; // Incorporate input weights
+      otherPixelContribution += pixels[i][c] * otherPositionWeights[i]; // Incorporate input weights
     }
     // Compute the final pixel value for this channel
-    //std::cout << "Weighted other positions: " <<  otherWeight*otherTileWeight << std::endl;
+    //std::cout << "Weighted other positions: " <<  otherTilesWeight << std::endl;
     //std::cout << "Weighted main: " << mainWeight*mainPixel[c] << std::endl;
-    outputPixel[c] = mainWeight*mainPixel[c] + otherWeight*otherTileWeight;
+    outputPixel[c] = mainWeight*mainPixel[c] + otherTilesWeight;
     
+  }
+  
+  if (col == 120) //DEBUG 
+  {
+    for (size_t i=0; i<numOtherTiles; ++i)
+    {
+      printf("Other weight %d at row %d: %lf\n", i, row, otherPositionWeights[i]);
+    }
+    printf("\n");
   }
   
   //std::cout << "outputPixel: " << outputPixel << std::endl;
@@ -188,6 +217,82 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   
   return true;
 }
+*/
+
+/// Generate weighted blend of input pixels
+/// - Each adjacent tile (4-connectivity) has a fixed weight.
+/// - Absent tiles have zero weight.
+/// - There is also a positional weight based on distance.
+bool determineBlendedPixel(int height, int width, int row, int col,
+                           const cv::Vec3b &mainPixel,  double mainWeightIn, // The main pixel
+                           const std::vector<cv::Vec3b> &pixels,     // All the other pixels
+                           const std::vector<cv::Vec2i> &offsets,
+                           const std::vector<double   > &weightsIn,
+                           cv::Vec3b &outputPixel)
+{
+  // Each pixel is influenced by the main tile and each adjacent tile
+  const size_t numOtherTiles = pixels.size();
+  const size_t numInfluences = pixels.size() + 1;
+  std::vector<double> influences(numInfluences);
+  
+  // The influence is a combination of tile size (weight) and distance to the tile.
+  // - The main tile gets extra influence.
+  double tileCenterY = static_cast<double>(height) / 2.0;
+  double tileCenterX = static_cast<double>(width)  / 2.0;
+  double mainDistY   = (double)row-tileCenterY;
+  double mainDistX   = (double)col-tileCenterX;
+  double mainDist    = mainDistX*mainDistX + mainDistY*mainDistY;
+  if (mainDist < 0.1) // Avoid divide by zero at center pixel
+  {
+    outputPixel = mainPixel;
+    return true;
+  }
+  influences[0] = mainWeightIn / mainDist; // Distances are kept squared to save time
+  
+  
+  double influenceSum = influences[0];
+  for (size_t i=0; i<numOtherTiles; ++i)
+  {
+    // Tile distance is computed from the center of the other tile
+    double thisTileCenterY = tileCenterY + offsets[i][1]*height;
+    double thisTileCenterX = tileCenterX + offsets[i][0]*width;
+    double tileDistY   = (double)row-thisTileCenterY;
+    double tileDistX   = (double)col-thisTileCenterX;
+    double tileDist    = tileDistX*tileDistX + tileDistY*tileDistY; // Don't need to check divide by zero here!
+    influences[i+1] = weightsIn[i] / tileDist;
+    influenceSum += influences[i+1];
+  }
+  
+  //if (col == 120) //DEBUG 
+  //  printf("At row %d: ", row); 
+  
+  // Now normalize all the influences so they total up to 1.0
+  for (size_t i=0; i<numInfluences; ++i)
+  {
+    influences[i] /= influenceSum;
+    
+    //if (col == 120) //DEBUG 
+    //  printf("influence %d = %lf, ", i, influences[i]);
+    
+  }
+  //if (col == 120) //DEBUG 
+  //  printf("\n");
+  
+  // Compute the final value
+  const size_t NUM_RGB_CHANNELS = 3;
+  for (size_t c=0; c<NUM_RGB_CHANNELS; ++c)
+  {
+    // Accumulate the output pixel over all influences
+    outputPixel[c] = influences[0]*mainPixel[c];
+    for (size_t i=0; i<numOtherTiles; ++i)
+    {
+      outputPixel[c] += pixels[i][c] * influences[i+1]; // Incorporate input weights
+    }    
+  }
+  
+  return true;
+}
+
 
 
 cv::Vec3b transformPixel(const std::vector<unsigned char> &hrscPixel, const cv::Mat &colorTransform)
@@ -241,7 +346,7 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
     for (int c=0; c<numCols; c+=1)
     {
       // Handle masked pixels
-      //weightImage.at<unsigned char>(r, c) = 0.0f; //DEBUG
+      //weightImage.at<unsigned char>(r, c) = 0; //DEBUG
       if (hrscMask.at<unsigned char>(r, c) == 0)
       {
         outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);

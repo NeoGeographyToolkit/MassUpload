@@ -125,13 +125,13 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
   int x1 = x+1;
   int y0 = y;
   int y1 = y+1;
-  
+  /*
   // Mirror a border of one by adjusting the bounding coordinates
   if (x0 == -1)       x0 = 0;
   if (y0 == -1)       y0 = 0;
   if (x1 == img.cols) x1 = img.cols-1;
-  if (y1 == img.cols) y1 = img.rows-1;
-  
+  if (y1 == img.rows) y1 = img.rows-1;
+  */
   // Pixels past the border are still rejected
   if ((x0 < 0) || (x0 >= img.cols)) return 0;
   if ((x1 < 0) || (x1 >= img.cols)) return 0;
@@ -148,7 +148,6 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
   if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
     return 0;
   
-  
   // Now interpolate each pixel channel
 
   float a = xF - (float)x;
@@ -160,17 +159,9 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
     float v00 = static_cast<float>(img.at<cv::Vec3b>(y0, x0)[i]);
     float v01 = static_cast<float>(img.at<cv::Vec3b>(y0, x1)[i]);
     float v10 = static_cast<float>(img.at<cv::Vec3b>(y1, x0)[i]);
-    float v11 = static_cast<float>(img.at<cv::Vec3b>(y1, x1)[i]);
-
-    outputPixel[i] = static_cast<unsigned char>( v00*(1-a)*(1-c)  + v10*a*(1-c) + v01*(1-a)*c + v11*a*c );
+    float v11 = static_cast<float>(img.at<cv::Vec3b>(y1, x1)[i]);  
+    outputPixel[i] = static_cast<unsigned char>( v00*(1.0f-a)*(1.0f-c)  + v10*a*(1.0f-c) + v01*(1.0f-a)*c + v11*a*c );
   }
-  /*
-  if (outputPixel == cv::Vec3b(0,0,0))
-  {
-    printf("xy's: %d, %d, %d, %d\n", x0, x1, y0, y1);
-    printf("i's: %d, %d, %d, %d\n", i00, i01, i10, i11);
-  }
-*/
   
   gotValue = true;
   return outputPixel;

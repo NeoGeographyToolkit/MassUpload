@@ -73,7 +73,34 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
   return true;
 }
 
-//TODO: We need a mask image to handle the borders properly!
+// Without supporting classes this function is a mess
+void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
+                         int &minX, int &minY, int &maxX, int &maxY)
+{
+  // Init the bounds
+  maxX = 0;
+  maxY = 0;
+  minX = outputImage.cols-1;
+  minY = outputImage.rows-1;
+  
+  // Compute the four corners
+  const int NUM_CORNERS = 4;
+  float interpX[NUM_CORNERS], interpY[NUM_CORNERS];
+  affineTransform(spatialTransform, 0,               0,               interpX[0], interpY[0]);
+  affineTransform(spatialTransform, 0,               imageToAdd.rows, interpX[1], interpY[1]);
+  affineTransform(spatialTransform, imageToAdd.cols, 0,               interpX[2], interpY[2]);
+  affineTransform(spatialTransform, imageToAdd.cols, imageToAdd.rows, interpX[3], interpY[3]);
+  
+  // Adjust the bounds to match the corners
+  for (int i=0; i<NUM_CORNERS; ++i)
+  {
+    if (floor(interpX[i]) < minX) minX = interpX[i];
+    if (ceil( interpX[i]) > maxX) maxX = interpX[i];
+    if (floor(interpY[i]) < minY) minY = interpY[i];
+    if (ceil( interpY[i]) > maxY) maxY = interpY[i];
+  }
+}
+
 
 /// Just do a simple paste of one image on to another.
 bool pasteImage(cv::Mat &outputImage,
@@ -81,25 +108,36 @@ bool pasteImage(cv::Mat &outputImage,
 {
   const int tileSize = outputImage.rows; // Currently the code requires square tiles
     
+  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
+  int minCol, minRow, maxCol, maxRow;
+  cv::Mat newToOutput;
+  cv::invert(spatialTransform, newToOutput);
+  getPasteBoundingBox(outputImage, imageToAdd, newToOutput, minCol, minRow, maxCol, maxRow);
+  
+  //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
+  
   // Iterate over the pixels of the output image
   bool gotValue;
   cv::Vec3b pastePixel;
-  for (int r=0; r<outputImage.rows; r++)
+  float interpX, interpY;
+  for (int r=minRow; r<maxRow; r++)
   {
-    for (int c=0; c<outputImage.cols; c++)
+    for (int c=minCol; c<maxCol; c++)
     {        
       // Compute the equivalent location in the basemap image
-      float interpX, interpY;
       affineTransform(spatialTransform, c, r, interpX, interpY);
       
+      // TODO: Don't use mirrored pixel over real pixel!
       
       // Extract all of the basemap values at that location.
       // - Call the mirror version of the function so we retain all edges.
-      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);
-
+      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);      
+      
       // Skip masked pixels and out of bounds pixels
       if (!gotValue)
+      {
         continue;
+      }
 
       // If the interpolated pixel is good just overwrite the current value in the output image
       outputImage.at<cv::Vec3b>(r, c) = pastePixel;
@@ -142,6 +180,8 @@ int main(int argc, char** argv)
 
   printf("Pasting on HRSC images...\n");
 
+  //TODO: Tile seams could be cleaned up by allowing interpolation with adjacent tiles!
+  
   // For now, just dump all of the HRSC images in one at a time.  
   const size_t numHrscImages = hrscImages.size();
   for (size_t i=0; i<numHrscImages; ++i)

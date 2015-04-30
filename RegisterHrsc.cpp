@@ -138,7 +138,7 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
 
   // Rule out obviously bad matches based on the known starting alignment accuracy
   cv::Mat mask(keypointsA.size(), keypointsB.size(), CV_8UC1);
-  const float MAX_MATCH_PIXEL_DISTANCE = 100; // TODO: Tune this for the base map resolution!
+  const float MAX_MATCH_PIXEL_DISTANCE = 30; // TODO: Tune this for the base map resolution!
   for (size_t j=0; j<keypointsB.size(); ++j)
   {
     cv::Point2f estRefPoint = transformPoint(keypointsB[j].pt, estimatedTransform);
@@ -283,7 +283,7 @@ int main(int argc, char** argv )
   // Load an estimated transform if the user passed one in
   float m[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
   cv::Mat estimatedTransform(3, 3, CV_32FC1, m);
-  if (argc == 5)
+  if (argc == 6)
   {
     std::string estTransformPath = argv[5];
     readTransform(estTransformPath, estimatedTransform);

@@ -624,10 +624,10 @@ cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'       
 cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_gray.tif'     # Resized region converted to grayscale
 
 
-hrscBasePathInList = [#'/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',]
-                      #'/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
-                      #'/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
+hrscBasePathInList = ['/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
 
 outputFolder = '/home/smcmich1/data/hrscMapTest/'
 
@@ -711,13 +711,18 @@ Generate a reduced-resolution of the file to match Noel's map using GDAL_transla
 
 Get a bounding box surrounding the HRSC image and extract that region from Noel's map.
 
-Manually checked spatial transforms:
+Manually checked spatial transforms (200% resolution):
 h0022 = 282, 1190
 h0506 = 80.6, 1323
 h2411 = 243, 2389
 h6419 = 295, 1829
 ---> Need to be able to compute these automatically!
 
+Basemap resolution transforms:
+h0022 = 41, 49
+h0506 = -61, 115
+h2411 = 
+h6419 = 
 
 DB command to find a list of overlapping HRSC files:
 select setname from Files where sensor=1 and minLon<102.64 and maxLon>98.2023 and minLat<-18.6077 and maxLat>-50.1955 and subtype="nd3";

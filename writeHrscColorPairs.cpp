@@ -52,6 +52,7 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   if (!corrector.readProfileCorrection(brightnessPath))
     return false;
 
+  std::cout << "DONE LOADING" << std::endl;
   return true;
 }
 
@@ -118,7 +119,7 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
 int main(int argc, char** argv)
 {
   // Check input arguments
-  if (argc != 10)
+  if (argc != 11)
   {
     printf("usage: WriteColorPairs <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <HRSC Mask> <Transform File Path> <Brightness File Path> <Output Path>\n");
     return -1;

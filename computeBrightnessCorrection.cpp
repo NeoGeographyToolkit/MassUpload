@@ -108,7 +108,6 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, cv::Mat &outputPro
   return true; 
 }
 
-
 void computeGainOffsets(const cv::Mat &baseProfile, const cv::Mat &hrscProfile,
                         BrightnessCorrector &brightness)
 {

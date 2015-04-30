@@ -225,22 +225,30 @@ bool writeTransform(const std::string &outputPath, const cv::Mat &transform)
 // Read a small matrix from a text file
 bool readTransform(const std::string &inputPath, cv::Mat &transform)
 {
+  //printf("Reading transform: %s\n", inputPath.c_str());
   std::ifstream file(inputPath.c_str());
-  char   comma;
-  size_t numRows, numCols;
-  file >> numRows >> comma >> numCols;
-  transform.create(numRows, numCols, CV_32FC1);
-  for (size_t r=0; r<transform.rows; ++r)
+  if (!file.fail())
   {
-    for (size_t c=0; c<transform.cols-1; ++c)
+    char   comma;
+    size_t numRows, numCols;
+    file >> numRows >> comma >> numCols;
+    transform.create(numRows, numCols, CV_32FC1);
+    for (size_t r=0; r<transform.rows; ++r)
     {
-      file >> transform.at<float>(r,c) >> comma;
+      for (size_t c=0; c<transform.cols-1; ++c)
+      {
+        file >> transform.at<float>(r,c) >> comma;
+      }
+      file >> transform.at<float>(r,transform.cols-1);
     }
-    file >> transform.at<float>(r,transform.cols-1);
+    file.close();
   }
-  file.close();
-  
-  return (!file.fail());
+  if (file.fail())
+  {
+    std::cout << "Failed to load transform file: " << inputPath << std::endl;
+    return false;
+  }
+  return true;
 }
 
 /// Try to load the image and then make sure we got valid data.
@@ -284,18 +292,27 @@ public:
   /// Write a gain/offset pair to a CSV file
   bool readProfileCorrection(const std::string &inputPath)
   {
+    //std::cout << "Reading profile correction: " << inputPath << std::endl;
     std::ifstream file(inputPath.c_str());
-    char   comma;
-    size_t numRows;
-    file >> numRows;
-    _gain.create(numRows, 1, CV_32FC1);
-    _offset.create(numRows, 1, CV_32FC1);
-    for (size_t r=0; r<numRows; ++r)
+    if (!file.fail())
     {
-      file >> _gain.at<float>(r,0) >> comma >> _offset.at<float>(r,0);
+      char   comma;
+      size_t numRows;
+      file >> numRows;
+      _gain.create(numRows, 1, CV_32FC1);
+      _offset.create(numRows, 1, CV_32FC1);
+      for (size_t r=0; r<numRows; ++r)
+      {
+        file >> _gain.at<float>(r,0) >> comma >> _offset.at<float>(r,0);
+      }
+      file.close();
     }
-    file.close();   
-    return (!file.fail());
+    if (file.fail())
+    {
+      std::cout << "Failed to load profile correction: " << inputPath << std::endl;
+      return false;
+    }
+    return true;
   }
 
   /// Get the corrected value of a single pixel

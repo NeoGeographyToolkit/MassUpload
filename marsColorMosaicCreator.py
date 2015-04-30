@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import subprocess
+import numpy
 import IrgGeoFunctions
 
 """
@@ -47,6 +48,15 @@ HRSC_BLUE  = 2
 HRSC_NIR   = 3
 HRSC_NADIR = 4
 CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
+
+# Information about Noel's base map
+DEGREES_TO_PROJECTION_METERS = 59274.9
+NOEL_MAP_METERS_PER_PIXEL = 1852.340625 # TODO: Make sure this is accurate before reprojecting everything
+
+# Resolution increase of the output map over the base map in percent.
+RESOLUTION_INCREASE = 400
+
+GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
 
 #----------------------------------------------------------------------------
 # Functions
@@ -124,16 +134,58 @@ def countBlackPixels(imagePath, isGray=True):
 
 
 
-def warpHrscFile(sourcePath, outputFolder, metersPerPixel):
+def warpHrscFile(sourcePath, outputFolder, postfix, metersPerPixel, force=False):
     '''Warps an HRSC file into the same projection space as the base map'''
     fileName   = sourcePath[sourcePath.rfind('/')+1:]
-    warpedPath = os.path.join(outputFolder, fileName)[:-4] + '_resample.tif'
+    warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
     cmd = (GDAL_DIR+'gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
              ' -t_srs "'+PROJ4_STRING+'" -tr '
              + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
-    cmdRunner(cmd, warpedPath)
+    cmdRunner(cmd, warpedPath, force)
     return warpedPath
 
+
+# TODO: Move to a general file
+def projCoordToPixelCoord(x, y, geoInfo):
+    '''Converts from projected coordinates into pixel coordinates using
+       the results from getImageGeoInfo()'''
+
+    xOffset = x - geoInfo['projection_bounds'][0]
+    yOffset = y - geoInfo['projection_bounds'][3]
+    
+    column = xOffset / geoInfo['pixel_size'][0]
+    row    = yOffset / geoInfo['pixel_size'][1]
+    
+    return (column, row)
+
+
+def estimateRegistration(baseImage, otherImage, outputPath):
+    '''Writes an estimated registration transform to a file based on geo metadata.'''
+    # This function assumes the images are in the same projection system!
+    
+    # Get the projection bounds and size in both images
+    baseGeoInfo     = IrgGeoFunctions.getImageGeoInfo(baseImage,  False)
+    otherGeoInfo    = IrgGeoFunctions.getImageGeoInfo(otherImage, False)
+    baseProjBounds  = baseGeoInfo[ 'projection_bounds']
+    otherProjBounds = otherGeoInfo['projection_bounds']
+    baseImageSize   = baseGeoInfo[ 'image_size']
+    otherImageSize  = otherGeoInfo['image_size']
+    
+    #print baseGeoInfo
+    #print '----'
+    #print otherGeoInfo
+    
+    # Now estimate the bounding box of the other image in the base image
+    topLeftCoord = projCoordToPixelCoord(otherProjBounds[0], otherProjBounds[3], baseGeoInfo)
+    
+    # Write the output file
+    with open(outputPath, 'w') as f:
+        f.write('3, 3\n')
+        f.write('1, 0, %lf\n' % (topLeftCoord[0]))
+        f.write('0, 1, %lf\n' % (topLeftCoord[1]))
+        f.write('0, 0, 1\n')
+    if not os.path.exists(outputPath):
+        raise Exception('Failed to create transform file ' + outputPath)
 
 def getTilePrefix(tileRow, tileCol):
     '''Return a standard string representation of a tile index'''
@@ -217,30 +269,91 @@ def writeSubSpatialTransform(fullPath, outputPath, pixelRow, pixelCol):
     fOut.write(fIn.readline()) # Copy the last line
     fIn.close()
     fOut.close()
-
-
-
-def writeSubBrightnessGains(fullPath, outputPath, pixelRow, tileHeight):
-    '''Generates a brightness gains file for a single tile'''
     
-    if os.path.exists(outputPath):
+
+def scaleSpatialTransform(inputPath, outputPath, scale, force=False):
+    '''Scale up a spatial transform for a higher resolution'''
+    
+    if os.path.exists(outputPath) and (not force):
         return
-
-    fIn  = open(fullPath,   'r')
+    
+    fIn  = open(inputPath,  'r')
     fOut = open(outputPath, 'w')
-    numInputLines = int(fIn.readline().strip())
-    fOut.write(str(tileHeight)+'\n') # Write the number of rows in the tile
-    for i in range(pixelRow): # Skip to the start of the pixels in the tile
-        fIn.readline()
     
-    for i in range(tileHeight): # Copy all the lines for this tile
-        fOut.write(fIn.readline())
+    fOut.write(fIn.readline()) # Copy the header
     
+    xParts = fIn.readline().strip().split(',') # Read in the existing offset
+    yParts = fIn.readline().strip().split(',')
+    
+    # Compute and write the new offsets
+    # - We are using translation only affine transforms so this is simple
+    newOffsetX = float(xParts[2]) * scale
+    newOffsetY = float(yParts[2]) * scale
+    fOut.write('%s, %s, %lf\n' % (xParts[0], xParts[1], newOffsetX))
+    fOut.write('%s, %s, %lf\n' % (yParts[0], yParts[1], newOffsetY))
+    
+    fOut.write(fIn.readline()) # Copy the last line
     fIn.close()
     fOut.close()
+
+#def writeSubBrightnessGains(fullPath, outputPath, pixelRow, tileHeight, scale):
+#    '''Generates a brightness gains file for a single tile'''
+#    
+#    if os.path.exists(outputPath):
+#        return
+#    
+#    fIn = open(fullPath,   'r')
+#    fOut = open(outputPath, 'w')
+#    numInputLines = int(fIn.readline().strip())
+#    fOut.write(str(tileHeight)+'\n') # Write the number of rows in the tile
+#    for i in range(pixelRow): # Skip to the start of the pixels in the tile
+#        fIn.readline()
+#    
+#    for i in range(tileHeight): # Copy all the lines for this tile
+#        fOut.write(fIn.readline())
+#    
+#    fIn.close()
+#    fOut.close()
+
+
+
+def splitScaleBrightnessGains(fullPath, tileDict, scale):
+    '''Generates a brightness gains file for a single tile'''
+
+    print 'Generating split brightness gains...'
+    
+    # Read in the entire input file
+    lowResVals = numpy.loadtxt(fullPath, skiprows=1, delimiter=',', usecols=(0,))   
+    lowResRows = range(0,len(lowResVals))
+    
+    for tile in tileDict.itervalues():
+        
+        outputPath = tile['brightnessGainsPath']
+        if os.path.exists(outputPath):
+            continue
+        
+        # Compute the row range in the input tile
+        tileHeight       = tile['height'  ]
+        pixelRow         = tile['pixelRow']
+        fullSizeStartRow = pixelRow
+        fullSizeStopRow  = (pixelRow+tileHeight)
+        
+        # For each desired ouput value, compute the location in the input values
+        thisTileRowsInInput = numpy.empty([tileHeight])
+        index = 0
+        for r in range(fullSizeStartRow, fullSizeStopRow):
+            thisTileRowsInInput[index] = r / scale
+            index += 1
+        # Use numpy to interpolate values 
+        thisTileVals = numpy.interp(thisTileRowsInInput, lowResRows, lowResVals)
+        zeroCol      = [0 for i in thisTileVals]
+            
+        # Write out the interpolated values
+        numpy.savetxt(outputPath, thisTileVals, header=str(tileHeight),  fmt='%1.6f, 0.0', comments='')  
     
 
-def getAdjancentTiles(tile, tileDict):
+
+def getAdjacentTiles(tile, tileDict):
     '''Gets a list containing all the (still valid) tiles which are adjacent to the provided tile'''
     
     tileRow = tile['tileRow'] # The location of the input tile
@@ -273,7 +386,7 @@ def generateNewHrscColor(tile, tileDict, force=False):
         
     try:
         # Get a list af adjacent tiles to pass in to the color transformer
-        adjacentTiles = getAdjancentTiles(tile, tileDict)
+        adjacentTiles = getAdjacentTiles(tile, tileDict)
         
         # Compute a weighting for each tile based on the pixel count
         totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
@@ -300,43 +413,58 @@ def generateNewHrscColor(tile, tileDict, force=False):
     return True
 
 
-def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, outputFolder, metersPerPixel):
+def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePathIn, outputFolder, metersPerPixel):
     '''Convert from HRSC color channels to an RGB image that matches the basemap colors'''
 
     # Set up all of the paths for this HRSC data set
-    setName              = hrscBasePathIn[hrscBasePathIn.rfind('/')+1:]
-    hrscBasePathOut      = os.path.join(outputFolder, setName)
-    tileFolder           = hrscBasePathOut + '_tiles'
-    spatialTransformPath = hrscBasePathOut+'_spatial_transform.csv'
-    brightnessGainsPath  = hrscBasePathOut+'_brightness_gains.csv'
-    hrscInputPaths       = getHrscChannelPaths(hrscBasePathIn)
+    setName                    = hrscBasePathIn[hrscBasePathIn.rfind('/')+1:]
+    hrscBasePathOut            = os.path.join(outputFolder, setName)
+    tileFolder                 = hrscBasePathOut + '_tiles'
+    estimatedTransformPath     = hrscBasePathOut+'_spatial_transform_estimated.csv'
+    spatialTransformPathLowRes = hrscBasePathOut+'_spatial_transform_lowRes.csv'
+    spatialTransformPath       = hrscBasePathOut+'_spatial_transform.csv'
+    brightnessGainsPath        = hrscBasePathOut+'_brightness_gains.csv'
+    hrscInputPaths             = getHrscChannelPaths(hrscBasePathIn)
 
     # Make sure the output directories exist
     if not os.path.exists(outputFolder):
         os.mkdir(outputFolder)
     if not os.path.exists(tileFolder):
         os.mkdir(tileFolder)
-   
+           
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
-    hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), metersPerPixel) for path in hrscInputPaths]
-       
-    # For convenience generate a string containing all the input channel files
+    hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_output_res', metersPerPixel, False)
+                           for path in hrscInputPaths]
+    # Also do a set at the original base map resolution
+    lowResWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_basemap_res', NOEL_MAP_METERS_PER_PIXEL, False)
+                           for path in hrscInputPaths]
+    
+    # For convenience generate strings containing all the input channel files
     hrscPathString = ''
     for path in hrscWarpedPaths:
         hrscPathString += path + ' '
-    
-    # Generate the spatial transform
-    # - TODO: This can be done at a lower resolution than all the following steps!
-    #         There is no point to running this at a higher resolution than the base map.
-    #         Will have to scale the transform up to the full resolution.
-    cmd = './RegisterHrsc ' + basemapGrayPath +' '+ hrscWarpedPaths[HRSC_NADIR] +' '+ spatialTransformPath
-    cmdRunner(cmd, spatialTransformPath, False)
+    lowResHrscPathString = ''
+    for path in lowResWarpedPaths:
+        lowResHrscPathString += path + ' '
 
+    # Estimate the spatial transform using the image metadata
+    estimateRegistration(lowResGrayBaseTile, lowResWarpedPaths[HRSC_NADIR], estimatedTransformPath)
+
+    # TODO: Check the number of inliers!    
+    # Refine the spatial transform using image data
+    # - This is computed at the base map resolution and then scaled up to the output resolution
+    cmd = ('./RegisterHrsc ' + lowResGrayBaseTile +' '+ lowResWarpedPaths[HRSC_NADIR]
+           +' '+ spatialTransformPathLowRes +' '+ str(1.0) +' '+ estimatedTransformPath)
+    cmdRunner(cmd, spatialTransformPathLowRes, False)
+
+    # Generate a full resolution copy of the spatial transform
+    scaleRatio = (RESOLUTION_INCREASE/100.0)
+    scaleSpatialTransform(spatialTransformPathLowRes, spatialTransformPath, scaleRatio, False) 
     
     # Compute the brightness scaling gains
-    # - TODO: Do this in a tile-friendly way!
-    #         Can do this by smoothing out the corrections after they have been computed per-tile.
-    cmd = './computeBrightnessCorrection ' + basemapGrayPath +' '+ hrscPathString +' '+ spatialTransformPath +' '+ brightnessGainsPath
+    # - This is done at low resolution
+    # - The low resolution output is smoothed out later to avoid jagged edges.
+    cmd = './computeBrightnessCorrection ' + lowResGrayBaseTile +' '+ lowResHrscPathString +' '+ spatialTransformPathLowRes +' '+ brightnessGainsPath
     cmdRunner(cmd, brightnessGainsPath, False)
 
 
@@ -362,13 +490,24 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         assert(len(pathList) == numTiles)
     print 'Generated ' +str(numTiles)+ ' tiles.'
 
-
     # Loop through each of the tiles we created and consolidate information across channels
     tileDict = {}
     for i in range(numTiles):
 
-        # Start with the tile info from the first channel
-        thisTileInfo   = tileInfoLists[0][i]
+        # Check the percent valid to see if there is any content in this tile
+        # - Percent valid is the only field that varies by channel
+        # - All the other information can just be read from the first channel
+        thisTileInfo = tileInfoLists[0][i]
+        percentValid = 1.0
+        for c in range(0,NUM_HRSC_CHANNELS):
+            chanInfo = tileInfoLists[c][i]
+            if chanInfo['percentValid'] < percentValid:
+                percentValid = chanInfo['percentValid']
+        thisTileInfo['percentValid'] = percentValid
+        if percentValid < 0.01:
+            print 'Dropping empty tile' + thisTileInfo['prefix']
+            continue
+
         allTilesString = ''
         # Add in paths to the tile for each channel, including a joint string for convenience.
         for c in range(NUM_HRSC_CHANNELS):
@@ -392,8 +531,8 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         # Generate individual tile versions of the spatial transform and brightness gains
         writeSubSpatialTransform(spatialTransformPath, thisTileInfo['spatialTransformPath'],
                                  thisTileInfo['pixelRow'], thisTileInfo['pixelCol'])
-        writeSubBrightnessGains(brightnessGainsPath, thisTileInfo['brightnessGainsPath'],
-                                thisTileInfo['pixelRow'], thisTileInfo['height'])
+        #writeSubBrightnessGains(brightnessGainsPath, thisTileInfo['brightnessGainsPath'],
+        #                        thisTileInfo['pixelRow'], thisTileInfo['height'])
     
         # Make a mask of valid pixels for this tile
         # - It would be great if the input images had a mask.
@@ -403,7 +542,10 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         
         key = thisTileInfo['prefix']
         tileDict[key] = thisTileInfo
-        
+
+    # Generate a "personalized" brightness file for each tile
+    splitScaleBrightnessGains(brightnessGainsPath, tileDict, scaleRatio)
+
     
     # Now that we have all the per-tile info, compute the spatial transform for each tile.
     for tile in tileDict.itervalues():    
@@ -412,8 +554,10 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
         
             # Generate the color pairs
             # - HRSC colors are written with the brightness correction already applied
-            cmd = './writeHrscColorPairs ' + basemapCropPath +' '+ tile['allTilesStringAndMask'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
+            cmd = './writeHrscColorPairs ' + highResColorBaseTile +' '+ tile['allTilesStringAndMask'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
             cmdRunner(cmd, tile['colorPairPath'], False)
+            
+            #raise Exception('DEBUG')
             
             # Compute the color transform
             cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
@@ -442,24 +586,52 @@ def generateHrscColorImage(basemapCropPath, basemapGrayPath, hrscBasePathIn, out
 
 
 
+def getBasemapTile(basemapPath, bigTilePath, smallGrayTilePath,
+                   minLon, maxLon, minLat, maxLat, resolutionIncrease, force=False):
+    '''Given a region of the base map, creates an original resolution and a high resolution tile for it'''
+    
+    smallTilePath = bigTilePath[:-4] + '_lowRes.tif'
+    
+    # Convert the bounding box from degrees to the projected coordinate system (meters)
+    minX = minLon*DEGREES_TO_PROJECTION_METERS
+    maxX = maxLon*DEGREES_TO_PROJECTION_METERS
+    minY = minLat*DEGREES_TO_PROJECTION_METERS
+    maxY = maxLat*DEGREES_TO_PROJECTION_METERS
+    
+    # Crop out the correct section of the base map
+    projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
+    cmd = (GDAL_DIR+'gdal_translate ' + basemapPath +' '+ smallTilePath
+                             +' -projwin '+ projCoordString)
+    cmdRunner(cmd, smallTilePath, force)
+    
+    # Increase the resolution of the cropped image
+    cmd = (GDAL_DIR+'gdal_translate ' + smallTilePath +' '+ bigTilePath
+           +' -outsize '+str(resolutionIncrease)+'% '+str(RESOLUTION_INCREASE)+'% ')
+    cmdRunner(cmd, bigTilePath, force)
+    
+    # Generate the grayscale version of the cropped base map
+    cmd = (GDAL_DIR+'gdal_translate -b 1 ' + smallTilePath +' '+ smallGrayTilePath)
+    cmdRunner(cmd, smallGrayTilePath, force)
+
+
 
 #-------------------------------------------------------------------
 
 
-fullBasemapPath      = '/home/smcmich1/data/hrscMapTest/noel_basemap.tif'
-cropBasemapSmallPath = '/home/smcmich1/data/hrscMapTest/basemap_crop_small.tif'
-cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'
-cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_red.tif'
+fullBasemapPath      = '/home/smcmich1/data/hrscMapTest/projection_space_basemap.tif'
+cropBasemapSmallPath = '/home/smcmich1/data/hrscMapTest/basemap_crop_orig_res.tif' # Cropped basemap at original resolution
+cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'          # Cropped region resized to output resolution
+cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_gray.tif'     # Resized region converted to grayscale
 
 
-hrscBasePathInList = ['/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
+hrscBasePathInList = [#'/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
+                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',]
+                      #'/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
+                      #'/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
 
 outputFolder = '/home/smcmich1/data/hrscMapTest/'
 
-GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
+
 
 print 'Starting basemap enhancement script...'
 
@@ -469,39 +641,16 @@ print 'Starting basemap enhancement script...'
 # - For now we extract an arbitrary chunk, later this will be tiled.
 #
 ## Get the HRSC bounding box and expand it
-#HRSC_BB_EXPAND_DEGREES = 1.5
-#(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
-#minLon -= HRSC_BB_EXPAND_DEGREES
-#maxLon += HRSC_BB_EXPAND_DEGREES
-#minLat -= HRSC_BB_EXPAND_DEGREES
-#maxLat += HRSC_BB_EXPAND_DEGREES
-#
-#print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
-#
-## Convert the bounding box from degrees to the projected coordinate system (meters)
-DEGREES_TO_PROJECTION_METERS = 59274.9
-NOEL_MAP_METERS_PER_PIXEL = 1852.4
-#minX = minLon*DEGREES_TO_PROJECTION_METERS
-#maxX = maxLon*DEGREES_TO_PROJECTION_METERS
-#minY = minLat*DEGREES_TO_PROJECTION_METERS
-#maxY = maxLat*DEGREES_TO_PROJECTION_METERS
-#
-## Crop out the correct section of the base map
-#projCoordString = '%f %f %f %f' % (minX, maxLat, maxX, minY)
-#cmd = (GDAL_DIR+'gdal_translate ' + fullBasemapPath +' '+ cropBasemapSmallPath
-#                         +' -projwin '+ projCoordString)
-#cmdRunner(cmd, cropBasemapSmallPath)
-#
-## Increase the resolution of the cropped image
-## TODO: Can this be done in one step?
-RESOLUTION_INCREASE = 200 # In percent
-#cmd = (GDAL_DIR+'gdal_translate ' + cropBasemapSmallPath +' '+ cropBasemapPath
-#       +' -outsize '+str(RESOLUTION_INCREASE)+'% '+str(RESOLUTION_INCREASE)+'% ')
-#cmdRunner(cmd, cropBasemapPath)
-#
-## Generate the grayscale version of the cropped basemap
-#cmd = (GDAL_DIR+'gdal_translate -b 1 ' + cropBasemapPath +' '+ cropBasemapGrayPath)
-#cmdRunner(cmd, cropBasemapGrayPath)
+HRSC_BB_EXPAND_DEGREES = 1.5
+(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
+minLon -= HRSC_BB_EXPAND_DEGREES
+maxLon += HRSC_BB_EXPAND_DEGREES
+minLat -= HRSC_BB_EXPAND_DEGREES
+maxLat += HRSC_BB_EXPAND_DEGREES
+
+print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
+getBasemapTile(fullBasemapPath, cropBasemapPath, cropBasemapGrayPath,
+                   minLon, maxLon, minLat, maxLat, RESOLUTION_INCREASE, False)
 
 # In the future:
 #   For each chunk of the basemap, find all the HRSC images that overlap it.
@@ -514,9 +663,15 @@ RESOLUTION_INCREASE = 200 # In percent
 
 for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
+
+    #try:
+
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
     metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
     tileDict = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscPath, outputFolder, metersPerPixel)
+
+    #except: # Testing registration
+    #    continue
 
     # TODO: Need to handle tiling of the output mosaic also!
     # TODO: This C++ program can do multiple tiles in one call.
@@ -537,7 +692,7 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
         except CmdRunException:
             tile['stillValid'] = False
 
-    #raise Exception('DEBUG')
+        #raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 
@@ -547,59 +702,14 @@ print 'Basemap enhancement script completed!'
 Generate RED version of Noel's map (ONCE)
 Equitorial circumference = 21338954.25548 / 2 = 10669477.1 <--- x span
 Polar      circumference = 21338954.25548 / 4 =  5334738.6 <--- y span
-gdal_translate RA_Albedo.tif noel_basemap.tif
-               -a_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
-               -a_ullr -10669477.1 5334738.6 10669477.1 -5334738.6
+gdal_translate mars_full_albedo.tif projection_space_basemap.tif -a_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr -10669477.1 5334738.6 10669477.1 -5334738.6
 gdal_translate noel_basemap.tif noel_basemap_red.tif -b 1
 DONE
-
-FETCH HRSC IMAGE
-
-Pick out HRSC image of interest and download ND3 file
-DONE
-
-PREP INPUT IMAGES
-
---> TODO: Try these steps out a increased resolution from the base map!
-            2x or 4x should be good.
 
 Generate a reduced-resolution of the file to match Noel's map using GDAL_translate.
 - Noel's map resolution is (circumference 21,344 km/ 11520 pixels) = 1852.4 meters per pixel.
 
 Get a bounding box surrounding the HRSC image and extract that region from Noel's map.
-
-Min latitude  = -50.1955
-Max latitude  = -18.6077
-Min longitude = 98.2023
-Max longitude = 102.64
-
-Convert from lat/lon to projected coordinates by multiplying degrees with these constants:
-meters per degree lon = 59274.9
-meters per degree lat = 59274.9
-
-gdal_translate noel_basemap_red.tif red_crop.tif -projwin 97.2023 -17.6077 103.64 -51.1955
- 5761656.61227 -1043694.65673  6143250.636 -3034608.14295
-
-
-Transform the HRSC image to the same projection/resolution as the base map
-~/programs/gdal-1.11.0-install/bin/gdalwarp h0022_0000_nd3.tif h0022_0000_nd3_resample.tif -t_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"  -tr 1852  1852 -overwrite
-
-
-ALIGN THE IMAGES
-
-Compute a pixel to pixel match between those two images.
-- HRSC to NOEL => 24.384001, 32.455997 (basemap res)
-
-
-GENERATE SHARPENED BASE TILE
-
-Generate an unsharp image from the HRSC pan image.
-
-Iterate through the base tile and for each pixel use the transform to find the matching point
- in the unsharp image, then add the unsharp image value to the base tile.  Also create a mask
- showing which pixels were modified (many won't overlap with the HRSC image).
-
-
 
 Manually checked spatial transforms:
 h0022 = 282, 1190
@@ -609,19 +719,8 @@ h6419 = 295, 1829
 ---> Need to be able to compute these automatically!
 
 
-"""
-
-
-
-"""
 DB command to find a list of overlapping HRSC files:
 select setname from Files where sensor=1 and minLon<102.64 and maxLon>98.2023 and minLat<-18.6077 and maxLat>-50.1955 and subtype="nd3";
-
-
-Alignment target = /byss/mars/themis/dayir_100m/
-- Noel's map goes down to +/-90 degrees lat, but matching will gets very hard outside 60 degrees!
-- Alignment between Noel and Themis is close but not exact, definately possible with ASP tools.
-
 
 
 A professionally made partial mosaic: http://maps.planet.fu-berlin.de/
@@ -629,63 +728,6 @@ A professionally made partial mosaic: http://maps.planet.fu-berlin.de/
 
 Query sqlite3 database to get a list of all the HRSC data sets after a certain date
     3500 sets -> 18000 files!
-
-From each of these, we will need the following:
-    ir3
-    nd3
-    red
-    green
-    blue
-
-Align the nd3 image to the THEMIS Day Time global map.
-    Vision workbench?
-    
-Generate a grid of pixel tie points between the nd3 and THEMIS
-
-Generate a grid of pixel tie points between the mars color reference and THEMIS
-    Only do this once!
-
-Make a list of pixel pairs: HRSC - COLOR REF
-
-Compute 5x3 transform using pixel pairs
-
-Transfrom HRSC bands to a new RGB representation using the transform
-
-Apply any image enhancement algorithms
-
-Transform the RGB image to align with the THEMIS base map
-
-While we are at it, try applying PAN unsharp mask to the upsampled color base layer!
-    - This might be the only way to easily make a good mosaic
-
-
-OUTSTANDING ISSUES
-- Dark side color handling?
-    - Ensure fixed brightness across image?
-        - What about dark spots and poles?
-        - Maybe brightness profile changed to match the color reference map?
-    - Transform changes gradually down image?
-        - Think of color transform as a rotation that smoothly changes
-        - Can this be done between images as well?
-    HRSC_h0344_0000_nd3
-    HRSC_h0543_0000_nd3
-    HRSC_h2011_0001_nd3
-
-- Streak handling and other random crap
-    HRSC_h0334_0000_nd3
-    HRSC_h1970_0000_nd3
-
-- Alignment verification
-
-- Seam blending --> Making sure the colors match!
-    - Images are captured at all sorts of light levels and angles so even a grayscale
-      mosaic is hard to get right (see http://maps.planet.fu-berlin.de/)
-
-
-- Can we do everything in OpenCV?
-    - The largest file is 13,500x150,000
-    - Image alignment is done at a lower resolution so no problem.
-    - Everything else can be done in dumb tiles.
 
 
 List of overlapping images for h0022_0000_nd3:

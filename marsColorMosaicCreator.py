@@ -245,10 +245,10 @@ def splitImage(imagePath, outputFolder, tileSize=512):
     return outputTileInfoList
 
 
-def writeSubSpatialTransform(fullPath, outputPath, pixelRow, pixelCol):
+def writeSubSpatialTransform(fullPath, outputPath, pixelRow, pixelCol, force):
     '''Generates a spatial transform file for a single tile'''
     
-    if os.path.exists(outputPath):
+    if os.path.exists(outputPath) and (not force):
         return
     
     fIn  = open(fullPath,   'r')
@@ -426,11 +426,15 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     brightnessGainsPath        = hrscBasePathOut+'_brightness_gains.csv'
     hrscInputPaths             = getHrscChannelPaths(hrscBasePathIn)
 
+    forceFromHere = False # Force recomputation
+
     # Make sure the output directories exist
     if not os.path.exists(outputFolder):
         os.mkdir(outputFolder)
     if not os.path.exists(tileFolder):
         os.mkdir(tileFolder)
+           
+    #forceFromHere = True
            
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
     hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_output_res', metersPerPixel, False)
@@ -455,17 +459,19 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     # - This is computed at the base map resolution and then scaled up to the output resolution
     cmd = ('./RegisterHrsc ' + lowResGrayBaseTile +' '+ lowResWarpedPaths[HRSC_NADIR]
            +' '+ spatialTransformPathLowRes +' '+ str(1.0) +' '+ estimatedTransformPath)
-    cmdRunner(cmd, spatialTransformPathLowRes, False)
+    cmdRunner(cmd, spatialTransformPathLowRes, forceFromHere)
+    
+    #raise Exception('DEBUG')
 
     # Generate a full resolution copy of the spatial transform
     scaleRatio = (RESOLUTION_INCREASE/100.0)
-    scaleSpatialTransform(spatialTransformPathLowRes, spatialTransformPath, scaleRatio, False) 
+    scaleSpatialTransform(spatialTransformPathLowRes, spatialTransformPath, scaleRatio, True) 
     
     # Compute the brightness scaling gains
     # - This is done at low resolution
     # - The low resolution output is smoothed out later to avoid jagged edges.
     cmd = './computeBrightnessCorrection ' + lowResGrayBaseTile +' '+ lowResHrscPathString +' '+ spatialTransformPathLowRes +' '+ brightnessGainsPath
-    cmdRunner(cmd, brightnessGainsPath, False)
+    cmdRunner(cmd, brightnessGainsPath, forceFromHere)
 
 
     # Break the registered image up into tiles
@@ -530,15 +536,13 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
         
         # Generate individual tile versions of the spatial transform and brightness gains
         writeSubSpatialTransform(spatialTransformPath, thisTileInfo['spatialTransformPath'],
-                                 thisTileInfo['pixelRow'], thisTileInfo['pixelCol'])
-        #writeSubBrightnessGains(brightnessGainsPath, thisTileInfo['brightnessGainsPath'],
-        #                        thisTileInfo['pixelRow'], thisTileInfo['height'])
+                                 thisTileInfo['pixelRow'], thisTileInfo['pixelCol'], forceFromHere)
     
         # Make a mask of valid pixels for this tile
         # - It would be great if the input images had a mask.
         # - Currently all-black pixels anywhere in the image get masked out!
         cmd = './makeSimpleImageMask ' + thisTileInfo['tileMaskPath'] +' '+ thisTileInfo['allTilesString']
-        cmdRunner(cmd, thisTileInfo['tileMaskPath'], False)
+        cmdRunner(cmd, thisTileInfo['tileMaskPath'], forceFromHere)
         
         key = thisTileInfo['prefix']
         tileDict[key] = thisTileInfo
@@ -555,13 +559,13 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
             # Generate the color pairs
             # - HRSC colors are written with the brightness correction already applied
             cmd = './writeHrscColorPairs ' + highResColorBaseTile +' '+ tile['allTilesStringAndMask'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
-            cmdRunner(cmd, tile['colorPairPath'], False)
+            cmdRunner(cmd, tile['colorPairPath'], forceFromHere)
             
             #raise Exception('DEBUG')
             
             # Compute the color transform
             cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
-            cmdRunner(cmd, tile['colorTransformPath'], False)
+            cmdRunner(cmd, tile['colorTransformPath'], forceFromHere)
             
         except CmdRunException: # Flag errors with this tile
             tile['stillValid'] = False
@@ -572,7 +576,7 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     for tile in tileDict.itervalues():
         
         # New color generation is handled in this function
-        generateNewHrscColor(tile, tileDict, False)
+        generateNewHrscColor(tile, tileDict, forceFromHere)
         
         #raise Exception('DEBUG')
 
@@ -721,7 +725,7 @@ h6419 = 295, 1829
 Basemap resolution transforms:
 h0022 = 41, 49
 h0506 = -61, 115
-h2411 = 
+h2411 = 122, 583
 h6419 = 
 
 DB command to find a list of overlapping HRSC files:

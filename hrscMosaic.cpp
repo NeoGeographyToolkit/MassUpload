@@ -101,6 +101,7 @@ void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, c
   }
 }
 
+// TODO: Need a bounding box class!
 
 /// Just do a simple paste of one image on to another.
 bool pasteImage(cv::Mat &outputImage,
@@ -114,6 +115,11 @@ bool pasteImage(cv::Mat &outputImage,
   cv::invert(spatialTransform, newToOutput);
   getPasteBoundingBox(outputImage, imageToAdd, newToOutput, minCol, minRow, maxCol, maxRow);
   
+  // Restrict the paste ROI to valid bounds --> Should use a class function!
+  if (minCol < 0)                minCol = 0;
+  if (maxCol > outputImage.cols) maxCol = outputImage.cols;
+  if (minRow < 0)                minRow = 0;
+  if (maxRow > outputImage.rows) maxRow = outputImage.rows;
   //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
   
   // Iterate over the pixels of the output image
@@ -138,7 +144,7 @@ bool pasteImage(cv::Mat &outputImage,
       {
         continue;
       }
-
+      
       // If the interpolated pixel is good just overwrite the current value in the output image
       outputImage.at<cv::Vec3b>(r, c) = pastePixel;
 

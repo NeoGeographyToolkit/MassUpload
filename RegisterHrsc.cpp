@@ -106,7 +106,7 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
   //GaussianBlur( src, src, Size(3,3), 0, 0, BORDER_DEFAULT );
   //cv::GaussianBlur( matchImageIn, matchImageIn, cv::Size(3,3), 0, 0, cv::BORDER_DEFAULT );
   
-  const int kernel_size = 5;
+  const int kernel_size = 3; // TODO: Try with different kernel sizes?
   const int scale = 1;
   const int delta = 0;
   cv::Laplacian( refImageIn,   temp, CV_16S, kernel_size, scale, delta, cv::BORDER_DEFAULT );
@@ -342,6 +342,7 @@ int main(int argc, char** argv )
   */
   
   // The output transform is from the HRSC image to the base map
+  //transform = estimatedTransform; //DEBUG!!!
   writeTransform(outputPath, transform);
   
   return 0;

@@ -424,6 +424,7 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     spatialTransformPathLowRes = hrscBasePathOut+'_spatial_transform_lowRes.csv'
     spatialTransformPath       = hrscBasePathOut+'_spatial_transform.csv'
     brightnessGainsPath        = hrscBasePathOut+'_brightness_gains.csv'
+    lowResMaskPath             = hrscBasePathOut+'_low_res_mask.tif'
     hrscInputPaths             = getHrscChannelPaths(hrscBasePathIn)
 
     forceFromHere = False # Force recomputation
@@ -450,6 +451,10 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     lowResHrscPathString = ''
     for path in lowResWarpedPaths:
         lowResHrscPathString += path + ' '
+
+    # Make a mask at the low resolution
+    cmd = './makeSimpleImageMask ' + lowResMaskPath +' '+ lowResHrscPathString
+    cmdRunner(cmd, lowResMaskPath, forceFromHere)
 
     # Estimate the spatial transform using the image metadata
     estimateRegistration(lowResGrayBaseTile, lowResWarpedPaths[HRSC_NADIR], estimatedTransformPath)
@@ -663,7 +668,12 @@ getBasemapTile(fullBasemapPath, cropBasemapPath, cropBasemapGrayPath,
 #------------------------------------
 # Process the individual HRSC images and add them to the mosaic
 
-# TODO: We need HRSC masks to handle the borders properly!!!
+# TODO: Need to handle tiling of the output mosaic also!
+# TODO: This C++ program can do multiple tiles in one call.
+mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
+
+if os.path.exists(mosaicPath):
+    os.remove(mosaicPath) # Clear the existing mosaic file
 
 for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
@@ -677,9 +687,8 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
     #except: # Testing registration
     #    continue
 
-    # TODO: Need to handle tiling of the output mosaic also!
-    # TODO: This C++ program can do multiple tiles in one call.
-    mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
+    # TODO: Choose tile order based on edge content?
+
     for tile in tileDict.itervalues():
     
         if not tile['stillValid']: # Skip tiles which have already failed
@@ -696,7 +705,7 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
         except CmdRunException:
             tile['stillValid'] = False
 
-        #raise Exception('DEBUG')
+    raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

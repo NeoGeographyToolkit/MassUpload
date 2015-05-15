@@ -1,7 +1,22 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <opencv2/opencv.hpp>
+
+
+#include "opencv2/stitching/detail/autocalib.hpp"
+#include "opencv2/stitching/detail/blenders.hpp"
+#include "opencv2/stitching/detail/timelapsers.hpp"
+#include "opencv2/stitching/detail/camera.hpp"
+#include "opencv2/stitching/detail/exposure_compensate.hpp"
+#include "opencv2/stitching/detail/matchers.hpp"
+#include "opencv2/stitching/detail/motion_estimators.hpp"
+#include "opencv2/stitching/detail/seam_finders.hpp"
+#include "opencv2/stitching/detail/util.hpp"
+#include "opencv2/stitching/detail/warpers.hpp"
+#include "opencv2/stitching/warpers.hpp"
+
 
 #include <HrscCommon.h>
 
@@ -15,7 +30,198 @@
  
  */
 
+const int BLEND_DIST_GLOBAL = 21;
+
 //=============================================================
+
+/// Sets up the base and paste masks so we get the desired images in the right places
+void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &pasteMasks,
+                                               const std::vector<cv::Mat> &spatialTransforms,
+                         cv::Mat &baseMaskOut)
+{
+  //  We want the base mask to be invalid underneath the paste mask except for the edges.
+  //  Tile edges do not count as edges for this purpose.
+  const int EDGE_SIZE = 41;//BLEND_DIST_GLOBAL;
+  
+  baseMask.copyTo(baseMaskOut);
+  
+  const size_t numMasks = pasteMasks.size();
+  
+  cv::Mat kernel(EDGE_SIZE, EDGE_SIZE, CV_8UC1, 255);
+  cv::Mat shrunkPasteMask, invertPasteMask, tempMat;
+  for (size_t i=0; i<numMasks; ++i)
+  {
+    
+    // Generate a shrunk version 
+    cv::erode(pasteMasks[i], shrunkPasteMask, kernel);
+    //shrunkPasteMask = pasteMasks[i];
+    
+    // Subtract the the shrunk version from the base mask
+    cv::absdiff(shrunkPasteMask, 255, invertPasteMask);
+    
+    cv::Rect pasteRoi(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
+                      static_cast<int>(-spatialTransforms[i].at<float>(1, 2)),
+                      invertPasteMask.cols, invertPasteMask.rows);
+    std::cout << pasteRoi << std::endl;
+    baseMaskOut.copyTo(tempMat);
+    cv::Mat outSection(baseMaskOut, pasteRoi);
+    cv::min(invertPasteMask, tempMat(pasteRoi), outSection);
+    
+    // DEBUG
+    std::string path = "shrunkPasteMask" + itoa(i) + ".tif";
+    cv::imwrite(path, shrunkPasteMask);
+    path = "invertPasteMask" + itoa(i) + ".tif";
+    cv::imwrite(path, invertPasteMask);
+    path = "baseMaskOut_" + itoa(i) + ".tif";
+    cv::imwrite(path, baseMaskOut);
+  }
+  
+}
+
+/// Paste new images using a graph cut to blend the seams.
+bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
+                         const std::vector<cv::Mat> &pasteImages,
+                         const std::vector<cv::Mat> &pasteMasks,
+                         const std::vector<cv::Mat> &spatialTransforms,
+                                           cv::Mat  &outputImage)
+{
+    const float FEATHER_SHARPNESS = 0.05f;
+    const int   NUM_BLEND_BANDS   = 2;
+    
+    // OpenCV provides the multi band blender and a feather blender
+    const bool USE_MULTI_BLENDER = false;
+    
+    size_t numImages = pasteImages.size() + 1;
+    
+    // Set up the initial image masks
+    // - Need to avoid feathering at the inter-tile boundaries.
+    //TODO
+    
+    // For now just use the input masks
+    cv::Mat baseMaskTrue(baseImage.rows, baseImage.cols, CV_8UC1, 255);
+    cv::Mat baseMaskShrunk;
+    setImageMasks(baseMaskTrue, pasteMasks, spatialTransforms, baseMaskShrunk);
+    
+    printf("Converting data...\n");
+    
+    // Need to convert from Mat to UMat?
+    std::vector<cv::UMat >  umatImages(numImages);
+    std::vector<cv::UMat >  seamMasks (numImages);
+    std::vector<cv::Point> corners   (numImages);
+    std::vector<cv::Size > sizes     (numImages);
+    for (int i = 0; i < numImages-1; ++i)
+    {
+      pasteImages[i].convertTo(umatImages[i], CV_32F);
+      pasteMasks [i].copyTo(seamMasks [i]);
+      
+      // The input transform is just a translation in affine format
+      // - TODO: Make this cleaner, get out inversion
+      corners[i] = cv::Point(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
+                             static_cast<int>(-spatialTransforms[i].at<float>(1, 2)));
+    }
+    printf("Converting data 2...\n");
+    // Add the base map to the list of input images with a mask
+    const int baseIndex = numImages-1;
+    baseImage.convertTo(umatImages[baseIndex], CV_32F);
+    baseMaskShrunk.copyTo(seamMasks[baseIndex]);
+    corners[baseIndex] = cv::Point(0,0);
+
+    
+    // Record the size of each input image
+    for (int i = 0; i < numImages; ++i){
+      sizes[i] = umatImages[i].size();
+      std::cout << "sizeI = " << sizes[i] << std::endl;
+      std::cout << "sizeM = " << seamMasks[i].size() << std::endl;
+    }
+
+    printf("Dumping input masks...\n");
+      
+    // Dump all the input masks to disk for debugging
+    for (size_t i=0; i<numImages; ++i)
+    {
+      std::cout << "Corner: " << corners[i] << std::endl;
+        
+      std::string path = "pre_seam_mask" + itoa(i) + ".tif";
+      cv::imwrite(path, seamMasks[i]);
+      
+      //path = "image_in_" + itoa(i) + ".tif";
+      //cv::imwrite(path, umatImages[i]);
+    }
+    
+    // Initialize seam finder
+    cv::Ptr<cv::detail::SeamFinder> seamFinder;
+    
+    // TODO: Pick one of these!
+    //seamFinder = cv::makePtr<cv::detail::VoronoiSeamFinder>();
+    //seamFinder = cv::makePtr<cv::detail::GraphCutSeamFinder>(cv::detail::GraphCutSeamFinderBase::COST_COLOR);
+    float terminal_cost      = 100.f;//10000.f; // TODO Adjust these!
+    float bad_region_penalty = 10.f;//1000.f;
+    seamFinder = cv::makePtr<cv::detail::GraphCutSeamFinder>(cv::detail::GraphCutSeamFinderBase::COST_COLOR_GRAD,
+                                                             terminal_cost, bad_region_penalty);
+    if (!seamFinder)
+    {
+      std::cout << "Can't create the seam finder!'\n";
+      return false;
+    }
+
+    // Call seam finder
+    printf("Running seam finder...\n");
+    seamFinder->find(umatImages, corners, seamMasks);
+    
+    printf("Dumping output masks...\n");
+    // Dump all the output masks to disk for debugging
+    for (size_t i=0; i<numImages; ++i)
+    {
+      std::string path = "seam_mask" + itoa(i) + ".tif";
+      cv::imwrite(path, seamMasks[i]);
+    }
+    
+    // Initialize the blender
+    printf("Initializing blender...\n");
+    cv::Ptr<cv::detail::Blender> blender;
+    bool TRY_GPU = false;
+    
+    if (USE_MULTI_BLENDER)
+    {
+      //blender = cv::detail::Blender::createDefault(cv::detail::Blender::MULTI_BAND, TRY_GPU); // Feather or pyramid blend
+      //cv::detail::MultiBandBlender* mb = dynamic_cast<cv::detail::MultiBandBlender*>(blender.get());
+      //mb->setNumBands(NUM_BLEND_BANDS);
+      blender = cv::Ptr<cv::detail::Blender>(new cv::detail::MultiBandBlender(TRY_GPU, NUM_BLEND_BANDS));
+      
+    }
+    else // Use the feather blender
+    {
+      blender = cv::detail::Blender::createDefault(cv::detail::Blender::FEATHER, TRY_GPU); // Feather or pyramid blend
+      cv::detail::FeatherBlender* fb = dynamic_cast<cv::detail::FeatherBlender*>(blender.get());
+      fb->setSharpness(FEATHER_SHARPNESS); // TODO: Set this
+    }
+    
+    
+    blender->prepare(corners, sizes);
+    
+    // Feed all the tiles into the blender
+    for (size_t i=0; i<numImages; ++i)
+    {
+      cv::Mat tempImg;
+      umatImages[i].convertTo(tempImg, CV_16S); // Image must be CV_16SC3 and mask must be CV_8U
+      blender->feed(tempImg, seamMasks[i], corners[i]);
+    }
+    
+    // Blend the images
+    printf("Running blender...\n");
+    cv::Mat resultMask;
+    blender->blend(outputImage, resultMask);
+    
+    cv::imwrite("blended.tif", outputImage);
+    cv::imwrite("blendMask.tif", resultMask);
+    
+    printf("Finished!\n");
+   
+}
+
+
+
+
 
 /// Load all the input files
 bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
@@ -105,7 +311,7 @@ void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, c
 
 /// Just do a simple paste of one image on to another.
 bool pasteImage(cv::Mat &outputImage,
-                const cv::Mat imageToAdd, const cv::Mat imageMask, const cv::Mat &spatialTransform)
+                const cv::Mat &imageToAdd, const cv::Mat &imageMask, const cv::Mat &spatialTransform)
 {
   const int tileSize = outputImage.rows; // Currently the code requires square tiles
     
@@ -130,7 +336,7 @@ bool pasteImage(cv::Mat &outputImage,
   {
     for (int c=minCol; c<maxCol; c++)
     {        
-      // Compute the equivalent location in the basemap image
+      // Compute the equivalent location in the added image
       affineTransform(spatialTransform, c, r, interpX, interpY);
       
       // TODO: Don't use mirrored pixel over real pixel!
@@ -190,11 +396,13 @@ int main(int argc, char** argv)
   
   // For now, just dump all of the HRSC images in one at a time.  
   const size_t numHrscImages = hrscImages.size();
-  for (size_t i=0; i<numHrscImages; ++i)
-  {
-    pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
-  }
+  //for (size_t i=0; i<numHrscImages; ++i)
+  //{
+  //  pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
+  //}
 
+  pasteImagesGraphCut(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
+  
   printf("Writing output file...\n");
   
   // Write the output image

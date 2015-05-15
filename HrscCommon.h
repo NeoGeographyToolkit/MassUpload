@@ -1,6 +1,7 @@
 
 
 #include <stdio.h>
+#include <sstream>
 #include <opencv2/opencv.hpp>
 
 #include <vw/Math/Geometry.h>
@@ -11,6 +12,14 @@
 
 const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
+
+
+std::string itoa(const int i)
+{
+  std::stringstream s;
+  s << i;
+  return s.str();
+}
 
 void affineTransform(const cv::Mat &transform, float xIn, float yIn, float &xOut, float &yOut)
 {

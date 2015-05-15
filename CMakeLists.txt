@@ -106,6 +106,9 @@ link_directories(${Boost_LIBRARY_DIRS})
 #==================================================================================
 # Executables
 
+add_executable( sample_rotation_stitcher sample_rotation_stitcher.cpp )
+target_link_libraries( sample_rotation_stitcher ${OpenCV_LIBS})
+
 add_executable( RegisterHrsc RegisterHrsc.cpp )
 target_link_libraries( RegisterHrsc ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
 

@@ -689,6 +689,7 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
     # TODO: Choose tile order based on edge content?
 
+    i = 0
     for tile in tileDict.itervalues():
     
         if not tile['stillValid']: # Skip tiles which have already failed
@@ -705,7 +706,9 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
         except CmdRunException:
             tile['stillValid'] = False
 
-    raise Exception('DEBUG')
+        #i += 1
+        #if i == 3:
+    #raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

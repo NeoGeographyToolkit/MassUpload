@@ -30,7 +30,7 @@
  
  */
 
-const int BLEND_DIST_GLOBAL = 15;
+const int BLEND_DIST_GLOBAL = 64;
 
 //=============================================================
 
@@ -238,7 +238,72 @@ bool pasteWeightedImage(cv::Mat &outputImage,
 
 
 
+/// A weighted simple paste of one image on to another.
+bool pasteWeightedImage2(cv::Mat &outputImage,
+                         const cv::Mat &imageToAdd, const cv::Mat &imageMask,
+                         const cv::Mat &imageWeight, const cv::Mat &spatialTransform)
+{
+  const int tileSize = imageToAdd.rows; // Currently the code requires square tiles
+  
+  // Use a simple integer translation to match the input masks!
+  const int colOffset = static_cast<int>(spatialTransform.at<float>(0, 2));
+  const int rowOffset = static_cast<int>(spatialTransform.at<float>(1, 2));
+    
+  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
+  int minCol, minRow, maxCol, maxRow;
+  cv::Mat newToOutput;
+  cv::invert(spatialTransform, newToOutput);
+  minCol = -colOffset;
+  minRow = -rowOffset;
+  maxCol = minCol + tileSize;
+  maxRow = minRow + tileSize;
+  
+  // Restrict the paste ROI to valid bounds --> Should use a class function!
+  if (minCol < 0)                minCol = 0;
+  if (maxCol > outputImage.cols) maxCol = outputImage.cols;
+  if (minRow < 0)                minRow = 0;
+  if (maxRow > outputImage.rows) maxRow = outputImage.rows;
+  //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
+  
+  
+  
+  // TODO: Use OpenCV calls to replace this block of code!
+  // TODO: Why does this produce better results than OpenCV?
+  
+  // Iterate over the pixels of the output image
+  cv::Vec3b pastePixel, currentPixel;
+  unsigned char maskPixel;
+  const int NUM_RGB_CHANNELS = 3;
+  for (int r=minRow; r<maxRow; r++)
+  {
+    for (int c=minCol; c<maxCol; c++)
+    {
+      const int smallR = r+rowOffset;
+      const int smallC = c+colOffset;
+      pastePixel = imageToAdd.at<cv::Vec3b>(smallR, smallC);
+      maskPixel  = imageMask.at<unsigned char>(smallR, smallC);
+      
+      // Skip masked pixels and out of bounds pixels
+      if (maskPixel == 0)
+      {
+        continue;
+      }
+      
+      // If the interpolated pixel is good add the weighted value to the output image
+      float weight = imageWeight.at<float>(smallR, smallC);
+      currentPixel = outputImage.at<cv::Vec3b>(r, c);
+      for (int chan=0; chan<NUM_RGB_CHANNELS; chan++)
+      {
+        float newVal = static_cast<float>(pastePixel[chan])*weight;
+        currentPixel[chan] += static_cast<unsigned char>(newVal);
+      }
+      outputImage.at<cv::Vec3b>(r, c) = currentPixel;
 
+    } // End col loop
+  } // End row loop
+
+  return true;
+}
 
 
 
@@ -333,9 +398,6 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     
     // Set up the initial image masks
     // - Need to avoid feathering at the inter-tile boundaries.
-    //TODO
-    
-    // For now just use the input masks
     cv::Mat baseMaskTrue(baseImage.rows, baseImage.cols, CV_8UC1, 255);
     cv::Mat baseMaskShrunk;
     std::vector<cv::Mat> pasteMasksShrunk;
@@ -478,7 +540,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
           cv::imwrite(path, temp);
         }
     }
-    
+    /*
     // Blend the images
     printf("Running blender...\n");
     cv::Mat resultImage, resultMask;
@@ -486,10 +548,10 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     printf("Blended!\n");
     
     resultImage.convertTo(outputImage, CV_8U); // The result comes out as CV_16S
-    cv::imwrite("blendMask.tif", resultMask);
+    //cv::imwrite("blendMask.tif", resultMask);
+    */
     
     
-    /*
     outputImage = cv::Mat::zeros(baseImage.rows, baseImage.cols, CV_8UC3);
     
     cv::Mat basemapMask(baseImage.rows, baseImage.cols, CV_8UC1, 255);
@@ -501,9 +563,9 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     // For now, just dump all of the HRSC images in one at a time.  
     for (size_t i=0; i<numImages-1; ++i)
     {
-      pasteWeightedImage(outputImage, pasteImages[i], pasteMasksShrunk[i], imageWeights[i], spatialTransforms[i]);
+      pasteWeightedImage2(outputImage, pasteImages[i], pasteMasksShrunk[i], imageWeights[i], spatialTransforms[i]);
     }    
-    */
+    
     
     /*
     // Note: Images are stored in BGR format
@@ -558,7 +620,7 @@ int main(int argc, char** argv)
 
 
   // Initialize the output image to be identical to the input basemap image
-  //cv::Mat outputImage(basemapImage);
+  
 
   printf("Pasting on HRSC images...\n");
 
@@ -579,11 +641,12 @@ int main(int argc, char** argv)
   
   printf("Pasted the base.\n");
   
-  // For now, just dump all of the HRSC images in one at a time.  
+  // For now, just dump all of the HRSC images in one at a time.
+  cv::Mat outputImage(basemapImage);
   for (size_t i=0; i<numHrscImages; ++i)
   {
-    pasteWeightedImage(outputImage, hrscImages[i], hrscMasks[i], imageWeights[i], spatialTransforms[i]);
-    //pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
+    //pasteWeightedImage(outputImage, hrscImages[i], hrscMasks[i], imageWeights[i], spatialTransforms[i]);
+    pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
   }
   */
   printf("Writing output file...\n");

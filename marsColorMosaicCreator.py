@@ -708,7 +708,7 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
         #i += 1
         #if i == 3:
-    raise Exception('DEBUG')
+    #raise Exception('DEBUG')
 
 print 'Basemap enhancement script completed!'
 

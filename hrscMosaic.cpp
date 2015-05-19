@@ -92,7 +92,7 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
 
   return true;
 }
-
+/*
 // Without supporting classes this function is a mess
 void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
                          int &minX, int &minY, int &maxX, int &maxY)
@@ -236,27 +236,26 @@ bool pasteWeightedImage(cv::Mat &outputImage,
 }
 
 
-
+*/
 
 /// A weighted simple paste of one image on to another.
-bool pasteWeightedImage2(cv::Mat &outputImage,
+bool pasteWeightedImage(cv::Mat &outputImage,
                          const cv::Mat &imageToAdd, const cv::Mat &imageMask,
                          const cv::Mat &imageWeight, const cv::Mat &spatialTransform)
 {
-  const int tileSize = imageToAdd.rows; // Currently the code requires square tiles
+  const int tileHeight = imageToAdd.rows;
+  const int tileWidth  = imageToAdd.cols;
   
   // Use a simple integer translation to match the input masks!
   const int colOffset = static_cast<int>(spatialTransform.at<float>(0, 2));
   const int rowOffset = static_cast<int>(spatialTransform.at<float>(1, 2));
     
-  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
+  // Compute the bounds of the new image so we do not have to iterate over the entire output image
   int minCol, minRow, maxCol, maxRow;
-  cv::Mat newToOutput;
-  cv::invert(spatialTransform, newToOutput);
   minCol = -colOffset;
   minRow = -rowOffset;
-  maxCol = minCol + tileSize;
-  maxRow = minRow + tileSize;
+  maxCol = minCol + tileWidth;
+  maxRow = minRow + tileHeight;
   
   // Restrict the paste ROI to valid bounds --> Should use a class function!
   if (minCol < 0)                minCol = 0;
@@ -264,7 +263,6 @@ bool pasteWeightedImage2(cv::Mat &outputImage,
   if (minRow < 0)                minRow = 0;
   if (maxRow > outputImage.rows) maxRow = outputImage.rows;
   //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
-  
   
   
   // TODO: Use OpenCV calls to replace this block of code!
@@ -280,14 +278,12 @@ bool pasteWeightedImage2(cv::Mat &outputImage,
     {
       const int smallR = r+rowOffset;
       const int smallC = c+colOffset;
-      pastePixel = imageToAdd.at<cv::Vec3b>(smallR, smallC);
-      maskPixel  = imageMask.at<unsigned char>(smallR, smallC);
+      maskPixel = imageMask.at<unsigned char>(smallR, smallC);      
       
-      // Skip masked pixels and out of bounds pixels
-      if (maskPixel == 0)
-      {
+      if (maskPixel == 0) // Skip masked pixels and out of bounds pixels
         continue;
-      }
+
+      pastePixel = imageToAdd.at<cv::Vec3b>(smallR, smallC);
       
       // If the interpolated pixel is good add the weighted value to the output image
       float weight = imageWeight.at<float>(smallR, smallC);
@@ -316,7 +312,7 @@ bool pasteWeightedImage2(cv::Mat &outputImage,
 /// Sets up the base and paste masks so we get the desired images in the right places
 void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &pasteMasks,
                                                const std::vector<cv::Mat> &spatialTransforms,
-                         cv::Mat &baseMaskOut,       std::vector<cv::Mat> &pasteMasksShrunk)
+                         cv::Mat &baseMaskOut)
 {
   //  We want the base mask to be invalid underneath the paste mask except for the edges.
   //  Tile edges do not count as edges for this purpose.
@@ -325,25 +321,15 @@ void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &paste
   const size_t numMasks = pasteMasks.size();
   const cv::Rect baseRoi(0, 0, baseMask.cols, baseMask.rows);
   
-  baseMask.copyTo(baseMaskOut);
-  pasteMasksShrunk.resize(numMasks);
-  
+  baseMask.copyTo(baseMaskOut); 
   
   cv::Mat kernel(EDGE_SIZE, EDGE_SIZE, CV_8UC1, 255);
-  //cv::Mat smallKernel(11, 11, CV_8UC1, 255);
   cv::Mat oneKernel(3, 3, CV_8UC1, 255);
   cv::Mat shrunkPasteMask, invertPasteMask, tempMat;
   for (size_t i=0; i<numMasks; ++i)
-  {
-    // TODO: Is this necessary?
-    // Generate a shrunk version to use generally
-    //cv::erode(pasteMasks[i], pasteMasksShrunk[i], smallKernel);
-    
-    pasteMasksShrunk[i] = pasteMasks[i];
-    
+  {    
     // Generate a shrunk version to mask the base map for blending
     cv::erode(pasteMasks[i], shrunkPasteMask, kernel);
-    //shrunkPasteMask = pasteMasks[i];
     
     // Subtract the the shrunk version from the base mask
     cv::absdiff(shrunkPasteMask, 255, invertPasteMask);
@@ -351,30 +337,42 @@ void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &paste
     
     // TODO: Improve image ROI handling so this does not break on certain images!
     
-    cv::Rect pasteRoi(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
-                      static_cast<int>(-spatialTransforms[i].at<float>(1, 2)),
-                      invertPasteMask.cols, invertPasteMask.rows);
+    // ROI of the small image in the base image
+    cv::Rect pasteRoiInBase(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
+                            static_cast<int>(-spatialTransforms[i].at<float>(1, 2)),
+                            invertPasteMask.cols, invertPasteMask.rows);
     
-    cv::Rect pasteRoiSafe = pasteRoi;// & baseRoi;
+    // The portion of small ROI that is contained in the base image, base image coordinates.
+    cv::Rect pasteRoiInBaseSafe = pasteRoiInBase & baseRoi;
+    
+    // The full ROI internal to the paste image
+    cv::Rect pasteRoiInPaste(0, 0, invertPasteMask.cols, invertPasteMask.rows);
+    // The full base ROI in the paste image
+    cv::Rect baseRoiInPaste(static_cast<int>(spatialTransforms[i].at<float>(0, 2)),
+                            static_cast<int>(spatialTransforms[i].at<float>(1, 2)),
+                            baseMask.cols, baseMask.rows);
+    // The portion of small ROI that is contained in the base image, paste image coordinates.
+    cv::Rect pasteRoiInPasteSafe = pasteRoiInPaste & baseRoiInPaste;
     
     
-    std::cout << "Paste ROI: " << pasteRoiSafe << std::endl;
+    //std::cout << "Paste ROI: " << pasteRoiSafe << std::endl;
     baseMaskOut.copyTo(tempMat);
-    cv::Mat outSection(baseMaskOut, pasteRoiSafe);
-    cv::min(invertPasteMask, tempMat(pasteRoiSafe), outSection);
+    cv::Mat outSection(baseMaskOut, pasteRoiInBaseSafe);
+    cv::min(invertPasteMask(pasteRoiInPasteSafe), tempMat(pasteRoiInBaseSafe), outSection);
     
     // Expand base mask by a single pixel to help clean up strange
     //  pixel artifacts seen at the top and bottom of a pasted tile.
     cv::Mat tempBase = baseMaskOut;
     cv::dilate(tempBase, baseMaskOut, oneKernel);
     
+    /*
     // DEBUG
     std::string path = "shrunkPasteMask" + itoa(i) + ".tif";
     cv::imwrite(path, shrunkPasteMask);
     path = "invertPasteMask" + itoa(i) + ".tif";
     cv::imwrite(path, invertPasteMask);
     path = "baseMaskOut_" + itoa(i) + ".tif";
-    cv::imwrite(path, baseMaskOut);
+    cv::imwrite(path, baseMaskOut);*/
   }
   
 }
@@ -400,8 +398,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     // - Need to avoid feathering at the inter-tile boundaries.
     cv::Mat baseMaskTrue(baseImage.rows, baseImage.cols, CV_8UC1, 255);
     cv::Mat baseMaskShrunk;
-    std::vector<cv::Mat> pasteMasksShrunk;
-    setImageMasks(baseMaskTrue, pasteMasks, spatialTransforms, baseMaskShrunk, pasteMasksShrunk);
+    setImageMasks(baseMaskTrue, pasteMasks, spatialTransforms, baseMaskShrunk);
     
     printf("Converting data...\n");
     
@@ -412,8 +409,8 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     std::vector<cv::Size > sizes     (numImages);
     for (int i = 0; i < numImages-1; ++i)
     {
-      pasteImages     [i].convertTo(umatImages[i], CV_32F); // Seam Finder needs this format
-      pasteMasksShrunk[i].copyTo(seamMasks [i]);
+      pasteImages[i].convertTo(umatImages[i], CV_32F); // Seam Finder needs this format
+      pasteMasks [i].copyTo(seamMasks [i]);
       
       // The input transform is just a translation in affine format
       // - TODO: Make this cleaner, get out inversion
@@ -563,7 +560,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     // For now, just dump all of the HRSC images in one at a time.  
     for (size_t i=0; i<numImages-1; ++i)
     {
-      pasteWeightedImage2(outputImage, pasteImages[i], pasteMasksShrunk[i], imageWeights[i], spatialTransforms[i]);
+      pasteWeightedImage(outputImage, pasteImages[i], pasteMasks[i], imageWeights[i], spatialTransforms[i]);
     }    
     
     

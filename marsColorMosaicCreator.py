@@ -5,6 +5,8 @@ import re
 import subprocess
 import numpy
 import IrgGeoFunctions
+import copyGeoTiffInfo
+import mosaicTileManager
 
 """
 TODO:
@@ -38,263 +40,205 @@ Existing tools:
 # Constants
 
 # The proj4 string defining the space the base map is projected in
-PROJ4_STRING = "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
-
-# The order that HRSC channel images are stored and their names in a list
-NUM_HRSC_CHANNELS = 5
-HRSC_RED   = 0
-HRSC_GREEN = 1
-HRSC_BLUE  = 2
-HRSC_NIR   = 3
-HRSC_NADIR = 4
-CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
-
-# Information about Noel's base map
-DEGREES_TO_PROJECTION_METERS = 59274.9
-NOEL_MAP_METERS_PER_PIXEL = 1852.340625 # TODO: Make sure this is accurate before reprojecting everything
-
-# Resolution increase of the output map over the base map in percent.
-RESOLUTION_INCREASE = 400
-
-GDAL_DIR = '/home/smcmich1/programs/gdal-1.11.0-install/bin/'
-
-#----------------------------------------------------------------------------
-# Functions
-
-def getHrscChannelPaths(hrscBasePath):
-    '''Get the list of all HRSC channel paths from the base path'''
-    return [hrscBasePath+'_re3.tif', # TODO: Take out these space things later
-            hrscBasePath+'_gr3.tif',
-            hrscBasePath+'_bl3.tif',
-            hrscBasePath+'_ir3.tif',
-            hrscBasePath+'_nd3.tif']
-
-class CmdRunException(Exception):
-    '''Exception type indicating an error with a cmd call'''
-    pass
-
-def cmdRunner(cmd, outputPath=None, force=False):
-    '''Executes a command if the output file does not exist and
-       throws if the output file is not created'''
-
-    if not os.path.exists(outputPath) or force:
-        print cmd
-        os.system(cmd)
-    if outputPath and (not os.path.exists(outputPath)):
-        raise CmdRunException('Failed to create output file: ' + outputPath)
-    return True
-
-
-def getImageSize(imagePath):
-    """Returns the size [rows, columns] in an image"""
-    # Make sure the input file exists
-    if not os.path.exists(imagePath):
-        raise Exception('Image file ' + imagePath + ' not found!')
-       
-    # Use subprocess to suppress the command output
-    cmd = ['gdalinfo', imagePath]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    textOutput, err = p.communicate()
-
-    # Extract the size from the text
-    sizePos    = textOutput.find('Size is')
-    endPos     = textOutput.find('\n', sizePos+7)
-    sizeStr    = textOutput[sizePos+7:endPos]
-    sizeStrs   = sizeStr.strip().split(',')
-    cols = int(sizeStrs[0])
-    rows = int(sizeStrs[1])
-    
-    return (rows, cols)
-
-def countBlackPixels(imagePath, isGray=True):
-    '''Returns the number of black pixels in an image'''
-    
-    # Call imageMagick to print out the results
-    if isGray:
-        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'gray(0)', '-format', '%c', 'histogram:info:']
-    else: # RGB
-        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'rgb(0,0,0)', '-format', '%c', 'histogram:info:']
-    #print cmd
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    text, err = p.communicate()
-    
-    # Output looks like this:
-    #     257066: (  0,  0,  0) #000000 black
-    #     317182: (255,255,255) #FFFFFF white
-
-    lines = text.split('\n')
-    blackLine = lines[0].strip()
-    otherLine = lines[1].strip()
-    blackCount = int(blackLine[:blackLine.find(':')])
-    #otherCount = int(otherLine[:otherLine.find(':')])
-    return blackCount
-
-# TODO: Stuff up here should come from common files
-#======================================================================
+#PROJ4_STRING = "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
 
 
 
-def warpHrscFile(sourcePath, outputFolder, postfix, metersPerPixel, force=False):
-    '''Warps an HRSC file into the same projection space as the base map'''
-    fileName   = sourcePath[sourcePath.rfind('/')+1:]
-    warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
-    cmd = (GDAL_DIR+'gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
-             ' -t_srs "'+PROJ4_STRING+'" -tr '
-             + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
-    cmdRunner(cmd, warpedPath, force)
-    return warpedPath
 
 
-# TODO: Move to a general file
-def projCoordToPixelCoord(x, y, geoInfo):
-    '''Converts from projected coordinates into pixel coordinates using
-       the results from getImageGeoInfo()'''
 
-    xOffset = x - geoInfo['projection_bounds'][0]
-    yOffset = y - geoInfo['projection_bounds'][3]
-    
-    column = xOffset / geoInfo['pixel_size'][0]
-    row    = yOffset / geoInfo['pixel_size'][1]
-    
-    return (column, row)
+## TODO: Move to a general file
+#def projCoordToPixelCoord(x, y, geoInfo):
+#    '''Converts from projected coordinates into pixel coordinates using
+#       the results from getImageGeoInfo()'''
+#
+#    xOffset = x - geoInfo['projection_bounds'][0]
+#    yOffset = y - geoInfo['projection_bounds'][3]
+#    
+#    column = xOffset / geoInfo['pixel_size'][0]
+#    row    = yOffset / geoInfo['pixel_size'][1]
+#    
+#    return (column, row)
 
 
-def estimateRegistration(baseImage, otherImage, outputPath):
-    '''Writes an estimated registration transform to a file based on geo metadata.'''
-    # This function assumes the images are in the same projection system!
-    
-    # Get the projection bounds and size in both images
-    baseGeoInfo     = IrgGeoFunctions.getImageGeoInfo(baseImage,  False)
-    otherGeoInfo    = IrgGeoFunctions.getImageGeoInfo(otherImage, False)
-    baseProjBounds  = baseGeoInfo[ 'projection_bounds']
-    otherProjBounds = otherGeoInfo['projection_bounds']
-    baseImageSize   = baseGeoInfo[ 'image_size']
-    otherImageSize  = otherGeoInfo['image_size']
-    
-    #print baseGeoInfo
-    #print '----'
-    #print otherGeoInfo
-    
-    # Now estimate the bounding box of the other image in the base image
-    topLeftCoord = projCoordToPixelCoord(otherProjBounds[0], otherProjBounds[3], baseGeoInfo)
-    
-    # Write the output file
-    with open(outputPath, 'w') as f:
-        f.write('3, 3\n')
-        f.write('1, 0, %lf\n' % (topLeftCoord[0]))
-        f.write('0, 1, %lf\n' % (topLeftCoord[1]))
-        f.write('0, 0, 1\n')
-    if not os.path.exists(outputPath):
-        raise Exception('Failed to create transform file ' + outputPath)
+#def estimateRegistration(baseImage, otherImage, outputPath):
+#    '''Writes an estimated registration transform to a file based on geo metadata.'''
+#    # This function assumes the images are in the same projection system!
+#    
+#    # Get the projection bounds and size in both images
+#    baseGeoInfo     = IrgGeoFunctions.getImageGeoInfo(baseImage,  False)
+#    otherGeoInfo    = IrgGeoFunctions.getImageGeoInfo(otherImage, False)
+#    baseProjBounds  = baseGeoInfo[ 'projection_bounds']
+#    otherProjBounds = otherGeoInfo['projection_bounds']
+#    baseImageSize   = baseGeoInfo[ 'image_size']
+#    otherImageSize  = otherGeoInfo['image_size']
+#    
+#    #print baseGeoInfo
+#    #print '----'
+#    #print otherGeoInfo
+#    
+#    # Now estimate the bounding box of the other image in the base image
+#    topLeftCoord = projCoordToPixelCoord(otherProjBounds[0], otherProjBounds[3], baseGeoInfo)
+#    
+#    # Write the output file
+#    with open(outputPath, 'w') as f:
+#        f.write('3, 3\n')
+#        f.write('1, 0, %lf\n' % (topLeftCoord[0]))
+#        f.write('0, 1, %lf\n' % (topLeftCoord[1]))
+#        f.write('0, 0, 1\n')
+#    if not os.path.exists(outputPath):
+#        raise Exception('Failed to create transform file ' + outputPath)
+#
+#    return topLeftCoord
 
 def getTilePrefix(tileRow, tileCol):
     '''Return a standard string representation of a tile index'''
     return (str(tileRow)+'_'+str(tileCol))
 
 
-def splitImage(imagePath, outputFolder, tileSize=512):
-    '''Splits up an image into a grid of tiles and returns all the tile paths'''
-    
-    filename     = os.path.basename(imagePath)[:-4] # Strip extension
-    outputPrefix = os.path.join(outputFolder, filename + '_tile_')
+#def splitImage(imagePath, outputFolder, tileSize=512):
+#    '''Splits up an image into a grid of tiles and returns all the tile paths'''
+#    
+#    filename     = os.path.basename(imagePath)[:-4] # Strip extension
+#    outputPrefix = os.path.join(outputFolder, filename + '_tile_')
+#
+#    # Skip tile creation if the first tile is present
+#    # - May need to make the decision smarter later on
+#    firstTilePath = outputPrefix + '0_0.tif'
+#    if not os.path.exists(firstTilePath):
+#    
+#        # This tile size is in the warped image (HRSC) resolution
+#        # --> May be able to 
+#        cmd = ('convert %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
+#                  % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
+#        print cmd
+#        os.system(cmd)
+#    
+#    # Build the list of output files
+#    outputTileInfoList = []
+#    for f in os.listdir(outputFolder):
+#        if '_tile_' not in f: # Skip any junk
+#            continue
+#        thisPath = os.path.join(outputFolder, f)
+#        numbers  =  re.findall(r"[\d']+", f) # Extract all numbers from the file name
+#        
+#        # Figure out the position of the tile
+#        tileRow  = int(numbers[3]) # In the tile grid
+#        tileCol  = int(numbers[4])
+#        pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
+#        pixelCol = tileCol * tileSize
+#        
+#        # Get other tile information
+#        height, width   = getImageSize(thisPath)
+#        totalNumPixels  = height*width
+#        blackPixelCount = countBlackPixels(thisPath)
+#        validPercentage = 1.0 - (blackPixelCount / totalNumPixels)
+#        
+#        thisTileInfo = {'path'        : thisPath,
+#                        'tileRow'     : tileRow,
+#                        'tileCol'     : tileCol,
+#                        'pixelRow'    : pixelRow,
+#                        'pixelCol'    : pixelCol,
+#                        'height'      : height,
+#                        'width'       : width,
+#                        'percentValid': validPercentage,
+#                        'prefix'      : getTilePrefix(tileRow, tileCol)
+#                       }
+#        outputTileInfoList.append(thisTileInfo)
+#
+#    return outputTileInfoList
+#
+#
+#def writeSubSpatialTransform(fullPath, outputPath, pixelRow, pixelCol, force):
+#    '''Generates a spatial transform file for a single tile'''
+#    
+#    if os.path.exists(outputPath) and (not force):
+#        return
+#    
+#    fIn  = open(fullPath,   'r')
+#    fOut = open(outputPath, 'w')
+#    
+#    fOut.write(fIn.readline()) # Copy the header
+#    
+#    xParts = fIn.readline().strip().split(',') # Read in the existing offset
+#    yParts = fIn.readline().strip().split(',')
+#    
+#    # Compute and write the new offsets
+#    # - We are using translation only affine transforms so this is simple
+#    newOffsetX = float(xParts[2]) + pixelCol
+#    newOffsetY = float(yParts[2]) + pixelRow
+#    fOut.write('%s, %s, %lf\n' % (xParts[0], xParts[1], newOffsetX))
+#    fOut.write('%s, %s, %lf\n' % (yParts[0], yParts[1], newOffsetY))
+#    
+#    fOut.write(fIn.readline()) # Copy the last line
+#    fIn.close()
+#    fOut.close()
+#    
+#
+#def scaleSpatialTransform(inputPath, outputPath, scale, offsetX, offsetY, force=False):
+#    '''Scale up a spatial transform for a higher resolution'''
+#    
+#    if os.path.exists(outputPath) and (not force):
+#        return
+#    
+#    fIn  = open(inputPath,  'r')
+#    fOut = open(outputPath, 'w')
+#    
+#    fOut.write(fIn.readline()) # Copy the header
+#    
+#    xParts = fIn.readline().strip().split(',') # Read in the existing offset
+#    yParts = fIn.readline().strip().split(',')
+#    
+#    # Compute and write the new offsets
+#    # - We are using translation only affine transforms so this is simple
+#    #print xParts
+#    #print yParts
+#    #print offsetX
+#    #print offsetY
+#    newOffsetX = (float(xParts[2]) + offsetX)* scale
+#    newOffsetY = (float(yParts[2]) + offsetY) * scale
+#    fOut.write('%s, %s, %f\n' % (xParts[0], xParts[1], newOffsetX))
+#    fOut.write('%s, %s, %f\n' % (yParts[0], yParts[1], newOffsetY))
+#    
+#    fOut.write(fIn.readline()) # Copy the last line
+#    fIn.close()
+#    fOut.close()
+#
+#
+#def computeSpatialRegistration(basemapInstance, tileIndex, hrscPath, outputPath, outputPathLowRes, tempFolder='', force=False):
+#    '''Compute the spatial registration from the HRSC image to the base image'''
+#
+#    # Estimate the spatial transform using the image metadata
+#    # - This is always done against the full image basemap
+#    estimatedTransformPath     = os.path.join(tempFolder, 'spatial_transform_basemap_estimated.csv')
+#    basemapLowResTransformPath = os.path.join(tempFolder, 'spatial_transform_basemap_low.csv')
+#    estX, estY = estimateRegistration(basemapInstance.getRegistrationFile(), hrscPath, estimatedTransformPath)
+#    
+#    #raise Exception('DEBUG')
+#
+#    # TODO: Check the number of inliers!    
+#    # Refine the spatial transform using image data
+#    # - This is computed at the base map resolution and then scaled up to the output resolution
+#    cmd = ('./RegisterHrsc ' + basemapInstance.getRegistrationFile() +' '+ hrscPath
+#           +' '+ basemapLowResTransformPath +' '+ str(1) +' '+ estimatedTransformPath)
+#    cmdRunner(cmd, basemapLowResTransformPath, force)
+#    
+#    #raise Exception('DEBUG')
+#
+#    # Convert the transform to be relative to the output tile
+#    # - Do this in both low (basemap) and high (output) resolution
+#    tileBounds = basemapInstance.getLowResPixelBounds(tileIndex)
+#    scaleSpatialTransform(basemapLowResTransformPath, outputPath, basemapInstance.getResolutionIncrease(),
+#                          -tileBounds.minX, -tileBounds.minY, force)
+#    scaleSpatialTransform(basemapLowResTransformPath, outputPathLowRes, 1.0,
+#                          -tileBounds.minX, -tileBounds.minY, force)
+#    
+#    # Clear temporary files
+#    #os.remove(estimatedTransformPath)
+#    #os.remove(basemapLowResTransformPath)
+#    
+#    #raise Exception('DEBUG')
 
-    # Skip tile creation if the first tile is present
-    # - May need to make the decision smarter later on
-    firstTilePath = outputPrefix + '0_0.tif'
-    if not os.path.exists(firstTilePath):
-    
-        # This tile size is in the warped image (HRSC) resolution
-        # --> May be able to 
-        cmd = ('convert %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
-                  % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
-        print cmd
-        os.system(cmd)
-    
-    # Build the list of output files
-    outputTileInfoList = []
-    for f in os.listdir(outputFolder):
-        if '_tile_' not in f: # Skip any junk
-            continue
-        thisPath = os.path.join(outputFolder, f)
-        numbers  =  re.findall(r"[\d']+", f) # Extract all numbers from the file name
-        
-        # Figure out the position of the tile
-        tileRow  = int(numbers[3]) # In the tile grid
-        tileCol  = int(numbers[4])
-        pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
-        pixelCol = tileCol * tileSize
-        
-        # Get other tile information
-        height, width   = getImageSize(thisPath)
-        totalNumPixels  = height*width
-        blackPixelCount = countBlackPixels(thisPath)
-        validPercentage = 1.0 - (blackPixelCount / totalNumPixels)
-        
-        thisTileInfo = {'path'        : thisPath,
-                        'tileRow'     : tileRow,
-                        'tileCol'     : tileCol,
-                        'pixelRow'    : pixelRow,
-                        'pixelCol'    : pixelCol,
-                        'height'      : height,
-                        'width'       : width,
-                        'percentValid': validPercentage,
-                        'prefix'      : getTilePrefix(tileRow, tileCol)
-                       }
-        outputTileInfoList.append(thisTileInfo)
-
-    return outputTileInfoList
-
-
-def writeSubSpatialTransform(fullPath, outputPath, pixelRow, pixelCol, force):
-    '''Generates a spatial transform file for a single tile'''
-    
-    if os.path.exists(outputPath) and (not force):
-        return
-    
-    fIn  = open(fullPath,   'r')
-    fOut = open(outputPath, 'w')
-    
-    fOut.write(fIn.readline()) # Copy the header
-    
-    xParts = fIn.readline().strip().split(',') # Read in the existing offset
-    yParts = fIn.readline().strip().split(',')
-    
-    # Compute and write the new offsets
-    # - We are using translation only affine transforms so this is simple
-    newOffsetX = float(xParts[2]) + pixelCol
-    newOffsetY = float(yParts[2]) + pixelRow
-    fOut.write('%s, %s, %lf\n' % (xParts[0], xParts[1], newOffsetX))
-    fOut.write('%s, %s, %lf\n' % (yParts[0], yParts[1], newOffsetY))
-    
-    fOut.write(fIn.readline()) # Copy the last line
-    fIn.close()
-    fOut.close()
-    
-
-def scaleSpatialTransform(inputPath, outputPath, scale, force=False):
-    '''Scale up a spatial transform for a higher resolution'''
-    
-    if os.path.exists(outputPath) and (not force):
-        return
-    
-    fIn  = open(inputPath,  'r')
-    fOut = open(outputPath, 'w')
-    
-    fOut.write(fIn.readline()) # Copy the header
-    
-    xParts = fIn.readline().strip().split(',') # Read in the existing offset
-    yParts = fIn.readline().strip().split(',')
-    
-    # Compute and write the new offsets
-    # - We are using translation only affine transforms so this is simple
-    newOffsetX = float(xParts[2]) * scale
-    newOffsetY = float(yParts[2]) * scale
-    fOut.write('%s, %s, %lf\n' % (xParts[0], xParts[1], newOffsetX))
-    fOut.write('%s, %s, %lf\n' % (yParts[0], yParts[1], newOffsetY))
-    
-    fOut.write(fIn.readline()) # Copy the last line
-    fIn.close()
-    fOut.close()
 
 #def writeSubBrightnessGains(fullPath, outputPath, pixelRow, tileHeight, scale):
 #    '''Generates a brightness gains file for a single tile'''
@@ -317,65 +261,65 @@ def scaleSpatialTransform(inputPath, outputPath, scale, force=False):
 
 
 
-def splitScaleBrightnessGains(fullPath, tileDict, scale):
-    '''Generates a brightness gains file for a single tile'''
-
-    print 'Generating split brightness gains...'
-    
-    # Read in the entire input file
-    lowResVals = numpy.loadtxt(fullPath, skiprows=1, delimiter=',', usecols=(0,))   
-    lowResRows = range(0,len(lowResVals))
-    
-    for tile in tileDict.itervalues():
-        
-        outputPath = tile['brightnessGainsPath']
-        if os.path.exists(outputPath):
-            continue
-        
-        # Compute the row range in the input tile
-        tileHeight       = tile['height'  ]
-        pixelRow         = tile['pixelRow']
-        fullSizeStartRow = pixelRow
-        fullSizeStopRow  = (pixelRow+tileHeight)
-        
-        # For each desired ouput value, compute the location in the input values
-        thisTileRowsInInput = numpy.empty([tileHeight])
-        index = 0
-        for r in range(fullSizeStartRow, fullSizeStopRow):
-            thisTileRowsInInput[index] = r / scale
-            index += 1
-        # Use numpy to interpolate values 
-        thisTileVals = numpy.interp(thisTileRowsInInput, lowResRows, lowResVals)
-        zeroCol      = [0 for i in thisTileVals]
-            
-        # Write out the interpolated values
-        numpy.savetxt(outputPath, thisTileVals, header=str(tileHeight),  fmt='%1.6f, 0.0', comments='')  
-    
-
-
-def getAdjacentTiles(tile, tileDict):
-    '''Gets a list containing all the (still valid) tiles which are adjacent to the provided tile'''
-    
-    tileRow = tile['tileRow'] # The location of the input tile
-    tileCol = tile['tileCol']
-    
-    # Build a list of the adjacent tiles
-    adjacentTileList = []
-    for r in range(-1,2):
-        for c in range(-1,2):
-            if (r==0) and (c==0): # Skip the main tile
-                continue
-            try:
-                prefix  = getTilePrefix(tileRow+r, tileCol+c)
-                adjTile = tileDict[prefix]
-                if adjTile['stillValid']:
-                    adjTile['rowOffset'] = r
-                    adjTile['colOffset'] = c
-                    adjacentTileList.append(adjTile)
-            except:
-                pass # This means this tile does not actually exist
-    
-    return adjacentTileList
+#def splitScaleBrightnessGains(fullPath, tileDict, scale):
+#    '''Generates a brightness gains file for a single tile'''
+#
+#    print 'Generating split brightness gains...'
+#    
+#    # Read in the entire input file
+#    lowResVals = numpy.loadtxt(fullPath, skiprows=1, delimiter=',', usecols=(0,))   
+#    lowResRows = range(0,len(lowResVals))
+#    
+#    for tile in tileDict.itervalues():
+#        
+#        outputPath = tile['brightnessGainsPath']
+#        if os.path.exists(outputPath):
+#            continue
+#        
+#        # Compute the row range in the input tile
+#        tileHeight       = tile['height'  ]
+#        pixelRow         = tile['pixelRow']
+#        fullSizeStartRow = pixelRow
+#        fullSizeStopRow  = (pixelRow+tileHeight)
+#        
+#        # For each desired ouput value, compute the location in the input values
+#        thisTileRowsInInput = numpy.empty([tileHeight])
+#        index = 0
+#        for r in range(fullSizeStartRow, fullSizeStopRow):
+#            thisTileRowsInInput[index] = r / scale
+#            index += 1
+#        # Use numpy to interpolate values 
+#        thisTileVals = numpy.interp(thisTileRowsInInput, lowResRows, lowResVals)
+#        zeroCol      = [0 for i in thisTileVals]
+#            
+#        # Write out the interpolated values
+#        numpy.savetxt(outputPath, thisTileVals, header=str(tileHeight),  fmt='%1.6f, 0.0', comments='')  
+#    
+#
+#
+#def getAdjacentTiles(tile, tileDict):
+#    '''Gets a list containing all the (still valid) tiles which are adjacent to the provided tile'''
+#    
+#    tileRow = tile['tileRow'] # The location of the input tile
+#    tileCol = tile['tileCol']
+#    
+#    # Build a list of the adjacent tiles
+#    adjacentTileList = []
+#    for r in range(-1,2):
+#        for c in range(-1,2):
+#            if (r==0) and (c==0): # Skip the main tile
+#                continue
+#            try:
+#                prefix  = getTilePrefix(tileRow+r, tileCol+c)
+#                adjTile = tileDict[prefix]
+#                if adjTile['stillValid']:
+#                    adjTile['rowOffset'] = r
+#                    adjTile['colOffset'] = c
+#                    adjacentTileList.append(adjTile)
+#            except:
+#                pass # This means this tile does not actually exist
+#    
+#    return adjacentTileList
 
 
 def generateNewHrscColor(tile, tileDict, force=False):
@@ -413,19 +357,20 @@ def generateNewHrscColor(tile, tileDict, force=False):
     return True
 
 
-def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePathIn, outputFolder, metersPerPixel):
+def generateHrscColorImage(basemapInstance, thisTileIndex, hrscPrefixIn, outputFolder):
     '''Convert from HRSC color channels to an RGB image that matches the basemap colors'''
 
     # Set up all of the paths for this HRSC data set
-    setName                    = hrscBasePathIn[hrscBasePathIn.rfind('/')+1:]
+    setName                    = hrscPrefixIn[hrscPrefixIn.rfind('/')+1:]
     hrscBasePathOut            = os.path.join(outputFolder, setName)
     tileFolder                 = hrscBasePathOut + '_tiles'
-    estimatedTransformPath     = hrscBasePathOut+'_spatial_transform_estimated.csv'
-    spatialTransformPathLowRes = hrscBasePathOut+'_spatial_transform_lowRes.csv'
-    spatialTransformPath       = hrscBasePathOut+'_spatial_transform.csv'
     brightnessGainsPath        = hrscBasePathOut+'_brightness_gains.csv'
     lowResMaskPath             = hrscBasePathOut+'_low_res_mask.tif'
-    hrscInputPaths             = getHrscChannelPaths(hrscBasePathIn)
+    hrscInputPaths             = getHrscChannelPaths(hrscPrefixIn)
+
+    tileFolder                 = basemapInstance.getTileFolder(thisTileIndex)
+    spatialTransformPathLowRes = os.path.join(tileFolder, setName+'_spatial_transform_lowRes.csv')
+    spatialTransformPath       = os.path.join(tileFolder, setName+'_spatial_transform.csv')
 
     forceFromHere = False # Force recomputation
 
@@ -438,10 +383,10 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     #forceFromHere = True
            
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
-    hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_output_res', metersPerPixel, False)
+    hrscWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_output_res', basemapInstance.getHighResMpp(), False)
                            for path in hrscInputPaths]
     # Also do a set at the original base map resolution
-    lowResWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_basemap_res', NOEL_MAP_METERS_PER_PIXEL, False)
+    lowResWarpedPaths = [warpHrscFile(path, os.path.dirname(hrscBasePathOut), '_basemap_res', basemapInstance.getLowResMpp(), False)
                            for path in hrscInputPaths]
     
     # For convenience generate strings containing all the input channel files
@@ -456,21 +401,9 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     cmd = './makeSimpleImageMask ' + lowResMaskPath +' '+ lowResHrscPathString
     cmdRunner(cmd, lowResMaskPath, forceFromHere)
 
-    # Estimate the spatial transform using the image metadata
-    estimateRegistration(lowResGrayBaseTile, lowResWarpedPaths[HRSC_NADIR], estimatedTransformPath)
-
-    # TODO: Check the number of inliers!    
-    # Refine the spatial transform using image data
-    # - This is computed at the base map resolution and then scaled up to the output resolution
-    cmd = ('./RegisterHrsc ' + lowResGrayBaseTile +' '+ lowResWarpedPaths[HRSC_NADIR]
-           +' '+ spatialTransformPathLowRes +' '+ str(1.0) +' '+ estimatedTransformPath)
-    cmdRunner(cmd, spatialTransformPathLowRes, forceFromHere)
-    
-    #raise Exception('DEBUG')
-
-    # Generate a full resolution copy of the spatial transform
-    scaleRatio = (RESOLUTION_INCREASE/100.0)
-    scaleSpatialTransform(spatialTransformPathLowRes, spatialTransformPath, scaleRatio, True) 
+    # Compute the spatial registration from the HRSC image to the basemap
+    computeSpatialRegistration(basemapInstance, thisTileIndex, lowResWarpedPaths[HRSC_NADIR],
+                               spatialTransformPath, spatialTransformPathLowRes, outputFolder, forceFromHere)
     
     # Compute the brightness scaling gains
     # - This is done at low resolution
@@ -478,6 +411,8 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     cmd = './computeBrightnessCorrection ' + lowResGrayBaseTile +' '+ lowResHrscPathString +' '+ spatialTransformPathLowRes +' '+ brightnessGainsPath
     cmdRunner(cmd, brightnessGainsPath, forceFromHere)
 
+
+    raise Exception('DEBUG')
 
     # Break the registered image up into tiles
     # - There is one list of tiles per HRSC channel
@@ -556,20 +491,22 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     splitScaleBrightnessGains(brightnessGainsPath, tileDict, scaleRatio)
 
     
-    # Now that we have all the per-tile info, compute the spatial transform for each tile.
+    # Now that we have all the per-tile info, compute the color transform for each tile.
     for tile in tileDict.itervalues():    
         
         try:
         
             # Generate the color pairs
             # - HRSC colors are written with the brightness correction already applied
-            cmd = './writeHrscColorPairs ' + highResColorBaseTile +' '+ tile['allTilesStringAndMask'] +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath']
+            cmd = ('./writeHrscColorPairs ' + highResColorBaseTile +' '+ tile['allTilesStringAndMask']
+                   +' '+ tile['spatialTransformPath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath'])
             cmdRunner(cmd, tile['colorPairPath'], forceFromHere)
             
             #raise Exception('DEBUG')
             
             # Compute the color transform
-            cmd = 'python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath'] +' '+ tile['colorPairPath']
+            cmd = ('python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath']
+                                                                              +' '+ tile['colorPairPath'])
             cmdRunner(cmd, tile['colorTransformPath'], forceFromHere)
             
         except CmdRunException: # Flag errors with this tile
@@ -591,98 +528,94 @@ def generateHrscColorImage(highResColorBaseTile, lowResGrayBaseTile, hrscBasePat
     # Return all of the generated tile information!
     return tileDict
 
+#-----------------------------------------------------------------------------------------
+# Helper classes
 
 
+   
 
-
-def getBasemapTile(basemapPath, bigTilePath, smallGrayTilePath,
-                   minLon, maxLon, minLat, maxLat, resolutionIncrease, force=False):
-    '''Given a region of the base map, creates an original resolution and a high resolution tile for it'''
+def findOverlappingHrscImages(tileBounds):
+    '''Return a list of all the HRSC image prefixes that overlap a given region'''
     
-    smallTilePath = bigTilePath[:-4] + '_lowRes.tif'
-    
-    # Convert the bounding box from degrees to the projected coordinate system (meters)
-    minX = minLon*DEGREES_TO_PROJECTION_METERS
-    maxX = maxLon*DEGREES_TO_PROJECTION_METERS
-    minY = minLat*DEGREES_TO_PROJECTION_METERS
-    maxY = maxLat*DEGREES_TO_PROJECTION_METERS
-    
-    # Crop out the correct section of the base map
-    projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
-    cmd = (GDAL_DIR+'gdal_translate ' + basemapPath +' '+ smallTilePath
-                             +' -projwin '+ projCoordString)
-    cmdRunner(cmd, smallTilePath, force)
-    
-    # Increase the resolution of the cropped image
-    cmd = (GDAL_DIR+'gdal_translate ' + smallTilePath +' '+ bigTilePath
-           +' -outsize '+str(resolutionIncrease)+'% '+str(RESOLUTION_INCREASE)+'% ')
-    cmdRunner(cmd, bigTilePath, force)
-    
-    # Generate the grayscale version of the cropped base map
-    cmd = (GDAL_DIR+'gdal_translate -b 1 ' + smallTilePath +' '+ smallGrayTilePath)
-    cmdRunner(cmd, smallGrayTilePath, force)
+    # TODO: Search our database to perform this function!
+    return ('h0022_0000')#,
+            #'h0506_0000',
+            #'h2411_0000',
+            #'h6419_0000')
 
 
-
-#-------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------
 
 
 fullBasemapPath      = '/home/smcmich1/data/hrscMapTest/projection_space_basemap.tif'
-cropBasemapSmallPath = '/home/smcmich1/data/hrscMapTest/basemap_crop_orig_res.tif' # Cropped basemap at original resolution
-cropBasemapPath      = '/home/smcmich1/data/hrscMapTest/basemap_crop.tif'          # Cropped region resized to output resolution
-cropBasemapGrayPath  = '/home/smcmich1/data/hrscMapTest/basemap_crop_gray.tif'     # Resized region converted to grayscale
 
+sourceHrscFolder = '/home/smcmich1/data/hrscMapTest/external_data'
 
-hrscBasePathInList = ['/home/smcmich1/data/hrscMapTest/external_data/h0022_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h0506_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h2411_0000',
-                      '/home/smcmich1/data/hrscMapTest/external_data/h6419_0000']
-
-outputFolder = '/home/smcmich1/data/hrscMapTest/'
+hrscOutputFolder = '/home/smcmich1/data/hrscMapTest/hrscFiles'
 
 
 
 print 'Starting basemap enhancement script...'
 
 
+
 #---------------------------
 # Prep the base map
 # - For now we extract an arbitrary chunk, later this will be tiled.
 #
-## Get the HRSC bounding box and expand it
-HRSC_BB_EXPAND_DEGREES = 1.5
-(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
-minLon -= HRSC_BB_EXPAND_DEGREES
-maxLon += HRSC_BB_EXPAND_DEGREES
-minLat -= HRSC_BB_EXPAND_DEGREES
-maxLat += HRSC_BB_EXPAND_DEGREES
+# Get the HRSC bounding box and expand it
+#HRSC_BB_EXPAND_DEGREES = 1.5
+#(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
+#minLon -= HRSC_BB_EXPAND_DEGREES
+#maxLon += HRSC_BB_EXPAND_DEGREES
+#minLat -= HRSC_BB_EXPAND_DEGREES
+#maxLat += HRSC_BB_EXPAND_DEGREES
 
-print 'Region bounds:' + str((minLon, maxLon, minLat, maxLat))
-getBasemapTile(fullBasemapPath, cropBasemapPath, cropBasemapGrayPath,
-                   minLon, maxLon, minLat, maxLat, RESOLUTION_INCREASE, False)
 
-# In the future:
-#   For each chunk of the basemap, find all the HRSC images that overlap it.
-#   Throw out images which are flagged as bad.
+# Break up the base map into tiles
+
+# DEBUG: Set a single high res fixed tile for testing!
+# TODO:  Iterate through a set of tiles! Eventually all of them!
+
+# TODO: Go down to 20 to 10 meters!
+OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
+
+basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
+
+# TODO: Move the tileIndex class?
+thisTileIndex  = mosaicTileManager.TileIndex(88, 199) #basemapInstance.getTileIndex(98.5, -27.5)
+thisTileBounds = basemapInstance.getDegreeBounds(thisTileIndex)
+
+print 'Tile index  = ' + str(thisTileIndex)
+print 'Tile bounds = ' + str(thisTileBounds)
+
+
+# Now that we have selected a tile, generate all of the tile images for it.
+(smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(thisTileIndex)
+
+
+# Now find all of the HRSC images that may overlap the tile.
+hrscPrefixList = findOverlappingHrscImages(thisTileBounds)
 
 #------------------------------------
 # Process the individual HRSC images and add them to the mosaic
 
-# TODO: Need to handle tiling of the output mosaic also!
 # TODO: This C++ program can do multiple tiles in one call.
-mosaicPath = '/home/smcmich1/data/hrscMapTest/outputMosaic.tif'
 
-if os.path.exists(mosaicPath):
-    os.remove(mosaicPath) # Clear the existing mosaic file
 
-for hrscPath in hrscBasePathInList: # Loop through input HRSC images
 
+for hrscPrefix in hrscPrefixList: # Loop through input HRSC images
+
+    thisHrscPrefix = os.path.join(sourceHrscFolder, hrscPrefix)
+    thisHrscFolder = os.path.join(hrscOutputFolder, hrscPrefix)
 
     #try:
 
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
-    metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-    tileDict = generateHrscColorImage(cropBasemapPath, cropBasemapGrayPath, hrscPath, outputFolder, metersPerPixel)
+    #metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
+    tileDict = generateHrscColorImage(basemapInstance, thisTileIndex, thisHrscPrefix, thisHrscFolder)
+
+    raise Exception('DEBUG')
 
     #except: # Testing registration
     #    continue
@@ -696,11 +629,8 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
             continue
     
         try:
-            tileParamsStr = mosaicPath +' '+ tile['newColorPath'] +' '+ tile['tileMaskPath'] +' '+ tile['spatialTransformPath']
-            if os.path.exists(mosaicPath):
-                cmd = './hrscMosaic ' + mosaicPath +' '+ tileParamsStr
-            else: # Only the first call
-                cmd = './hrscMosaic ' + cropBasemapPath +' '+ tileParamsStr
+            cmd = ('./hrscMosaic ' + outputTilePathPath +' '+ tile['newColorPath'] +' '+
+                                      tile['tileMaskPath'] +' '+ tile['spatialTransformPath'])
             cmdRunner(cmd, mosaicPath, True)
             
         except CmdRunException:
@@ -709,6 +639,9 @@ for hrscPath in hrscBasePathInList: # Loop through input HRSC images
         #i += 1
         #if i == 3:
     #raise Exception('DEBUG')
+
+# Copy the geo metadata from the full resolution output file to the output mosaic file
+copyGeoTiffInfo.copyGeoTiffInfo(cropBasemapPath, mosaicPath, mosaicGeoPath)
 
 print 'Basemap enhancement script completed!'
 

@@ -158,6 +158,8 @@ int main(int argc, char** argv)
     return -1;
 
   printf("Computing brightness profiles...\n");
+  
+  // Squish the images down to vertical profiles
   cv::Mat basemapProfile, hrscProfile;
   rgbVertProfile(hrscChannels, spatialTransform, basemapImage,  basemapProfile);
   hrscVertProfile(hrscChannels, hrscProfile);
@@ -174,7 +176,7 @@ int main(int argc, char** argv)
   const double SMOOTHING_SIGMA        = 21;  // TODO: Play with these values to improve quality
   cv::Mat basemapSmoothProfile, hrscSmoothProfile;
   
- 
+  // Apply a gaussian blur to the profiles
   cv::GaussianBlur(basemapProfile, basemapSmoothProfile, cv::Size(PROFILE_SMOOTHING_SIZE, PROFILE_SMOOTHING_SIZE), SMOOTHING_SIGMA, 0);
   cv::GaussianBlur(hrscProfile,    hrscSmoothProfile,    cv::Size(PROFILE_SMOOTHING_SIZE, PROFILE_SMOOTHING_SIZE), SMOOTHING_SIGMA, 0);
   

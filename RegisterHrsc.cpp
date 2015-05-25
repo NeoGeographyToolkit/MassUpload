@@ -306,11 +306,27 @@ int main(int argc, char** argv )
     printf("Failed to load match image\n");
     return -1;
   }
+  
+  // To simplify things, only run image processing on a certain region outside the estimated
+  //   transform location.
+  const int PROCESS_RADIUS = 500; // The buffer size in the reference image
+  cv::Rect processRoi(estimatedTransform.at<float>(0, 2) - PROCESS_RADIUS,
+                      estimatedTransform.at<float>(1, 2) - PROCESS_RADIUS,
+                      matchImageIn.cols + 2*PROCESS_RADIUS,
+                      matchImageIn.rows + 2*PROCESS_RADIUS);
+  cv::Rect refImageRoi(0, 0, refImageIn.cols, refImageIn.rows);
+  processRoi = processRoi & refImageRoi;
+  cv::Mat croppedRefImage = refImageIn(processRoi);
 
+  // Update the estimated transform to apply to the cropped ROI
+  cv::Mat croppedEstimatedTransform = estimatedTransform;
+  croppedEstimatedTransform.at<float>(0, 2) -= processRoi.x;
+  croppedEstimatedTransform.at<float>(1, 2) -= processRoi.y;
+  
   // First compute the transform between the two images
   // - This could be moved to a seperate tool!
   cv::Mat transform(3, 3, CV_32FC1);
-  if (!computeImageTransform(refImageIn, matchImageIn, estimatedTransform, transform))
+  if (!computeImageTransform(croppedRefImage, matchImageIn, estimatedTransform, transform))
   {
     printf("Failed to compute image transform!\n");
     return -1;
@@ -330,9 +346,12 @@ int main(int argc, char** argv )
   std::cout << "H = \n" << transform << std::endl;
   
   // Convert the transform to apply to the higher resolution images
+  // - Also convert the transform back into the frame of the full input reference image.
   // - Since we are only computing the translation this is easy!
-  transform.at<float>(0, 2) *= outputScale;
-  transform.at<float>(1, 2) *= outputScale;
+  transform.at<float>(0, 2) = (transform.at<float>(0, 2) + processRoi.x) * outputScale;
+  transform.at<float>(1, 2) = (transform.at<float>(1, 2) + processRoi.y) * outputScale;
+  
+  std::cout << "H adjusted = \n" << transform << std::endl;
   
   /*
   // For the next step the transform needs to be from reference to match!

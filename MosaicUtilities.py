@@ -4,6 +4,7 @@
 
 import os
 import sys
+import copy
 
 
 # TODO: Organize further!
@@ -111,9 +112,9 @@ class Rectangle:
         return (self.minX, self.maxX, self.minY, self.maxY)
     
     def width(self):
-        return maxX - minX
+        return self.maxX - self.minX
     def height(self):
-        return maxY - minY
+        return self.maxY - self.minY
     
     def getMinCoord(self):
         return (self.minX, self.minY)
@@ -144,12 +145,14 @@ class Rectangle:
 class Tiling:
     '''Sets up a tiling scheme'''
     
+    # TODO: This class should handle non-even splits!
     def __init__(self, numTileCols, numTileRows, width, height):
         
         self._numTileCols = numTileCols
         self._numTileRows = numTileRows
         self._tileWidth   = width  / numTileCols
         self._tileHeight  = height / numTileRows
+        #print 'Init tiling = ' + self.__str__()
         
     def getTileWidth(self):
         return self._tileWidth
@@ -169,6 +172,10 @@ class Tiling:
         yStart = tile.row * self._tileHeight
         return Rectangle(xStart, xStart+self._tileWidth,
                          yStart, yStart+self._tileHeight)
+    
+    def __str__(self):
+        return ('numTilesCols: %d, numTileRows: %d, tileWidth: %d, tileHeight: %d' %
+                (self._numTileCols, self._numTileRows, self._tileWidth, self._tileHeight))
 
 class SpatialTransform:
     '''Class to represent a spatial transform in image coordinates.
@@ -197,6 +204,18 @@ class SpatialTransform:
     def addShift(self, dx, dy):
         values[2] += dx
         values[5] += dy
+        
+    def setScaling(self, scaling):
+        '''The scaling from input units to output units'''
+        values[0] = scaling
+        values[4] = scaling
+    
+    def transform(self, x, y):
+        '''Apply the transform to an input point'''
+        xOut = values[0]*x + values[1]*y + values[2]
+        yOut = values[3]*x + values[4]*y + values[5]
+        return (xOut, yOut)
+    
     
     def load(self, path):
         '''Read the transform from a file'''
@@ -227,7 +246,7 @@ class GeoReference:
     def __init__(self, degreesToMeters):
         self._degreesToMeters = degreesToMeters
         self._lonLatBounds    = Rectangle(-180, 180, -90, 90)
-        self._projectionBounds = self._lonLatBounds # TODO: Force copies!
+        self._projectionBounds = copy.copy(self._lonLatBounds)
         self._projectionBounds.scaleByConstant(degreesToMeters)
     
     def degreesToProjected(self, lon, lat):
@@ -242,13 +261,13 @@ class GeoReference:
     
     def degreeRectToProjectedRect(self, degreeRect):
         '''Convert a bounding box in degrees to one in projected coordinates'''
-        projRect = degreeRect
+        projRect = copy.copy(degreeRect)
         projRect.scaleByConstant(self._degreesToMeters)
         return projRect
     
-    def projectedRectToDegreeRect(self, degreeRect):
+    def projectedRectToDegreeRect(self, projRect):
         '''Convert a bounding box in degrees to one in projected coordinates'''
-        degreeRect = projRect
+        degreeRect = copy.copy(projRect)
         degreeRect.scaleByConstant(1.0/self._degreesToMeters)
         return degreeRect
     
@@ -262,14 +281,19 @@ class GeoReference:
 class ImageCoverage:
     '''Handles XY space to image space transforms'''
     
-    def __init(self, numCols, numRows, geoBounds):
+    def __init__(self, numCols, numRows, geoBounds):
         self._geoBounds = geoBounds
-        self._numRows   = numRows
         self._numCols   = numCols
+        self._numRows   = numRows
         self._metersPerPixelX = self._geoBounds.width()  / numCols
         self._metersPerPixelY = self._geoBounds.height() / numRows
+        print 'ImageCoverage init: ' + str(self)
         
-        
+    def __str__(self):
+        return ('geoBounds: %s, numCols: %d, numRows: %d, mppX: %lf, mppy: %lf'
+                   % (str(self._geoBounds), self._numCols, self._numRows,
+                      self._metersPerPixelX, self._metersPerPixelY))
+    
     def numRows(self):
         return self._numRows
     def numCols(self):
@@ -294,27 +318,26 @@ class ImageCoverage:
     # ROI conversion functions ---------------------------------------------
     def pixelRectToProjectedRect(self, pixelRect):
         '''From a pixel ROI, computes the projected ROI.'''
-        (projMinX, projMaxY) = pixelToProjected(pixelRect.minX, pixelRect.minY)
-        (projMaxX, projMinY) = pixelToProjected(pixelRect.maxX, pixelRect.maxY)
+        (projMinX, projMaxY) = self.pixelToProjected(pixelRect.minX, pixelRect.minY)
+        (projMaxX, projMinY) = self.pixelToProjected(pixelRect.maxX, pixelRect.maxY)
         return Rectangle(projMinX, projMaxX, projMinY, projMaxY)
 
     def projectedRectToPixelRect(self, projectedRect):
         '''From a projected ROI, compute the pixel bounding box.'''
-        (pixelMinX, pixelMinY) = projectedToPixel(projectedRect.minX, projectedRect.maxY)
-        (pixelMaxX, pixelMaxY) = projectedToPixel(projectedRect.maxX, projectedRect.minY)
+        (pixelMinX, pixelMinY) = self.projectedToPixel(projectedRect.minX, projectedRect.maxY)
+        (pixelMaxX, pixelMaxY) = self.projectedToPixel(projectedRect.maxX, projectedRect.minY)
         return Rectangle(pixelMinX, pixelMaxX, pixelMinY, pixelMaxY)
-    
 
 
 class ImageWithGeoRef(GeoReference, ImageCoverage):
     '''Adds an image to a GeoReference'''
 
-    def __init__(self, degreesToMeters, numRows, numCols):
+    def __init__(self, degreesToMeters, numCols, numRows):
         
         # Iniatialize with the GeoReference and the image size
         # - GeoReference happens first so we can call getProjectionBounds()
         GeoReference.__init__(self, degreesToMeters)
-        ImageCoverage.__init(self, numRows, numCols, self.getProjectionBounds())
+        ImageCoverage.__init__(self, numCols, numRows, self.getProjectionBounds())
 
     # Condensed conversion functions
     
@@ -341,8 +364,9 @@ class TiledGeoRefImage(ImageWithGeoRef):
     '''ImageWithGeoRef with tiles added'''
     
     def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows):
-        GeoReference.__init__(degreesToMeters, numCols, numRows) # Init this first!
-        self._tiling = Tiling(numTileCols, numTileRows, self.numCols(), self.numRows())
+        '''These are the total image height/width, not per tile.'''
+        ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows) # Init this first!
+        self._tiling = Tiling(numTileCols, numTileRows, numCols, numRows) # These are total pixel sizes
 
 
     def getTileSizePixels(self):
@@ -360,7 +384,7 @@ class TiledGeoRefImage(ImageWithGeoRef):
      
     def getTileRectDegree(self, tile):
         '''Returns the boundaries of a given tile in degrees'''
-        pixelRect = self.getTileRectPixels(tile)
+        pixelRect = self.getTileRectPixel(tile)
         return self.pixelRectToDegreeRect(pixelRect)
         
 

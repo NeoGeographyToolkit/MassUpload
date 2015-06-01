@@ -6,7 +6,9 @@ import subprocess
 import numpy
 import IrgGeoFunctions
 import copyGeoTiffInfo
-import mosaicTileManager
+import mosaicTileManager # TODO: Normalize caps!
+import MosaicUtilities
+import hrscImageManager
 
 """
 TODO:
@@ -538,7 +540,7 @@ def findOverlappingHrscImages(tileBounds):
     '''Return a list of all the HRSC image prefixes that overlap a given region'''
     
     # TODO: Search our database to perform this function!
-    return ('h0022_0000')#,
+    return ['h0022_0000']#,
             #'h0506_0000',
             #'h2411_0000',
             #'h6419_0000')
@@ -583,8 +585,8 @@ OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
 
 # TODO: Move the tileIndex class?
-thisTileIndex  = mosaicTileManager.TileIndex(88, 199) #basemapInstance.getTileIndex(98.5, -27.5)
-thisTileBounds = basemapInstance.getDegreeBounds(thisTileIndex)
+thisTileIndex  = MosaicUtilities.TileIndex(88, 199) #basemapInstance.getTileIndex(98.5, -27.5)
+thisTileBounds = basemapInstance.getTileRectDegree(thisTileIndex)
 
 print 'Tile index  = ' + str(thisTileIndex)
 print 'Tile bounds = ' + str(thisTileBounds)
@@ -592,7 +594,6 @@ print 'Tile bounds = ' + str(thisTileBounds)
 
 # Now that we have selected a tile, generate all of the tile images for it.
 (smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(thisTileIndex)
-
 
 # Now find all of the HRSC images that may overlap the tile.
 hrscPrefixList = findOverlappingHrscImages(thisTileBounds)
@@ -613,7 +614,11 @@ for hrscPrefix in hrscPrefixList: # Loop through input HRSC images
 
     # Transform the HRSC image to the same projection/resolution as the upsampled base map crop
     #metersPerPixel = NOEL_MAP_METERS_PER_PIXEL / (RESOLUTION_INCREASE/100.0)
-    tileDict = generateHrscColorImage(basemapInstance, thisTileIndex, thisHrscPrefix, thisHrscFolder)
+    #tileDict = generateHrscColorImage(basemapInstance, thisTileIndex, thisHrscPrefix, thisHrscFolder)
+
+    # Fetch and preprocess the HRSC image
+    # - TODO: Use the manager class to handle this!
+    hrscObject = hrscImageManager.HrscImage(hrscPrefix, sourceHrscFolder, thisHrscFolder, basemapInstance)
 
     raise Exception('DEBUG')
 

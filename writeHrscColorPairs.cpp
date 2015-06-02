@@ -52,19 +52,19 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   if (!corrector.readProfileCorrection(brightnessPath))
     return false;
 
-  std::cout << "DONE LOADING" << std::endl;
+  //std::cout << "DONE LOADING" << std::endl;
   return true;
 }
 
 /// Generate a list of matched pixels for the base map and HRSC images
 /// --> Format is "baseR, baseG, baseB, R, G, B, NIR, NADIR" 
-bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform,
+int writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform,
                      const BrightnessCorrector &corrector,
                      const std::vector<cv::Mat> hrscChannels, const cv::Mat &hrscMask,
-                     const std::string outputPath)
+                     const std::string outputPath,
+                     const int sampleDist = 25)
 {
   // Control what percentage of the pixel pairs we use
-  const int SAMPLE_DIST = 25;
   const int numRows = hrscMask.rows;
   const int numCols = hrscMask.cols;
 
@@ -74,9 +74,9 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
   bool gotValue;
   cv::Vec3b baseValues;
   size_t numPairs = 0;
-  for (int r=0; r<numRows; r+=SAMPLE_DIST)
+  for (int r=0; r<numRows; r+=sampleDist)
   {
-    for (int c=0; c<numCols; c+=SAMPLE_DIST)
+    for (int c=0; c<numCols; c+=sampleDist)
     {     
       // Skip masked out HRSC pixels
       if (hrscMask.at<unsigned char>(r,c) == 0)
@@ -108,9 +108,8 @@ bool writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransfor
   
   outputFile.close();
 
-  std::cout << "numPairs = " << numPairs << std::endl;
-  
-  return (numPairs > 0);
+  //std::cout << "numPairs = " << numPairs << std::endl;
+  return numPairs;
 }
 
 //============================================================================
@@ -137,11 +136,28 @@ int main(int argc, char** argv)
 
   // Generate the list of color pairs
   printf("Writing pixel pairs...\n");
-  if (!writeColorPairs(basemapImage, spatialTransform, corrector, hrscChannels, hrscMask, outputPath))
-      printf("Failed to detect any color pairs!!!\n");
-
+  const int MIN_PIXEL_PAIRS = 80;
+  int sampleDist = 25;
+  int numSamples = 0;
+  while (sampleDist > 0)
+  {
+    numSamples = writeColorPairs(basemapImage, spatialTransform, corrector, hrscChannels, hrscMask, outputPath, sampleDist);
+        
+    if (numSamples >= MIN_PIXEL_PAIRS) // We got enough samples, we are finished!
+        return 0; 
+    // Otherwise reduce the sample distance 
+    sampleDist /= 4;
+    printf("Trying again with sample distance = %d\n", sampleDist);
+  }
+  if (numSamples > 0) // At least we got something, for now we just use this.
+  {
+    printf("Warning: Only found %d color pairs!\n", numSamples);
+    return 0;
+  }
   
-  return 0;
+  // Did not get any points even with a sample distance of 1!
+  printf("Failed to detect any color pairs!!!\n");
+  return -1;
 }
 
 

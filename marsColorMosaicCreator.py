@@ -93,10 +93,6 @@ Existing tools:
 #
 #    return topLeftCoord
 
-def getTilePrefix(tileRow, tileCol):
-    '''Return a standard string representation of a tile index'''
-    return (str(tileRow)+'_'+str(tileCol))
-
 
 #def splitImage(imagePath, outputFolder, tileSize=512):
 #    '''Splits up an image into a grid of tiles and returns all the tile paths'''
@@ -620,15 +616,22 @@ for hrscPrefix in hrscPrefixList: # Loop through input HRSC images
     # - TODO: Use the manager class to handle this!
     hrscObject = hrscImageManager.HrscImage(hrscPrefix, sourceHrscFolder, thisHrscFolder, basemapInstance)
 
-    raise Exception('DEBUG')
+    # Complete the high resolution components
+    hrscObject.prepHighResolutionProducts()
+
+    # Get the tile information from the HRSC image
+    tileDict = hrscObject.getTileInfo(thisTileBounds)
+
+    #raise Exception('DEBUG')
 
     #except: # Testing registration
     #    continue
 
     # TODO: Choose tile order based on edge content?
 
+    # For each tile...
     i = 0
-    for tile in tileDict.itervalues():
+    for tile in tileDict.itervalues(): 
     
         if not tile['stillValid']: # Skip tiles which have already failed
             continue

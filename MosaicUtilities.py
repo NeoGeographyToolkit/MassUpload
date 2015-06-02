@@ -5,7 +5,7 @@
 import os
 import sys
 import copy
-
+import subprocess
 
 # TODO: Organize further!
 
@@ -32,26 +32,26 @@ def cmdRunner(cmd, outputPath=None, force=False):
     return True
 
 
-def getImageSize(imagePath):
-    """Returns the size [rows, columns] in an image"""
-    # Make sure the input file exists
-    if not os.path.exists(imagePath):
-        raise Exception('Image file ' + imagePath + ' not found!')
-       
-    # Use subprocess to suppress the command output
-    cmd = ['gdalinfo', imagePath]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    textOutput, err = p.communicate()
-
-    # Extract the size from the text
-    sizePos    = textOutput.find('Size is')
-    endPos     = textOutput.find('\n', sizePos+7)
-    sizeStr    = textOutput[sizePos+7:endPos]
-    sizeStrs   = sizeStr.strip().split(',')
-    cols = int(sizeStrs[0])
-    rows = int(sizeStrs[1])
-    
-    return (rows, cols)
+#def getImageSize(imagePath):
+#    """Returns the size [rows, columns] in an image"""
+#    # Make sure the input file exists
+#    if not os.path.exists(imagePath):
+#        raise Exception('Image file ' + imagePath + ' not found!')
+#       
+#    # Use subprocess to suppress the command output
+#    cmd = ['gdalinfo', imagePath]
+#    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+#    textOutput, err = p.communicate()
+#
+#    # Extract the size from the text
+#    sizePos    = textOutput.find('Size is')
+#    endPos     = textOutput.find('\n', sizePos+7)
+#    sizeStr    = textOutput[sizePos+7:endPos]
+#    sizeStrs   = sizeStr.strip().split(',')
+#    cols = int(sizeStrs[0])
+#    rows = int(sizeStrs[1])
+#    
+#    return (rows, cols)
 
 def countBlackPixels(imagePath, isGray=True):
     '''Returns the number of black pixels in an image'''

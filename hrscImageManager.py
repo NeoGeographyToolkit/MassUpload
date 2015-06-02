@@ -4,6 +4,7 @@
 
 import os
 import sys
+import copy
 
 import IrgGeoFunctions
 
@@ -160,6 +161,8 @@ class HrscImage():
        high resolution basemap data.
     '''
     
+    # TODO: Add setup/teardown functions that remove large image data but keep the small outputs on disk
+    
     def __init__(self, setName, inputFolder, outputFolder, basemapInstance, force=False):
         '''Set up all the low resolution HRSC products.'''
         
@@ -173,17 +176,19 @@ class HrscImage():
         self._lowResMaskPath      = self._hrscBasePathOut + '_low_res_mask.tif'
         self._brightnessGainsPath = self._hrscBasePathOut + '_brightness_gains.csv'
         self._basemapCropPath     = self._hrscBasePathOut + '_local_cropped_basemap.tif' # A crop of the basemap used in several places
+        self._basemapGrayCropPath = self._hrscBasePathOut + '_local_gray_cropped_basemap.tif'
         self._colorPairPath       = self._hrscBasePathOut + '_low_res_color_pairs.csv'
-        self._lowResSpatialRegistrationPath  = self._hrscBasePathOut + '_low_res_spatial_transform_basemap.csv'
-        self._highResSpatialRegistrationPath = self._hrscBasePathOut + '_high_res_spatial_transform_basemap.csv'
+        self._basemapSpatialRegistrationPath       = self._hrscBasePathOut + '_low_res_spatial_transform_basemap.csv' # Transform to the low res basemap
+        self._croppedRegionSpatialRegistrationPath = self._hrscBasePathOut + '_cropped_region_spatial_transform.csv'  # Transform to cropped region of low res basemap
+        self._highResSpatialRegistrationPath       = self._hrscBasePathOut + '_high_res_spatial_transform_basemap.csv'
         self._lowResSpatialCroppedRegistrationPath = self._hrscBasePathOut + '_low_res_cropped_spatial_transform.csv'
         
         # Record input parameters
         self._basemapMpp  = basemapInstance.getLowResMpp()
         self._outputMpp   = basemapInstance.getHighResMpp()
         self._proj4String = basemapInstance.getProj4String()
-        self._basemapRegistrationPath = basemapInstance.getRegistrationPath() # Path to the grayscale low res entire base map
-        self._basemapColorPath        = basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
+        self._basemapColorPath = basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
+        #self._basemapGrayPath  = basemapInstance.getGrayBasemapPath()  # Path to the grayscale low res entire base map
         
         # Get full list of input paths
         self._inputHrscPaths = self._getHrscChannelPaths(self._hrscBasePathIn)
@@ -209,44 +214,45 @@ class HrscImage():
         self._lowResPathStringAndMask = self._lowResPathString +' '+ self._lowResMaskPath
         self._lowResMaskImageSize = IrgGeoFunctions.getImageSize(self._lowResMaskPath)
         
-        raise Exception('DEBUG')
-        
         # Compute the HRSC bounding box
         # - This is a pretty good estimate based on the metadata
         lowResNadirPath = self._lowResWarpedPaths[HRSC_NADIR]
         (minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getImageBoundingBox(lowResNadirPath)
-        hrscBoundingBoxDegrees = Rectangle(minLon, maxLon, minLat, maxLat)
-        
-        
-
+        hrscBoundingBoxDegrees = MosaicUtilities.Rectangle(minLon, maxLon, minLat, maxLat)
+        print 'Estimated HRSC bounds: ' + str(hrscBoundingBoxDegrees)
         
         # Cut out a region from the basemap around the location of the HRSC image
-        CROP_BUFFER_LAT = 0.5
-        CROP_BUFFER_LON = 0.5
-        expandedBoundingBox = hrscBoundingBoxDegrees
-        expandedBoundingBox.expand(CROP_BUFFER_LON, CROP_BUFFER_LAT)
-        basemapInstance.makeCroppedRegionDegrees(expandedBoundingBox, self._basemapCropPath)
-
-        raise Exception('DEBUG')
-        
+        # - We record the ROI in degrees and low res pixels
+        print 'Generating low res base basemap region around HRSC data'
+        CROP_BUFFER_LAT = 1.0
+        CROP_BUFFER_LON = 1.0
+        self._croppedRegionBoundingBoxDegrees = copy.copy(hrscBoundingBoxDegrees)
+        self._croppedRegionBoundingBoxDegrees.expand(CROP_BUFFER_LON, CROP_BUFFER_LAT)
+        self._croppedRegionBoundingBoxPixels = basemapInstance.degreeRoiToPixelRoi(self._croppedRegionBoundingBoxDegrees, False)
+        basemapInstance.makeCroppedRegionDegrees(self._croppedRegionBoundingBoxDegrees, self._basemapCropPath)
+        self._makeGrayscaleImage(self._basemapCropPath, self._basemapGrayCropPath)
         
         # Compute the spatial registration from the HRSC image to the base map
-        # - TODO: If we use the local basemap region debugging will be easier
         self._computeBaseSpatialRegistration(basemapInstance, lowResNadirPath, force)
-
-        # Compute the spatial transform to the cropped region
-        isHighRes = False
-        basemapInstance.updateTransformToBoundsDegrees(self._lowResSpatialRegistrationPath, self._lowResSpatialCroppedRegistrationPath, expandedBoundingBox, isHighRes)
         
         # Compute the brightness scaling gains relative to the cropped base map
         # - This is done at low resolution
         # - The low resolution output is smoothed out later to avoid jagged edges.
-        cmd = './computeBrightnessCorrection ' + self._basemapCropPath +' '+ lowResHrscPathString +' '+ self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath
-        MosaicUtilities.cmdRunner(cmd, brightnessGainsPath, forceFromHere)        
+        # TODO: Should we use the mask here?
+        cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathString +' '
+                + self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath)
+        MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)        
         
-        
+        print 'Finished with low resolution processing for HRSC set ' + setName
         
         # Now we have done everything we plan to with the low resolution maps
+        
+        
+    def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
+        '''Convert an image on disk to grayscale'''
+        # Currently we just take the red channel, later we should experiment.
+        cmd = 'gdal_translate -b 1 ' + inputPath +' '+ outputPath
+        MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
         
     def prepHighResolutionProducts(force=False):
@@ -421,7 +427,7 @@ class HrscImage():
         return warpedPath
             
         
-    def _estimateRegistration(baseImage, otherImage, outputPath):
+    def _estimateRegistration(self, baseImage, otherImage, outputPath):
         '''Writes an estimated registration transform to a file based on geo metadata.'''
         # This function assumes the images are in the same projection system!
         
@@ -440,41 +446,64 @@ class HrscImage():
         # Now estimate the bounding box of the other image in the base image
         topLeftCoord = projCoordToPixelCoord(otherProjBounds[0], otherProjBounds[3], baseGeoInfo)
         
-        transform = SpatialTransform()
+        transform = MosaicUtilities.SpatialTransform()
         transform.setShift(topLeftCoord[0], topLeftCoord[1])
-        tranform.write(outputPath)
+        transform.write(outputPath)
     
         return topLeftCoord    
     
+    def _transformToRect(self, transform, isHighRes=False):
+        '''Converts an HRSC transform into an HRSC ROI at high or low resolution'''
+        tx, ty = transform.getShift()
+        if isHighRes:
+            rect = MosaicUtilities.Rectangle(tx, tx+self._highResMaskImageSize[0], ty, ty+self._highResMaskImageSize[1])
+        else:
+            rect = MosaicUtilities.Rectangle(tx, tx+self._lowResMaskImageSize[0], ty, ty+self._lowResMaskImageSize[1])
+        return rect
     
-    def _computeBaseSpatialRegistration(basemapInstance, hrscPath, force=False):
+    def _rectToTransform(self, rectangle, outputPath):
+        '''Convert a pixel ROI into a transform and write it to disk'''
+        tf = MosaicUtilities.SpatialTransform()
+        tf.setShift(rectangle.minX, rectangle.minY)
+        tf.write(outputPath)
+    
+    def _computeBaseSpatialRegistration(self, basemapInstance, hrscPath, force=False):
         '''Compute the spatial registration from the HRSC image to the base image'''
     
+        ## Estimate the spatial transform using the image metadata
+        ## - This is against the full basemap image
+        #estimatedTransformPath = self._hrscBasePathOut + 'spatial_transform_basemap_estimated.csv'
+        #estX, estY = self._estimateRegistration(self._basemapColorPath, hrscPath, estimatedTransformPath)
+        #
+        ## Update the estimated transform to apply to the cropped region
+        #estimatedCroppedTransformPath = self._hrscBasePathOut + 'spatial_transform_cropped_estimated.csv'
+        #basemapInstance.updateTransformToBoundsDegrees(estimatedTransformPath, estimatedCroppedTransformPath,
+        #                                               self._croppedRegionBoundingBoxDegrees, False)
+
         # Estimate the spatial transform using the image metadata
-        # - This is always done against the full image basemap
-        estimatedTransformPath = self._hrscBasePathOut + 'spatial_transform_basemap_estimated.csv'
-        estX, estY = estimateRegistration(self._basemapRegistrationPath, hrscPath, estimatedTransformPath)
-        
-        #raise Exception('DEBUG')
-    
+        # - This is against the cropped basemap image
+        estimatedCroppedTransformPath = self._hrscBasePathOut + '_spatial_transform_cropped_estimated.csv'
+        estX, estY = self._estimateRegistration(self._basemapGrayCropPath, hrscPath, estimatedCroppedTransformPath)
+
         # TODO: Check the number of inliers!    
         # Refine the spatial transform using image data
-        # - This is computed at the base map resolution and then scaled up to the output resolution
-        cmd = ('./RegisterHrsc ' + self._basemapRegistrationPath +' '+ hrscPath
-               +' '+ self._lowResSpatialRegistrationPath +' '+ str(1) +' '+ estimatedTransformPath)
-        MosaicUtilities.cmdRunner(cmd, self._lowResSpatialRegistrationPath, force)
+        # - This is computed to the low resolution cropped image
+        cmd = ('./RegisterHrsc ' + self._basemapGrayCropPath +' '+ hrscPath
+               +' '+ self._lowResSpatialCroppedRegistrationPath +' '+ str(1.0) +' '+ estimatedCroppedTransformPath)
+        MosaicUtilities.cmdRunner(cmd, self._lowResSpatialCroppedRegistrationPath, force)
+
+        # Load the transform we just computed and convert it to a bounding box
+        lowResCroppedPixelRoi  = self._transformToRect(MosaicUtilities.SpatialTransform(self._lowResSpatialCroppedRegistrationPath), False)
+        # Convert so that the ROI is relative to the entire basemap
+        lowResPixelRoi = copy.copy(lowResCroppedPixelRoi)
+        lowResPixelRoi.shift(self._croppedRegionBoundingBoxPixels.minX, self._croppedRegionBoundingBoxPixels.minY)
         
-        # We have the low res spatial transform, now compute the high res spatial transform to the base map.
-        lowResSpatialTransform = SpatialTransform(self._lowResSpatialRegistrationPath)
-        tx, ty = lowResSpatialTransform.getShift()
-        self._boundingBoxLowResPixels = Rectangle(tx, tx+self._lowResMaskImageSize[0], ty, ty+self._lowResMaskImageSize[1])
-        self._boundingBoxProjMeters   = basemapInstance.lowResPixelBoxToProjectedBox(self._boundingBoxLowResPixels)
-        self._boundingBoxDegrees      = basemapInstance.projectedBoxToDegreeBox(self._boundingBoxProjMeters)
+        # Convert so we have a high resolution basemap pixel ROI
+        highResPixelRoi = basemapInstance.convertPixelRoiResolution(lowResPixelRoi, False)
         
-        
-        self._highResSpatialRegistrationPath
-        
-        #raise Exception('DEBUG')    
+        # Convert back to a transform and record to disk
+        self._rectToTransform(highResPixelRoi, self._highResSpatialRegistrationPath)
+
     
     def _getTransformFromHighResTileToLowResBase(self, highResCol, highResRow, outputPath, force):
         '''Compute a transform going from a high resolution HRSC tile to the low resolution basemap.'''

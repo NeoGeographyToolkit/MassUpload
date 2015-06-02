@@ -76,6 +76,7 @@ def countBlackPixels(imagePath, isGray=True):
     #otherCount = int(otherLine[:otherLine.find(':')])
     return blackCount
 
+
 # TODO: Stuff up here should come from common files
 #=======================================================================================
 #=======================================================================================
@@ -121,6 +122,13 @@ class Rectangle:
     def getMaxCoord(self):
         return (self.maxX, self.maxY)
     
+    def shift(self, dx, dy):
+        '''Shifts the entire box'''
+        self.minX += dx
+        self.maxX += dx
+        self.minY += dy
+        self.maxY += dy
+    
     def scaleByConstant(self, xScale, yScale=None):
         '''Scale the units by a constant'''
         if yScale == None:
@@ -141,6 +149,12 @@ class Rectangle:
         self.maxX += right
         self.maxY += up
 
+    def expandToContain(self, x, y):
+        '''Expands the rect to contain the given point'''
+        if x < self.minX: self.minX = x
+        if x > self.maxX: self.maxX = x
+        if y < self.minY: self.minY = y
+        if y > self.maxY: self.maxY = y
 
 class Tiling:
     '''Sets up a tiling scheme'''
@@ -195,36 +209,37 @@ class SpatialTransform:
     #    values[5] += dy
     
     def getShift(self):
-        return (values[2], values[5])
+        return (self.values[2], self.values[5])
     
     def setShift(self, dx, dy):
-        values[2] = dx
-        values[5] = dy
+        self.values[2] = dx
+        self.values[5] = dy
     
     def addShift(self, dx, dy):
-        values[2] += dx
-        values[5] += dy
+        self.values[2] += dx
+        self.values[5] += dy
         
     def setScaling(self, scaling):
         '''The scaling from input units to output units'''
-        values[0] = scaling
-        values[4] = scaling
+        self.values[0] = scaling
+        self.values[4] = scaling
     
     def transform(self, x, y):
         '''Apply the transform to an input point'''
-        xOut = values[0]*x + values[1]*y + values[2]
-        yOut = values[3]*x + values[4]*y + values[5]
+        xOut = self.values[0]*x + self.values[1]*y + self.values[2]
+        yOut = self.values[3]*x + self.values[4]*y + self.values[5]
         return (xOut, yOut)
-    
     
     def load(self, path):
         '''Read the transform from a file'''
 
         with open(path, 'r') as f:
             f.readline() # Skip the header
-            values[0], values[1], values[2] = fIn.readline().strip().split(',')
-            values[3], values[4], values[5] = fIn.readline().strip().split(',')
-            values[6], values[7], values[8] = fIn.readline().strip().split(',')
+            self.values[0], self.values[1], self.values[2] = f.readline().strip().split(',')
+            self.values[3], self.values[4], self.values[5] = f.readline().strip().split(',')
+            self.values[6], self.values[7], self.values[8] = f.readline().strip().split(',')
+        for i in range(0,len(self.values)): # Convert the strings to floats
+            self.values[i] = float(self.values[i])
 
     def write(self, path):
         '''Save the transform to a file'''
@@ -232,12 +247,20 @@ class SpatialTransform:
         # Write the output file
         with open(path, 'w') as f:
             f.write('3, 3\n')
-            f.write('%lf, %lf, %lf\n' % (values[0], values[1], values[2]))
-            f.write('%lf, %lf, %lf\n' % (values[3], values[4], values[5]))
-            f.write('%lf, %lf, %lf\n' % (values[6], values[7], values[8]))
+            f.write('%lf, %lf, %lf\n' % (self.values[0], self.values[1], self.values[2]))
+            f.write('%lf, %lf, %lf\n' % (self.values[3], self.values[4], self.values[5]))
+            f.write('%lf, %lf, %lf\n' % (self.values[6], self.values[7], self.values[8]))
         if not os.path.exists(path):
             raise Exception('Failed to create transform file ' + path)
 
+
+def getTransformedBoundingBox(transform, rectangle):
+        '''Compute a bounding box for a transformed rectangle'''
+        x,y = transform(rectangle.minX,rectangle.minY);  bb = Rectangle(x,x,y,y)   # Init a rect at the first point
+        x,y = transform(rectangle.maxX,rectangle.minY);  bb.expandToContain(x,y);  # Expand to contain all of the other points
+        x,y = transform(rectangle.maxX,rectangle.maxY);  bb.expandToContain(x,y);
+        x,y = transform(rectangle.minX,rectangle.maxY);  bb.expandToContain(x,y);
+        return bb
 
 class GeoReference:
     '''Handles GDC / projected space transforms.
@@ -356,8 +379,6 @@ class ImageWithGeoRef(GeoReference, ImageCoverage):
     def degreeRectToPixelRect(self, degreeRect):
         projRect = self.degreeRectToProjectedRect(degreeRect)
         return self.projectedRectToPixelRect(projRect)
-
-
 
 
 class TiledGeoRefImage(ImageWithGeoRef):

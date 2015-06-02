@@ -236,7 +236,7 @@ bool computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageI
   }
 
   cv::Mat matches_image;
-  cv::drawMatches( refImage, keypointsA, matchImage, keypointsB,
+  cv::drawMatches( refImageIn, keypointsA, matchImageIn, keypointsB,
                        good_matches, matches_image, cv::Scalar::all(-1), cv::Scalar::all(-1),
                        std::vector<char>(),cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
                        

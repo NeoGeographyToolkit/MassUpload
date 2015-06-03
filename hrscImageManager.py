@@ -184,6 +184,7 @@ class HrscImage():
         self._tileDict = None #
         
         # Set up some paths
+        self._setName = setName
         self._outputFolder        = outputFolder
         self._basemapInstance     = basemapInstance
         self._hrscBasePathIn      = os.path.join(inputFolder,  setName)
@@ -261,6 +262,8 @@ class HrscImage():
         
         # Now we have done everything we plan to with the low resolution maps
         
+    def getSetName(self):
+        return self._setName
         
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
         '''Convert an image on disk to grayscale'''

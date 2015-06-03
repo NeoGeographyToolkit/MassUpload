@@ -581,15 +581,17 @@ OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
 
 # TODO: Move the tileIndex class?
-thisTileIndex  = MosaicUtilities.TileIndex(88, 199) #basemapInstance.getTileIndex(98.5, -27.5)
-thisTileBounds = basemapInstance.getTileRectDegree(thisTileIndex)
+thisTileIndex      = MosaicUtilities.TileIndex(88, 199) #basemapInstance.getTileIndex(98.5, -27.5)
+thisTileBounds     = basemapInstance.getTileRectDegree(thisTileIndex)
 
 print 'Tile index  = ' + str(thisTileIndex)
 print 'Tile bounds = ' + str(thisTileBounds)
 
-
 # Now that we have selected a tile, generate all of the tile images for it.
 (smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(thisTileIndex)
+
+## DEBUG Clear the existing output tile
+#os.remove(outputTilePath)
 
 # Now find all of the HRSC images that may overlap the tile.
 hrscPrefixList = findOverlappingHrscImages(thisTileBounds)
@@ -621,6 +623,9 @@ for hrscPrefix in hrscPrefixList: # Loop through input HRSC images
 
     # Get the tile information from the HRSC image
     tileDict = hrscObject.getTileInfo(thisTileBounds)
+    print 'Found these tile intersections:'
+    for hrscTile in tileDict.itervalues():
+        print hrscTile['prefix']
 
     #raise Exception('DEBUG')
 
@@ -631,25 +636,21 @@ for hrscPrefix in hrscPrefixList: # Loop through input HRSC images
 
     # For each tile...
     i = 0
-    for tile in tileDict.itervalues(): 
+    for hrscTile in tileDict.itervalues(): 
     
-        if not tile['stillValid']: # Skip tiles which have already failed
-            continue
-    
-        try:
-            cmd = ('./hrscMosaic ' + outputTilePathPath +' '+ tile['newColorPath'] +' '+
-                                      tile['tileMaskPath'] +' '+ tile['spatialTransformPath'])
-            cmdRunner(cmd, mosaicPath, True)
+        #try:
+        cmd = ('./hrscMosaic ' + outputTilePath +' '+ outputTilePath +' '+ hrscTile['newColorPath'] +' '+
+                                  hrscTile['tileMaskPath'] +' '+ hrscTile['tileToTileTransformPath'])
+        MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
             
-        except CmdRunException:
-            tile['stillValid'] = False
+        #except CmdRunException:
+        #    hrscTile['stillValid'] = False
 
         #i += 1
         #if i == 3:
-    #raise Exception('DEBUG')
-
-# Copy the geo metadata from the full resolution output file to the output mosaic file
-copyGeoTiffInfo.copyGeoTiffInfo(cropBasemapPath, mosaicPath, mosaicGeoPath)
+        #    raise Exception('DEBUG')
+    
+        # TODO: Make sure the output tiles still have their geo info
 
 print 'Basemap enhancement script completed!'
 

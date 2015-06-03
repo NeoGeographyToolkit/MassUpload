@@ -226,8 +226,8 @@ bool determineBlendedPixel(int height, int width, int row, int col,
 bool determineBlendedPixel(int height, int width, int row, int col,
                            const cv::Vec3b &mainPixel,  double mainWeightIn, // The main pixel
                            const std::vector<cv::Vec3b> &pixels,     // All the other pixels
-                           const std::vector<cv::Vec2i> &offsets,
-                           const std::vector<double   > &weightsIn,
+                           const std::vector<cv::Vec2i> &offsets,    // Offset in tiles for the other pixels
+                           const std::vector<double   > &weightsIn,  //
                            cv::Vec3b &outputPixel)
 {
   // Each pixel is influenced by the main tile and each adjacent tile
@@ -236,21 +236,22 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   std::vector<double> influences(numInfluences);
   
   // The influence is a combination of tile size (weight) and distance to the tile.
-  // - The main tile gets extra influence.
+  // - The squared distance is used to assess the penalty.  This is important because
+  //   the influence of a tile needs to be about zero by the edge of adjacent tiles!
   double tileCenterY = static_cast<double>(height) / 2.0;
   double tileCenterX = static_cast<double>(width)  / 2.0;
   double mainDistY   = (double)row-tileCenterY;
   double mainDistX   = (double)col-tileCenterX;
-  double mainDist    = mainDistX*mainDistX + mainDistY*mainDistY;
-  if (mainDist < 0.1) // Avoid divide by zero at center pixel
+  double mainDistSq  = mainDistX*mainDistX + mainDistY*mainDistY;
+  if (mainDistSq < 0.1) // Avoid divide by zero at center pixel
   {
     outputPixel = mainPixel;
     return true;
   }
-  influences[0] = mainWeightIn / mainDist; // Distances are kept squared to save time
-  
-  
+  influences[0] = mainWeightIn / mainDistSq;
   double influenceSum = influences[0];
+  
+  
   for (size_t i=0; i<numOtherTiles; ++i)
   {
     // Tile distance is computed from the center of the other tile
@@ -258,8 +259,8 @@ bool determineBlendedPixel(int height, int width, int row, int col,
     double thisTileCenterX = tileCenterX + offsets[i][0]*width;
     double tileDistY   = (double)row-thisTileCenterY;
     double tileDistX   = (double)col-thisTileCenterX;
-    double tileDist    = tileDistX*tileDistX + tileDistY*tileDistY; // Don't need to check divide by zero here!
-    influences[i+1] = weightsIn[i] / tileDist;
+    double tileDistSq  = tileDistX*tileDistX + tileDistY*tileDistY; // Don't need to check divide by zero here!
+    influences[i+1] = weightsIn[i] / tileDistSq;
     influenceSum += influences[i+1];
   }
   
@@ -372,8 +373,8 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
       // Compute a blended composition of the different color transforms.
       const size_t tileSize = numRows;
       determineBlendedPixel(numRows, numCols, r, c,
-                            mainPixel,  mainWeight,
-                            otherPixels, otherOffsets,otherWeights,
+                            mainPixel,   mainWeight,
+                            otherPixels, otherOffsets, otherWeights,
                             outputPixel);
       
       

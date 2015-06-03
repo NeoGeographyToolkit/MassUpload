@@ -92,7 +92,7 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
 
   return true;
 }
-/*
+
 // Without supporting classes this function is a mess
 void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
                          int &minX, int &minY, int &maxX, int &maxY)
@@ -124,11 +124,11 @@ void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, c
 // TODO: Need a bounding box class!
 
 /// Just do a simple paste of one image on to another.
+/// - This is not a pretty looking as a blended image paste but it is
+///   simple, faster, and good for testing.
 bool pasteImage(cv::Mat &outputImage,
                 const cv::Mat &imageToAdd, const cv::Mat &imageMask, const cv::Mat &spatialTransform)
 {
-  const int tileSize = outputImage.rows; // Currently the code requires square tiles
-    
   // Estimate the bounds of the new image so we do not have to iterate over the entire output image
   int minCol, minRow, maxCol, maxRow;
   cv::Mat newToOutput;
@@ -174,14 +174,12 @@ bool pasteImage(cv::Mat &outputImage,
   return true;
 }
 
-
+/*
 /// A weighted simple paste of one image on to another.
 bool pasteWeightedImage(cv::Mat &outputImage,
                         const cv::Mat &imageToAdd, const cv::Mat &imageMask,
                         const cv::Mat &imageWeight, const cv::Mat &spatialTransform)
 {
-  const int tileSize = outputImage.rows; // Currently the code requires square tiles
-    
   // Estimate the bounds of the new image so we do not have to iterate over the entire output image
   int minCol, minRow, maxCol, maxRow;
   cv::Mat newToOutput;
@@ -400,7 +398,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     cv::Mat baseMaskShrunk;
     setImageMasks(baseMaskTrue, pasteMasks, spatialTransforms, baseMaskShrunk);
     
-    printf("Converting data...\n");
+    //printf("Converting data...\n");
     
     // Need to convert from Mat to UMat
     std::vector<cv::UMat >  umatImages(numImages);
@@ -417,7 +415,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
       corners[i] = cv::Point(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
                              static_cast<int>(-spatialTransforms[i].at<float>(1, 2)));
     }
-    printf("Converting data 2...\n");
+    //printf("Converting data 2...\n");
     // Add the base map to the list of input images with a mask
     const int baseIndex = numImages-1;
     baseImage.convertTo(umatImages[baseIndex], CV_32F);
@@ -428,8 +426,8 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     // Record the size of each input image
     for (int i = 0; i < numImages; ++i){
       sizes[i] = umatImages[i].size();
-      std::cout << "sizeI = " << sizes[i] << std::endl;
-      std::cout << "sizeM = " << seamMasks[i].size() << std::endl;
+      //std::cout << "sizeI = " << sizes[i] << std::endl;
+      //std::cout << "sizeM = " << seamMasks[i].size() << std::endl;
     }
 /*
     int debugX = 1026;
@@ -441,12 +439,12 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
                                               debugX+spatialTransforms[0].at<float>(0, 2)) << std::endl;
     */
     
-    printf("Dumping input masks...\n");
+    //printf("Dumping input masks...\n");
       
     // Dump all the input masks to disk for debugging
     for (size_t i=0; i<numImages; ++i)
     {
-      std::cout << "Corner: " << corners[i] << std::endl;
+      //std::cout << "Corner: " << corners[i] << std::endl;
         
       std::string path = "pre_seam_mask" + itoa(i) + ".tif";
       cv::imwrite(path, seamMasks[i]);
@@ -474,12 +472,12 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     }
 
     // Call seam finder
-    printf("Running seam finder...\n");
+    //printf("Running seam finder...\n");
     //seamFinder->find(umatImages, corners, seamMasks); //TODO: This is wiping out all overlap!
     
-    std::cout << "seamMasks type: " <<seamMasks[0].type() << std::endl;
+    //std::cout << "seamMasks type: " <<seamMasks[0].type() << std::endl;
     
-    printf("Dumping output masks...\n");
+    //printf("Dumping output masks...\n");
     // Dump all the output masks to disk for debugging
     for (size_t i=0; i<numImages; ++i)
     {
@@ -488,7 +486,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     }
     
     // Initialize the blender
-    printf("Initializing blender...\n");
+    //printf("Initializing blender...\n");
     cv::Ptr<cv::detail::Blender> blender;
     bool TRY_GPU = false;
     
@@ -519,7 +517,7 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
       blender->feed(tempImg, seamMasks[i], corners[i]);
     }
     
-    if (!USE_MULTI_BLENDER)
+    if (!USE_MULTI_BLENDER) // Generate the feather blender weight masks for debugging
     {
         std::vector<cv::UMat> imageWeightsUmat;
         cv::detail::FeatherBlender* fb = dynamic_cast<cv::detail::FeatherBlender*>(blender.get());
@@ -537,7 +535,8 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
           cv::imwrite(path, temp);
         }
     }
-    /*
+    
+    /* TODO: Why does the feather blender mess up the image colors?
     // Blend the images
     printf("Running blender...\n");
     cv::Mat resultImage, resultMask;
@@ -548,14 +547,15 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     //cv::imwrite("blendMask.tif", resultMask);
     */
     
-    
+    // Using manual image pasting because the OpenCV functions are not working!
     outputImage = cv::Mat::zeros(baseImage.rows, baseImage.cols, CV_8UC3);
     
+    // First paste the basemap image on to the blank output image
     cv::Mat basemapMask(baseImage.rows, baseImage.cols, CV_8UC1, 255);
     cv::Mat basemapTransform = cv::Mat::eye(3, 3, CV_32F);
     pasteWeightedImage(outputImage, baseImage, baseMaskShrunk, imageWeights[numImages-1], basemapTransform);
   
-    printf("Pasted the base.\n");
+    //printf("Pasted the base.\n");
   
     // For now, just dump all of the HRSC images in one at a time.  
     for (size_t i=0; i<numImages-1; ++i)
@@ -621,8 +621,7 @@ int main(int argc, char** argv)
 
   printf("Pasting on HRSC images...\n");
 
-  // Just use this function to compute the image weights
-  // - The base image weights are in the last element
+  // OpenCV based image blending
   std::vector<cv::Mat> imageWeights;
   cv::Mat outputImage, basemapFloat;
   pasteImagesGraphCut(basemapImage, hrscImages, hrscMasks, spatialTransforms, imageWeights, outputImage);

@@ -5,6 +5,7 @@
 import os
 import sys
 import copy
+import math
 import subprocess
 
 # TODO: Organize further!
@@ -64,17 +65,24 @@ def countBlackPixels(imagePath, isGray=True):
     #print cmd
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     text, err = p.communicate()
+    #print text
     
-    # Output looks like this:
+    # Output looks like this, but lines are missing if there are no pixels in them.
     #     257066: (  0,  0,  0) #000000 black
     #     317182: (255,255,255) #FFFFFF white
 
     lines = text.split('\n')
-    blackLine = lines[0].strip()
-    otherLine = lines[1].strip()
-    blackCount = int(blackLine[:blackLine.find(':')])
+    if not ('black' in text): # No black pixels!
+        return 0
+    else:   
+        blackLine = lines[0].strip()
+        blackCount = int(blackLine[:blackLine.find(':')])
+        return blackCount
+        
+    # Currently we don't care about the other count
+    #otherLine = lines[1].strip()
     #otherCount = int(otherLine[:otherLine.find(':')])
-    return blackCount
+    
 
 
 # TODO: Stuff up here should come from common files
@@ -104,6 +112,9 @@ class Rectangle:
         self.maxX = maxX
         self.minY = minY
         self.maxY = maxY
+        #
+        #if not self.hasArea(): # Debug helper
+        #    print 'RECTANGLE WARNING: ' + str(self)
     
     def __str__(self):
         return ('minX: %f, maxX: %f, minY: %f, maxY: %f' % (self.minX, self.maxX, self.minY, self.maxY))
@@ -117,6 +128,20 @@ class Rectangle:
     def height(self):
         return self.maxY - self.minY
     
+    def hasArea(self):
+        '''Returns true if the rectangle contains any area.'''
+        return (self.width() > 0) and (self.height() > 0)
+    
+    def perimiter(self):
+        return 2*self.width() + 2*self.height()
+    
+    def area(self):
+        '''Returns the valid area'''
+        if not self.hasArea():
+            return 0
+        else:
+            return self.height() * self.width()
+
     def getMinCoord(self):
         return (self.minX, self.minY)
     def getMaxCoord(self):
@@ -155,41 +180,62 @@ class Rectangle:
         if x > self.maxX: self.maxX = x
         if y < self.minY: self.minY = y
         if y > self.maxY: self.maxY = y
+        
+    def getIntersection(self, otherRect):
+        '''Returns the overlapping region of two rectangles'''
+        overlap = Rectangle(max(self.minX, otherRect.minX),
+                            min(self.maxX, otherRect.maxX),
+                            max(self.minY, otherRect.minY),
+                            min(self.maxY, otherRect.maxY))
+        return overlap
+        
+    def overlaps(self, otherRect):
+        '''Returns true if there is any overlap between this and another rectangle'''
+        overlapArea = self.getIntersection(otherRect)
+        return overlapArea.hasArea()
+    
 
 class Tiling:
     '''Sets up a tiling scheme'''
     
-    # TODO: This class should handle non-even splits!
-    def __init__(self, numTileCols, numTileRows, width, height):
-        
-        self._numTileCols = numTileCols
-        self._numTileRows = numTileRows
-        self._tileWidth   = width  / numTileCols
-        self._tileHeight  = height / numTileRows
+    def __init__(self, boundsRect, tileWidth, tileHeight):
+        '''Init with the region to cover and the tile size.
+           All units are the same as is used in boundsRect.'''
+        self._bounds      = boundsRect
+        self._numTileCols = math.ceil(boundsRect.width()  / tileWidth)
+        self._numTileRows = math.ceil(boundsRect.height() / tileHeight)
+        self._tileWidth   = tileWidth  # Nominal size, some tiles will be smaller.
+        self._tileHeight  = tileHeight
         #print 'Init tiling = ' + self.__str__()
         
-    def getTileWidth(self):
-        return self._tileWidth
-    
-    def getTileHeight(self):
-        return self._tileHeight
+    def getNominalTileSize(self):
+        '''Get the nominal tile size'''
+        return (self._tileWidth, self.TileWidth)
+        
+    def getTileSize(self, tileIndex):
+        '''Returns the actual size of a selected tile'''
+        bb = self.getTileBounds(tileIndex)
+        return (bb.width(), bb.height())
         
     def getTile(self, x, y):
         '''Computes the tile that contains the input location'''
-        tileRow = x / self._tileWidth
-        tileCol = y / self._tileHeight
+        tileRow = (x - self._minX) / self._tileWidth
+        tileCol = (y - self._minY) / self._tileHeight
         return TileIndex(tileRow, tileCol)
      
-    def getTileBounds(self, tile):
+    def getTileBounds(self, tileIndex):
         '''Returns the boundaries of a given tile'''
-        xStart = tile.col * self._tileWidth
-        yStart = tile.row * self._tileHeight
-        return Rectangle(xStart, xStart+self._tileWidth,
-                         yStart, yStart+self._tileHeight)
+        # Compute the nominal bounds
+        xStart = self._bounds.minX + tileIndex.col * self._tileWidth
+        yStart = self._bounds.minY + tileIndex.row * self._tileHeight
+        bb     = Rectangle(xStart, xStart+self._tileWidth,
+                           yStart, yStart+self._tileHeight)
+        # Restrict the bounds to the initialized boundary
+        return bb.getIntersection(self._bounds)
     
     def __str__(self):
-        return ('numTilesCols: %d, numTileRows: %d, tileWidth: %d, tileHeight: %d' %
-                (self._numTileCols, self._numTileRows, self._tileWidth, self._tileHeight))
+        return ('numTilesCols: %d, numTileRows: %d, bounds: %s' %
+                (self._numTileCols, self._numTileRows, str(self._bounds)))
 
 class SpatialTransform:
     '''Class to represent a spatial transform in image coordinates.
@@ -271,6 +317,7 @@ class GeoReference:
         self._lonLatBounds    = Rectangle(-180, 180, -90, 90)
         self._projectionBounds = copy.copy(self._lonLatBounds)
         self._projectionBounds.scaleByConstant(degreesToMeters)
+        print 'GeoReference init: ' + str(self)
     
     def degreesToProjected(self, lon, lat):
         '''Given a (lon, lat) coordinate, convert to the projected coordinate system.'''
@@ -300,6 +347,9 @@ class GeoReference:
     def getProjectionBounds(self):
         return self._projectionBounds
 
+    def __str__(self):
+        return ('lonlatBounds: %s, projectionBounds: %s') % (str(self._lonLatBounds), str(self._projectionBounds))
+    
 
 class ImageCoverage:
     '''Handles XY space to image space transforms'''
@@ -386,12 +436,16 @@ class TiledGeoRefImage(ImageWithGeoRef):
     
     def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows):
         '''These are the total image height/width, not per tile.'''
+        # This class requires that the pixel dimensions work out exactly!
         ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows) # Init this first!
-        self._tiling = Tiling(numTileCols, numTileRows, numCols, numRows) # These are total pixel sizes
-
+        #self._tiling = Tiling(numTileCols, numTileRows, numCols, numRows) # These are total pixel sizes
+        pixelBounds  = Rectangle(0, numCols, 0, numRows)
+        tileWidth    = numCols / numTileCols
+        tileHeight   = numRows / numTileRows
+        self._tiling = Tiling(pixelBounds, tileWidth, tileHeight) # These are total pixel sizes
 
     def getTileSizePixels(self):
-        return (self._tiling.getTileWidth(), self._tiling.getTileHeight())
+        return self._tiling.getNominalTileSize()
 
         
     def getTileAtLonLat(self, lon, lat):

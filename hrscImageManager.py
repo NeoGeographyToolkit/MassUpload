@@ -35,7 +35,7 @@ def getTilePrefix(tileRow, tileCol):
 
 def splitImage(imagePath, outputFolder, tileSize=512, force=False):
         '''Splits up an image into a grid of tiles and returns all the tile paths'''
-        
+                
         filename     = os.path.basename(imagePath)[:-4] # Strip extension
         outputPrefix = os.path.join(outputFolder, filename + '_tile_')
         
@@ -123,15 +123,15 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
                 height, width   = IrgGeoFunctions.getImageSize(thisPath)
                 totalNumPixels  = height*width
                 blackPixelCount = MosaicUtilities.countBlackPixels(thisPath)
-                validPercentage = 1.0 - (blackPixelCount / totalNumPixels)
+                validPercentage = 1.0 - (float(blackPixelCount) / float(totalNumPixels))
                 
                 thisTileInfo = {'path'        : thisPath,
                                 'tileRow'     : tileRow,
                                 'tileCol'     : tileCol,
                                 'pixelRow'    : pixelRow,
                                 'pixelCol'    : pixelCol,
-                                'height'      : height,
-                                'width'       : width,
+                                'heightPixels': height,
+                                'widthPixels' : width,
                                 'percentValid': validPercentage,
                                 'prefix'      : getTilePrefix(tileRow, tileCol)
                                }
@@ -142,7 +142,6 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
                 
             outputTileInfoList.append(thisTileInfo)
         # End of loop through files   
-
     
         return outputTileInfoList 
 
@@ -273,6 +272,8 @@ class HrscImage():
     def prepHighResolutionProducts(self, force=False):
         '''Generates all of the high resolution HRSC products'''
         
+        # TODO: Accept an input Degree region and only generate the tiles
+        #       surrounding that region.
         
         # Convert each high res input image into the output format
         
@@ -322,13 +323,6 @@ class HrscImage():
         
         # TODO: We can probably delete the original warped images now
         
-        # TODO: Delete all the blank tiles
-        
-        ## Compute the bounding box in degrees of each tile
-        # TODO: Requires upgrades to the tiling class!
-        #MosaicUtilities.Tiling(numTileCols, numTileRows, self._hrscBoundingBoxDegrees.width(), self._hrscBoundingBoxDegrees.height())
-        
-        
         # Loop through each of the tiles we created and consolidate information across channels
         print 'Consolidating tile information...'
         self._tileDict = {}
@@ -372,9 +366,8 @@ class HrscImage():
             thisTileInfo['stillValid'] = True # Set this to false if there is an error processing this tile
             
             # Generate the transform from the high resolution tile to the low resolution basemap
-            self._getTransformFromHighResTileToLowResBase(thisTileInfo['pixelCol'], thisTileInfo['pixelRow'],
-                                                          thisTileInfo['spatialTransformToLowResBasePath'], force)
-        
+            self._computeTileBoundsAndTransform(thisTileInfo, force)
+               
             # Make a mask of valid pixels for this tile
             # - It would be great if the input images had a mask.
             # - Currently all-black pixels anywhere in the image get masked out!
@@ -416,25 +409,49 @@ class HrscImage():
         
         print 'Finished generating high resolution content for HRSC image.'
         
-    def getTileInfo(self):
-        '''Return the high resolution tile information'''
-        return self._tileDict
+    def getTileInfo(self, boundsDegrees=None):
+        '''Return the high resolution tile information.
+           If an ROI in degrees is passed in, only tiles that intersect that ROI will be returned.'''
+        if boundsDegrees == None:
+            return self._tileDict
+        
+        # Otherwise we need to make a new dictionary containing only the intersecting tiles
+        outputDict = {}
+        #print boundsDegrees
+        for k in self._tileDict:
+            tile = self._tileDict[k]
+            #print tile['prefix']
+            #print tile['degreeRect']
+            if boundsDegrees.overlaps(tile['degreeRect']):
+                # Compute the transform to the provided ROI
+                # TODO: Don't overwrite these transforms each time!
+                tile['tileToTileTransformPath'] = os.path.join(self._tileFolder, 'tile_to_tile_transform_' + tile['prefix'] + '.csv')
+                self.getTransformToBasemapRoi(tile, boundsDegrees, tile['tileToTileTransformPath'])
+                outputDict[k] = tile
+        return outputDict
+        
     
 
 
-    # TODO: Need function to compute transform from HRSC tiles to to desired output tiles!
-    #def getTransformToTile():
-    #    '''Computes the transform to a specific output tile'''
-    #    pass
-        ## Convert the transform to be relative to the output tile
-        ## - Do this in both low (basemap) and high (output) resolution
-        #tileBounds = basemapInstance.getLowResPixelBounds(tileIndex)
-        #scaleSpatialTransform(basemapLowResTransformPath, outputPath, basemapInstance.getResolutionIncrease(),
-        #                      -tileBounds.minX, -tileBounds.minY, force)
-        #scaleSpatialTransform(basemapLowResTransformPath, outputPathLowRes, 1.0,
-        #                      -tileBounds.minX, -tileBounds.minY, force)
-        #        
+    def getTransformToBasemapRoi(self, tileInfo, basemapRoiDegrees, outputPath):
+        '''Computes the transform of an HRSC tile to a specific output tile'''
         
+        # Load the low res transform and compute to high res
+        tf = MosaicUtilities.SpatialTransform(tileInfo['spatialTransformToLowResBasePath'])
+        
+        # Get the pixel ROI of the basemap tile
+        basemapRoiHighResPixels = self._basemapInstance.degreeRoiToPixelRoi(basemapRoiDegrees, True)
+        
+        # Update the transform scale (low res -> high res)
+        # - Also subtract out the pixel position of the tile
+        scaling = self._basemapInstance.getLowResMpp() / self._basemapInstance.getHighResMpp()
+        tf.setScaling(1.0) # The new transform is not converting pixel resolutions
+        dx, dy = tf.getShift()
+        tf.setShift(dx*scaling - basemapRoiHighResPixels.minX,
+                    dy*scaling - basemapRoiHighResPixels.minY)
+        
+        # Write the output transform
+        tf.write(outputPath)
         
         
     def _getHrscChannelPaths(self, hrscBasePath):
@@ -471,11 +488,7 @@ class HrscImage():
         otherProjBounds = otherGeoInfo['projection_bounds']
         baseImageSize   = baseGeoInfo[ 'image_size']
         otherImageSize  = otherGeoInfo['image_size']
-        
-        #print baseGeoInfo
-        #print '----'
-        #print otherGeoInfo
-        
+            
         # Now estimate the bounding box of the other image in the base image
         topLeftCoord = projCoordToPixelCoord(otherProjBounds[0], otherProjBounds[3], baseGeoInfo)
         
@@ -541,23 +554,36 @@ class HrscImage():
         self._hrscBoundingBoxDegrees = basemapInstance.pixelRoiToDegreeRoi(highResPixelRoi)
 
     
-    def _getTransformFromHighResTileToLowResBase(self, highResCol, highResRow, outputPath, force):
-        '''Compute a transform going from a high resolution HRSC tile to the low resolution basemap.'''
+    def _computeTileBoundsAndTransform(self, tileInfo, force=False):
+        '''Compute boundary and transform information for this high resolution tile'''
+
+        # Compute a transform going from a high resolution HRSC tile to the low resolution basemap
         
         # Load the transform from high res HRSC to high res basemap
         tf = MosaicUtilities.SpatialTransform(self._highResSpatialRegistrationPath)
+        dx, dy = tf.getShift()
         
-        # Update scale (high res -> low res)
+        # Record the high resolution pixel ROI
+        minHighResCol = dx + tileInfo['pixelCol']
+        minHighResRow = dy + tileInfo['pixelRow']
+        highResPixelRect = MosaicUtilities.Rectangle(minHighResCol, minHighResCol + tileInfo['widthPixels' ],
+                                                     minHighResRow, minHighResRow + tileInfo['heightPixels'])
+        tileInfo['highResPixelRect'] = highResPixelRect
+        
+        # Record the ROI in degrees
+        degreeRect = self._basemapInstance.pixelRoiToDegreeRoi(highResPixelRect, True)
+        tileInfo['degreeRect'] = degreeRect
+        
+        # Update the transform scale (high res -> low res)
         scaling = self._basemapInstance.getHighResMpp() / self._basemapInstance.getLowResMpp()
         tf.setScaling(scaling)
 
         # Factor in the tile shift (converting to low res pixels)
-        dx, dy = tf.getShift()
-        tf.setShift((dx + highResCol)*scaling,
-                    (dy + highResRow)*scaling)
+        tf.setShift(minHighResCol*scaling,
+                    minHighResRow*scaling)
         
         # Write out the new transform
-        tf.write(outputPath)
+        tf.write(tileInfo['spatialTransformToLowResBasePath'])
    
 
     
@@ -581,8 +607,8 @@ class HrscImage():
                 continue
             
             # Compute the row range in the input tile
-            tileHeight       = tile['height'  ]
-            pixelRow         = tile['pixelRow']
+            tileHeight       = tile['heightPixels']
+            pixelRow         = tile['pixelRow'    ]
             fullSizeStartRow = pixelRow
             fullSizeStopRow  = (pixelRow+tileHeight)
             
@@ -635,6 +661,9 @@ class HrscImage():
         
         if not tile['stillValid']: # Skip tiles which have already failed
             return False
+
+        # TODO: Should we include tiles up to two distance away?  Need to make
+        #       sure that there are no sharp changes is the color transform function.
             
         try:
             # Get a list af adjacent tiles to pass in to the color transformer
@@ -643,6 +672,8 @@ class HrscImage():
             # Compute a weighting for each tile based on the pixel count
             totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
             for adjTile in adjacentTiles:
+                #if force:
+                #    print adjTile
                 totalWeight += (adjTile['percentValid'] / tile['percentValid'])
                 
             # Generate the parameter sequence for the next program call
@@ -662,6 +693,7 @@ class HrscImage():
         except CmdRunException:
             tile['stillValid'] = False
         
+        #raise Exception('DEBUG')
 
 
     

@@ -94,8 +94,8 @@ def countBlackPixels(imagePath, isGray=True):
 class TileIndex:
     '''Class used for indexing tiles'''
     def __init__(self, row=0, col=0):
-        self.row = row
-        self.col = col
+        self.row = int(row)
+        self.col = int(col)
     
     def __str__(self):
         return ('(R:%d, C:%d)' % (self.row, self.col))
@@ -105,6 +105,7 @@ class TileIndex:
         return ('%04d_%04d' % (self.row, self.col))
     
     
+# TODO: Make changes so this can work with integers?
 class Rectangle:
     '''Simple rectangle class for ROIs. Max values are NON-INCLUSIVE'''
     def __init__(self, minX=0, maxX=0, minY=0, maxY=0):
@@ -219,10 +220,22 @@ class Tiling:
         
     def getTile(self, x, y):
         '''Computes the tile that contains the input location'''
-        tileRow = (x - self._minX) / self._tileWidth
-        tileCol = (y - self._minY) / self._tileHeight
+        tileCol = (x - self._bounds.minX) / self._tileWidth
+        tileRow = (y - self._bounds.minY) / self._tileHeight
         return TileIndex(tileRow, tileCol)
-     
+    
+    def getIntersectingTiles(self, rect):
+        '''Returns a rectangle containing all the intersecting tiles'''
+        ti = self.getTile(rect.minX, rect.minY)
+        tileRect = Rectangle(ti.col, ti.col, ti.row, ti.row)
+        ti = self.getTile(rect.maxX, rect.minY);  tileRect.expandToContain(ti.col, ti.row);
+        ti = self.getTile(rect.maxX, rect.maxY);  tileRect.expandToContain(ti.col, ti.row);
+        ti = self.getTile(rect.minX, rect.maxY);  tileRect.expandToContain(ti.col, ti.row);
+        tileRect.maxX += 1 # Until the rect is update for integers we need to do this!
+        tileRect.maxY += 1
+        return tileRect
+    
+    
     def getTileBounds(self, tileIndex):
         '''Returns the boundaries of a given tile'''
         # Compute the nominal bounds
@@ -395,6 +408,7 @@ class ImageCoverage:
         (projMaxX, projMinY) = self.pixelToProjected(pixelRect.maxX, pixelRect.maxY)
         return Rectangle(projMinX, projMaxX, projMinY, projMaxY)
 
+    # TODO: Handle rounding!
     def projectedRectToPixelRect(self, projectedRect):
         '''From a projected ROI, compute the pixel bounding box.'''
         (pixelMinX, pixelMinY) = self.projectedToPixel(projectedRect.minX, projectedRect.maxY)
@@ -438,7 +452,6 @@ class TiledGeoRefImage(ImageWithGeoRef):
         '''These are the total image height/width, not per tile.'''
         # This class requires that the pixel dimensions work out exactly!
         ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows) # Init this first!
-        #self._tiling = Tiling(numTileCols, numTileRows, numCols, numRows) # These are total pixel sizes
         pixelBounds  = Rectangle(0, numCols, 0, numRows)
         tileWidth    = numCols / numTileCols
         tileHeight   = numRows / numTileRows
@@ -462,6 +475,12 @@ class TiledGeoRefImage(ImageWithGeoRef):
         pixelRect = self.getTileRectPixel(tile)
         return self.pixelRectToDegreeRect(pixelRect)
         
+    def getIntersectingTiles(self, rectDegrees):
+        '''Returns a Rectangle containing all the tiles intersecting the input ROI'''
+        # Convert to pixels, then just use the tiling function.
+        rectPixels = self.degreeRectToPixelRect(rectDegrees)
+        return self._tiling.getIntersectingTiles(rectPixels)
+    
 
 
     

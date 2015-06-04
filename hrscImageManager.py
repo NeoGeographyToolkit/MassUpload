@@ -120,7 +120,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
                 
                 # TODO: Cache this information!
                 # Get other tile information
-                height, width   = IrgGeoFunctions.getImageSize(thisPath)
+                width, height   = IrgGeoFunctions.getImageSize(thisPath)
                 totalNumPixels  = height*width
                 blackPixelCount = MosaicUtilities.countBlackPixels(thisPath)
                 validPercentage = 1.0 - (float(blackPixelCount) / float(totalNumPixels))
@@ -264,6 +264,10 @@ class HrscImage():
         
     def getSetName(self):
         return self._setName
+    
+    def getBoundingBoxDegrees(self):
+        '''Returns the bounding box of the entire HRSC image'''
+        return self._hrscBoundingBoxDegrees
         
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
         '''Convert an image on disk to grayscale'''
@@ -383,6 +387,7 @@ class HrscImage():
         # Generate a "personalized" brightness file for each tile
         self._splitScaleBrightnessGains(self._brightnessGainsPath, self._tileDict, force)
 
+
         # Generate the color transform for each tile
         # - HRSC colors are written with the brightness correction already applied
         # - Color pairs are computed between the high resolution HRSC tile and the low resolution input basemap.
@@ -400,7 +405,6 @@ class HrscImage():
             cmd = ('python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath']
                                                                               +' '+ tile['colorPairPath'])
             MosaicUtilities.cmdRunner(cmd, tile['colorTransformPath'], force)
-
 
         # Now that we have all the color transforms, generate the new color image for each tile.
         for tile in self._tileDict.itervalues():
@@ -554,7 +558,7 @@ class HrscImage():
         self._rectToTransform(highResPixelRoi, self._highResSpatialRegistrationPath)
         
         # Also convert to a bounding box in degrees
-        self._hrscBoundingBoxDegrees = basemapInstance.pixelRoiToDegreeRoi(highResPixelRoi)
+        self._hrscBoundingBoxDegrees = basemapInstance.pixelRoiToDegreeRoi(highResPixelRoi, True)
 
     
     def _computeTileBoundsAndTransform(self, tileInfo, force=False):

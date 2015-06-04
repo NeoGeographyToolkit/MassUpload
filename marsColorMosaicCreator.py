@@ -46,32 +46,22 @@ Existing tools:
 # Functions
 
 
-   
-
-#def findOverlappingHrscImages(tileBounds):
-#    '''Return a list of all the HRSC image prefixes that overlap a given region'''
-#    
-#    # TODO: Search our database to perform this function!
-#    return ['h0022_0000']#,
-#            #'h0506_0000',
-#            #'h2411_0000',
-#            #'h6419_0000')
-#
-
 def getHrscImageList():
     '''For just returns a fixed list of HRSC images for testing'''
     
     # TODO: Search our database to perform this function!
     return ['h0022_0000']#,
-            #'h0506_0000',
+            #'h0506_0000']#,
             #'h2411_0000',
             #'h6419_0000')
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
-    # DEBUG TILE INDICES
-    return MosaicUtilities.Rectangle(86, 90, 198, 201)
-    #return MosaicUtilities.Rectangle(86, 90, 199, 200)
+    
+    hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
+    return basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
+
+    #return MosaicUtilities.Rectangle(196, 197, 92, 93) # DEBUG
 
 def updateTileWithHrscImage(basemapInstance, tileIndex, outputTilePath, hrscInstance):
     '''Update a single output tile with the given HRSC image'''
@@ -121,7 +111,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
         for col in range(outputTilesRect.minX, outputTilesRect.maxX):
     
             # Set up the til information
-            tileIndex  = MosaicUtilities.TileIndex(col, row) #basemapInstance.getTileIndex(98.5, -27.5)
+            tileIndex  = MosaicUtilities.TileIndex(row, col) #basemapInstance.getTileIndex(98.5, -27.5)
             tileBounds = basemapInstance.getTileRectDegree(tileIndex)
             
             print 'Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex)
@@ -130,7 +120,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
             print '\nMaking sure basemap info is present...'
             
             # Now that we have selected a tile, generate all of the tile images for it.
-            (smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(tileIndex)
+            (smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(tileIndex, False)
         
             print '\nPasting on HRSC tiles...'
 
@@ -141,6 +131,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
             
             #raise Exception('DEBUG')
         
+    print '\n---> Finished updating tiles for HRSC image ' + hrscSetName
 
 #-----------------------------------------------------------------------------------------
 
@@ -157,25 +148,6 @@ outputTileFolder = '/home/smcmich1/data/hrscMapTest/outputTiles'
 
 print 'Starting basemap enhancement script...'
 
-
-
-#---------------------------
-# Prep the base map
-# - For now we extract an arbitrary chunk, later this will be tiled.
-#
-# Get the HRSC bounding box and expand it
-#HRSC_BB_EXPAND_DEGREES = 1.5
-#(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getGeoTiffBoundingBox(hrscBasePathInList[0]+'_nd3.tif')
-#minLon -= HRSC_BB_EXPAND_DEGREES
-#maxLon += HRSC_BB_EXPAND_DEGREES
-#minLat -= HRSC_BB_EXPAND_DEGREES
-#maxLat += HRSC_BB_EXPAND_DEGREES
-
-
-# Break up the base map into tiles
-
-# DEBUG: Set a single high res fixed tile for testing!
-# TODO:  Iterate through a set of tiles! Eventually all of them!
 
 # TODO: Go down to 20 to 10 meters!
 OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
@@ -211,6 +183,10 @@ for hrscSetName in hrscImageList:
 
     # Call the function to update all the output images for this HRSC image
     updateTilesContainingHrscImage(basemapInstance, hrscInstance)  
+
+    print '<<<<< Finished writing all tiles for this HRSC image! >>>>>'
+
+    # TODO: Clean up if necessary
 
     raise Exception('DEBUG')
 

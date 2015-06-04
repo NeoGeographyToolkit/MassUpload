@@ -219,6 +219,23 @@ bool determineBlendedPixel(int height, int width, int row, int col,
 }
 */
 
+/// Given the squared distance, compute a smoothly decreasing weight.
+double distWeightingFunction(const double distance)
+{
+  const double MAX_WEIGHT = 1.0;
+  const double MIN_WEIGHT = 0.0;
+  
+  // Using the max tile size makes this reach just to the center of diagonal tiles
+  const double MAX_TILE_SIZE = 1440;
+  const double MAX_DIST = (MAX_TILE_SIZE);//*sqrt(2.0);
+    
+  // Simple linear drop
+  double weight = (MAX_DIST - distance) / MAX_DIST;
+  if (weight < MIN_WEIGHT)
+    weight = MIN_WEIGHT;
+  return weight;
+}
+
 /// Generate weighted blend of input pixels
 /// - Each adjacent tile (4-connectivity) has a fixed weight.
 /// - Absent tiles have zero weight.
@@ -230,6 +247,13 @@ bool determineBlendedPixel(int height, int width, int row, int col,
                            const std::vector<double   > &weightsIn,  //
                            cv::Vec3b &outputPixel)
 {
+    
+  int TEST_COL = 1010;
+  int LOW_ROW  = 10;
+  int HIGH_ROW = 1014;
+  bool DEBUG_PIXEL = false;//((col == TEST_COL) && ((row < LOW_ROW) || (row >= HIGH_ROW)));
+      
+    
   // Each pixel is influenced by the main tile and each adjacent tile
   const size_t numOtherTiles = pixels.size();
   const size_t numInfluences = pixels.size() + 1;
@@ -242,15 +266,17 @@ bool determineBlendedPixel(int height, int width, int row, int col,
   double tileCenterX = static_cast<double>(width)  / 2.0;
   double mainDistY   = (double)row-tileCenterY;
   double mainDistX   = (double)col-tileCenterX;
-  double mainDistSq  = mainDistX*mainDistX + mainDistY*mainDistY;
-  if (mainDistSq < 0.1) // Avoid divide by zero at center pixel
+  double mainDist    = sqrt(mainDistX*mainDistX + mainDistY*mainDistY);
+  if (mainDist < 0.1) // Avoid divide by zero at center pixel
   {
     outputPixel = mainPixel;
     return true;
   }
-  influences[0] = mainWeightIn / mainDistSq;
+  influences[0] = mainWeightIn * distWeightingFunction(mainDist);
   double influenceSum = influences[0];
   
+  if (DEBUG_PIXEL) //DEBUG 
+    printf("At row %d, distances: ", row); 
   
   for (size_t i=0; i<numOtherTiles; ++i)
   {
@@ -259,25 +285,27 @@ bool determineBlendedPixel(int height, int width, int row, int col,
     double thisTileCenterX = tileCenterX + offsets[i][0]*width;
     double tileDistY   = (double)row-thisTileCenterY;
     double tileDistX   = (double)col-thisTileCenterX;
-    double tileDistSq  = tileDistX*tileDistX + tileDistY*tileDistY; // Don't need to check divide by zero here!
-    influences[i+1] = weightsIn[i] / tileDistSq;
+    double tileDist    = sqrt(tileDistX*tileDistX + tileDistY*tileDistY); // Don't need to check divide by zero here!
+    if (DEBUG_PIXEL)
+      printf("%lf, ", tileDist);
+    influences[i+1] = weightsIn[i] * distWeightingFunction(tileDist);
     influenceSum += influences[i+1];
   }
   
-  //if (col == 120) //DEBUG 
-  //  printf("At row %d: ", row); 
+  if (DEBUG_PIXEL) //DEBUG 
+    printf("\nAt row %d, influences: ", row); 
   
   // Now normalize all the influences so they total up to 1.0
   for (size_t i=0; i<numInfluences; ++i)
   {
     influences[i] /= influenceSum;
     
-    //if (col == 120) //DEBUG 
-    //  printf("influence %d = %lf, ", i, influences[i]);
+    if (DEBUG_PIXEL) //DEBUG 
+      printf("%lf, ", influences[i]);
     
   }
-  //if (col == 120) //DEBUG 
-  //  printf("\n");
+  if (DEBUG_PIXEL) //DEBUG 
+    printf("\n");
   
   // Compute the final value
   const size_t NUM_RGB_CHANNELS = 3;
@@ -353,13 +381,24 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
         outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);
         continue;
       }
-        
+/*
+      std::cout << "Input HRSC channels:  ";
+      for (int i=0; i<NUM_HRSC_CHANNELS; ++i) {
+        std::cout << int(hrscChannels[i].at<unsigned char>(r,c)) << ", ";
+      }
+      std::cout << "\n";
+        */
       // Build the HRSC pixel from the seperate channels with brightness correction
-      for (int i=0; i<NUM_HRSC_CHANNELS; ++i)
+      //std::cout << "Brightness corrected HRSC channels:  ";
+      for (int i=0; i<NUM_HRSC_CHANNELS; ++i) {
         hrscPixel[i] = corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r); // Correct brightness
+        //std::cout << int(hrscPixel[i]) << ", ";
+      }
+      //std::cout << "\n";
     
       // Compute the main pixel transform
       mainPixel = transformPixel(hrscPixel, colorTransform);
+      //std::cout << "HRSC pixel: " << hrscPixel << std::endl;
       //std::cout << "Main pixel: " << mainPixel << std::endl;
       
       // Compute pixel transforms from all the adjacent tiles
@@ -377,6 +416,7 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
                             otherPixels, otherOffsets, otherWeights,
                             outputPixel);
       
+      //std::cout << "Output pixel: " << outputPixel << std::endl;
       
       //double calcWeight = computeMainWeight(numRows, numCols, r, c);
       //double a = calcWeight*255.0;

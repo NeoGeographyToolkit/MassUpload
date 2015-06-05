@@ -30,7 +30,11 @@
  
  */
 
+// TODO: Increase this as we increase the resolution!
 const int BLEND_DIST_GLOBAL = 64;
+
+// Set this to use the simple, no blending mosaic method.
+//#define USE_SIMPLE_PASTE
 
 //=============================================================
 
@@ -621,11 +625,12 @@ int main(int argc, char** argv)
 
   printf("Pasting on HRSC images...\n");
 
+#ifndef USE_SIMPLE_PASTE  
   // OpenCV based image blending
   std::vector<cv::Mat> imageWeights;
   cv::Mat outputImage, basemapFloat;
   pasteImagesGraphCut(basemapImage, hrscImages, hrscMasks, spatialTransforms, imageWeights, outputImage);
-  
+#else
   /*
   cv::Mat outputImage =cv::Mat::zeros(basemapImage.rows, basemapImage.cols, CV_8UC3);
   
@@ -636,7 +641,7 @@ int main(int argc, char** argv)
   pasteWeightedImage(outputImage, basemapImage, basemapMask, imageWeights[numHrscImages], basemapTransform);
   
   printf("Pasted the base.\n");
-  
+  */
   // For now, just dump all of the HRSC images in one at a time.
   cv::Mat outputImage(basemapImage);
   for (size_t i=0; i<numHrscImages; ++i)
@@ -644,7 +649,8 @@ int main(int argc, char** argv)
     //pasteWeightedImage(outputImage, hrscImages[i], hrscMasks[i], imageWeights[i], spatialTransforms[i]);
     pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
   }
-  */
+  
+#endif  
   printf("Writing output file...\n");
   
   // Write the output image

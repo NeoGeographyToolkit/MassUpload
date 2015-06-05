@@ -50,8 +50,8 @@ def getHrscImageList():
     '''For just returns a fixed list of HRSC images for testing'''
     
     # TODO: Search our database to perform this function!
-    return ['h0022_0000']#,
-            #'h0506_0000']#,
+    return ['h0022_0000',
+            'h0506_0000']#,
             #'h2411_0000',
             #'h6419_0000')
 
@@ -104,6 +104,14 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
     # Find all the output tiles that intersect with this
     outputTilesRect = getCoveredOutputTiles(basemapInstance, hrscInstance)
 
+    hrscSetName = hrscInstance.getSetName()
+    mainLogPath = basemapInstance.getMainLogPath()
+    
+    # Skip this function if we have completed adding this HRSC image
+    if basemapInstance.checkLog(mainLogPath, hrscSetName):
+        print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
+        return
+    
     print 'Found overlapping output tiles:  ' + str(outputTilesRect)
     
     # Loop through all the tiles
@@ -120,17 +128,30 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
             print '\nMaking sure basemap info is present...'
             
             # Now that we have selected a tile, generate all of the tile images for it.
-            (smallTilePath, largeTilePath, grayTilePath, outputTilePath) = basemapInstance.generateTileImages(tileIndex, False)
+            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath) =  \
+                        basemapInstance.generateTileImages(tileIndex, False)
         
             print '\nPasting on HRSC tiles...'
 
             #raise Exception('DEBUG')
         
+            # Have we already written this HRSC image to this tile?
+            comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
+            if comboAlreadyWritten:
+                print '-- Skipping already written tile!' #Don't want to double-write the same image.
+                continue
+        
             # Update the selected tile with the HRSC image
             updateTileWithHrscImage(basemapInstance, tileIndex, outputTilePath, hrscInstance)
             
+            # Record that we have used this HRSC/tile combination.
+            basemapInstance.updateLog(tileLogPath, hrscSetName)
+            
             #raise Exception('DEBUG')
         
+    # Log the fact that we have finished adding this HRSC image    
+    basemapInstance.updateLog(mainLogPath, hrscSetName)
+    
     print '\n---> Finished updating tiles for HRSC image ' + hrscSetName
 
 #-----------------------------------------------------------------------------------------
@@ -154,7 +175,7 @@ OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 
 print '\n==== Initializing the base map object ===='
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
-
+mainLogPath = basemapInstance.getMainLogPath()
 print '--- Finished initializing the base map object ---\n'
 
 # Get a list of all the HRSC images we are testing with
@@ -162,6 +183,11 @@ hrscImageList = getHrscImageList()
 
 # Loop through input HRSC images
 for hrscSetName in hrscImageList: 
+    
+    # Skip this HRSC image if we have already finished adding it!
+    if basemapInstance.checkLog(mainLogPath, hrscSetName):
+        print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
+        continue
     
     # Pick a location to store the data for this HRSC image
     thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)

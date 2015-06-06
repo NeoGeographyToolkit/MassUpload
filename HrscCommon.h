@@ -14,6 +14,62 @@ const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
 
+
+/*
+/// Extension of OpenCV's Rect class to add additional functions
+template <typename T>
+class Rectangle_ : public cv:Rect_<T>
+{
+public:
+    /// Constructors work the same as the base class
+    Rectangle_(T x, T y, T width, T height) : cv::Rect_<T>(x, y, width, height) {}
+ 
+    // Corner access   
+    cv::Point_<T> tr() const {return cv::Point_<T>(this->x+this->width, this->y);}
+    cv::Point_<T> bl() const {return cv::Point_<T>(this->x,             this->y+this->height);}
+    
+    /// Returns true if there is any overlap with another rectangle
+    bool overlaps(const Rectangle_<T> &otherRect) const
+    {
+      cv::Rect_<T> intersect = (*this) & otherRect;
+      return (intersect.area() > 0);
+    }
+}
+typedef Rectangle_<int> Rectangle; //< Convience typedef
+*/
+
+/// Constrain an OpenCV ROI to lie within an image
+/// - Returns false if there is no overlap
+bool constrainCvRoi(cv::Rect &roi, const int imageWidth, const int imageHeight)
+{
+  std::cout << "roi    = " << roi << std::endl;
+  std::cout << "width  = " << imageWidth << std::endl;
+  std::cout << "height = " << imageHeight << std::endl;
+  cv::Rect imageRoi(0, 0, imageWidth, imageHeight);
+  roi &= imageRoi;
+  return (roi.area() > 0);
+}
+
+/// As constrainCvRoi, but also resizes roi2 to match the changes to roi1.
+bool constrainMatchedCvRois(cv::Rect &roi, const int imageWidth, const int imageHeight,
+                            cv::Rect &roi2)
+{
+  // Constrain the first ROI
+  cv::Rect roiIn = roi;
+  if (!constrainCvRoi(roi, imageWidth, imageHeight))
+    return false;
+  // Detect the changes
+  cv::Point tlDiff = roi.tl()   - roiIn.tl(); // TL corner can only have increased
+  //cv::Point brDiff = roiIn.br() - roi.br();
+  
+  std::cout << "tlDiff  = " << tlDiff << std::endl;
+  
+  roi2 = cv::Rect(roi2.tl() + tlDiff, roi.size()); // Use the new size
+  std::cout << "roi2  = " << roi2<< std::endl;
+  return true;
+}
+
+
 std::string itoa(const int i)
 {
   std::stringstream s;

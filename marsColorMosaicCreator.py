@@ -94,7 +94,7 @@ def updateTileWithHrscImage(basemapInstance, tileIndex, outputTilePath, hrscInst
     
         # TODO: Make sure the output tiles still have their geo info
 
-
+        #raise Exception('DEBUG')
 
 
 
@@ -147,7 +147,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
             # Record that we have used this HRSC/tile combination.
             basemapInstance.updateLog(tileLogPath, hrscSetName)
             
-            #raise Exception('DEBUG')
+    #raise Exception('DEBUG')
         
     # Log the fact that we have finished adding this HRSC image    
     basemapInstance.updateLog(mainLogPath, hrscSetName)

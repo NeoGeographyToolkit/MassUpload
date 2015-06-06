@@ -178,80 +178,17 @@ bool pasteImage(cv::Mat &outputImage,
   return true;
 }
 
-/*
+
 /// A weighted simple paste of one image on to another.
+/// - To increase speed, this function just takes a translation offset instead of a full transform.
 bool pasteWeightedImage(cv::Mat &outputImage,
                         const cv::Mat &imageToAdd, const cv::Mat &imageMask,
-                        const cv::Mat &imageWeight, const cv::Mat &spatialTransform)
-{
-  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
-  int minCol, minRow, maxCol, maxRow;
-  cv::Mat newToOutput;
-  cv::invert(spatialTransform, newToOutput);
-  getPasteBoundingBox(outputImage, imageToAdd, newToOutput, minCol, minRow, maxCol, maxRow);
-  
-  // Restrict the paste ROI to valid bounds --> Should use a class function!
-  if (minCol < 0)                minCol = 0;
-  if (maxCol > outputImage.cols) maxCol = outputImage.cols;
-  if (minRow < 0)                minRow = 0;
-  if (maxRow > outputImage.rows) maxRow = outputImage.rows;
-  //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
-  
-  // Iterate over the pixels of the output image
-  bool gotValue;
-  cv::Vec3b pastePixel, currentPixel;
-  float interpX, interpY;
-  const int NUM_RGB_CHANNELS = 3;
-  for (int r=minRow; r<maxRow; r++)
-  {
-    for (int c=minCol; c<maxCol; c++)
-    {        
-      // Compute the equivalent location in the added image
-      affineTransform(spatialTransform, c, r, interpX, interpY);
-      
-      // TODO: Don't use mirrored pixel over real pixel!
-      
-      // Extract all of the basemap values at that location.
-      // - Call the mirror version of the function so we retain all edges.
-      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);      
-      
-      // Skip masked pixels and out of bounds pixels
-      if (!gotValue)
-      {
-        continue;
-      }
-      
-      // If the interpolated pixel is good add the weighted value to the output image
-      float weight = imageWeight.at<float>(r,c);
-      currentPixel = outputImage.at<cv::Vec3b>(r, c);
-      for (int chan=0; chan<NUM_RGB_CHANNELS; chan++)
-      {
-        float newVal = static_cast<float>(pastePixel[chan])*weight;
-        currentPixel[chan] += static_cast<unsigned char>(newVal);
-      }
-      outputImage.at<cv::Vec3b>(r, c) = currentPixel;
-
-    } // End col loop
-  } // End row loop
-
-  return true;
-}
-
-
-*/
-
-/// A weighted simple paste of one image on to another.
-bool pasteWeightedImage(cv::Mat &outputImage,
-                         const cv::Mat &imageToAdd, const cv::Mat &imageMask,
-                         const cv::Mat &imageWeight, const cv::Mat &spatialTransform)
+                        const cv::Mat &imageWeight,
+                        const int colOffset, const int rowOffset)
 {
   const int tileHeight = imageToAdd.rows;
   const int tileWidth  = imageToAdd.cols;
-  
-  // Use a simple integer translation to match the input masks!
-  const int colOffset = static_cast<int>(spatialTransform.at<float>(0, 2));
-  const int rowOffset = static_cast<int>(spatialTransform.at<float>(1, 2));
-    
+  /*
   // Compute the bounds of the new image so we do not have to iterate over the entire output image
   int minCol, minRow, maxCol, maxRow;
   minCol = -colOffset;
@@ -267,9 +204,7 @@ bool pasteWeightedImage(cv::Mat &outputImage,
   //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
   
   
-  // TODO: Use OpenCV calls to replace this block of code!
-  // TODO: Why does this produce better results than OpenCV?
-  
+  // TODO: Delete this chunk once the OpenCV replacement is fully tested
   // Iterate over the pixels of the output image
   cv::Vec3b pastePixel, currentPixel;
   unsigned char maskPixel;
@@ -299,15 +234,49 @@ bool pasteWeightedImage(cv::Mat &outputImage,
 
     } // End col loop
   } // End row loop
+*/
 
+
+  cv::Mat imageWeight3;
+  cv::Mat linker[]  {imageWeight, imageWeight, imageWeight};
+  cv::merge(linker, 3, imageWeight3);
+  
+  int minCol = -colOffset;
+  int minRow = -rowOffset;
+  //std::cout << "col, row offsets = " << colOffset << ", " << rowOffset<< std::endl;
+  
+  cv::Rect outputRoi(minCol, minRow, tileWidth, tileHeight);
+  //std::cout << "output ROI = " << outputRoi << std::endl;
+  
+  cv::Rect pasteRoi(minCol+colOffset, minRow+rowOffset,
+                    tileWidth, tileHeight);
+  //std::cout << "paste ROI = " << pasteRoi << std::endl;
+  
+  
+  if (!constrainMatchedCvRois(outputRoi, outputImage.cols, outputImage.rows, pasteRoi)) {
+    printf("hrscMosaic.cpp WARNING: No ROI match!\n");
+    return true;  // No image intersection, no need for image operations.
+  }
+  
+  //std::cout << "output ROI = " << outputRoi << std::endl;
+  cv::Mat  outputRegion = outputImage(outputRoi);
+  
+  //std::cout << "paste ROI = " << pasteRoi << std::endl;
+  cv::Mat  pasteRegion  = imageToAdd(pasteRoi);
+  cv::Mat  weightRegion = imageWeight3(pasteRoi);
+
+  //std::cout << "paste size  = " << pasteRegion.size() << std::endl;
+  //std::cout << "weight size = " << weightRegion.size() << std::endl;
+  
+  // outputImage += imageToAdd * imageWeight
+  cv::Mat temp;
+  //printf("Mult\n");
+  cv::multiply(pasteRegion, weightRegion, temp, 1.0, CV_8UC3);
+  //printf("Add\n");
+  cv::add(outputRegion, temp, outputRegion);
+  
   return true;
 }
-
-
-
-
-
-
 
 
 
@@ -378,7 +347,7 @@ void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &paste
   }
   
 }
-
+/*
 /// Paste new images using a graph cut to blend the seams.
 bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
                          const std::vector<cv::Mat> &pasteImages,
@@ -433,15 +402,15 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
       //std::cout << "sizeI = " << sizes[i] << std::endl;
       //std::cout << "sizeM = " << seamMasks[i].size() << std::endl;
     }
-/*
-    int debugX = 1026;
-    int debugY = 1972;
-    std::cout << debugY+spatialTransforms[0].at<float>(1, 2) << ", "
-              << debugX+spatialTransforms[0].at<float>(0, 2) << std::endl;
-    std::cout << baseImage.at<cv::Vec3b>(debugY, debugX) << std::endl;
-    std::cout << pasteImages[0].at<cv::Vec3b>(debugY+spatialTransforms[0].at<float>(1, 2),
-                                              debugX+spatialTransforms[0].at<float>(0, 2)) << std::endl;
-    */
+
+    //int debugX = 1026;
+    //int debugY = 1972;
+    //std::cout << debugY+spatialTransforms[0].at<float>(1, 2) << ", "
+    //          << debugX+spatialTransforms[0].at<float>(0, 2) << std::endl;
+    //std::cout << baseImage.at<cv::Vec3b>(debugY, debugX) << std::endl;
+    //std::cout << pasteImages[0].at<cv::Vec3b>(debugY+spatialTransforms[0].at<float>(1, 2),
+    //                                          debugX+spatialTransforms[0].at<float>(0, 2)) << std::endl;
+    
     
     //printf("Dumping input masks...\n");
       
@@ -540,16 +509,16 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
         }
     }
     
-    /* TODO: Why does the feather blender mess up the image colors?
-    // Blend the images
-    printf("Running blender...\n");
-    cv::Mat resultImage, resultMask;
-    blender->blend(resultImage, resultMask);
-    printf("Blended!\n");
+    //// TODO: Why does the feather blender mess up the image colors?
+    //// Blend the images
+    //printf("Running blender...\n");
+    //cv::Mat resultImage, resultMask;
+    //blender->blend(resultImage, resultMask);
+    //printf("Blended!\n");
     
-    resultImage.convertTo(outputImage, CV_8U); // The result comes out as CV_16S
+    //resultImage.convertTo(outputImage, CV_8U); // The result comes out as CV_16S
     //cv::imwrite("blendMask.tif", resultMask);
-    */
+    
     
     // Using manual image pasting because the OpenCV functions are not working!
     outputImage = cv::Mat::zeros(baseImage.rows, baseImage.cols, CV_8UC3);
@@ -568,20 +537,127 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
     }    
     
     
-    /*
+    
     // Note: Images are stored in BGR format
-    std::cout << "Output: " << outputImage.at<cv::Vec3b>(debugY, debugX) << std::endl;
-    std::cout << "Output type: " <<outputImage.type() << std::endl;
-    */
+    //std::cout << "Output: " << outputImage.at<cv::Vec3b>(debugY, debugX) << std::endl;
+    //std::cout << "Output type: " <<outputImage.type() << std::endl;
+    
     cv::imwrite("blended.tif", outputImage);
-
-   
 }
+*/
 
+/// Slimmed down version of the previous function.
+/// - This version only supports the feather blender with manual pasting of the images.
+bool pasteImagesFeather(const             cv::Mat  &baseImage,
+                        const std::vector<cv::Mat> &pasteImages,
+                        const std::vector<cv::Mat> &pasteMasks,
+                        const std::vector<cv::Mat> &spatialTransforms,
+                                          cv::Mat  &outputImage)
+{
+    const float FEATHER_BLEND_DIST = BLEND_DIST_GLOBAL;
+    const bool  TRY_GPU = false;
+        
+    size_t numImages = pasteImages.size() + 1;
+    
+    // Set up the initial image masks
+    // - Need to avoid feathering at the inter-tile boundaries.
+    cv::Mat baseMaskTrue(baseImage.rows, baseImage.cols, CV_8UC1, 255);
+    cv::Mat baseMaskShrunk;
+    setImageMasks(baseMaskTrue, pasteMasks, spatialTransforms, baseMaskShrunk);
+    
+    // Need to convert from Mat to UMat
+    std::vector<cv::Mat >  pasteImages16s(numImages);
+    std::vector<cv::UMat > seamMasks (numImages);
+    std::vector<cv::Point> corners   (numImages);
+    std::vector<cv::Size > sizes     (numImages);
+    for (int i = 0; i < numImages-1; ++i)
+    {
+      pasteImages[i].convertTo(pasteImages16s[i], CV_16S); // Blender needs this format
+      pasteMasks [i].copyTo(seamMasks [i]);
+      
+      // The input transform is just a translation in affine format
+      // - TODO: Make this cleaner, get out inversion
+      corners[i] = cv::Point(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
+                             static_cast<int>(-spatialTransforms[i].at<float>(1, 2)));
+    }
+    
+    // Add the base map to the list of input images with a mask
+    const int baseIndex = numImages-1;
+    baseImage.convertTo(pasteImages16s[baseIndex], CV_16S);
+    baseMaskShrunk.copyTo(seamMasks[baseIndex]);
+    corners[baseIndex] = cv::Point(0,0);
 
-
-
-
+    // Record the size of each input image
+    for (int i = 0; i < numImages; ++i){
+      sizes[i] = pasteImages16s[i].size();
+    }
+    /*
+    // Dump all the input masks to disk for debugging
+    for (size_t i=0; i<numImages; ++i)
+    {
+      std::string path = "pre_seam_mask" + itoa(i) + ".tif";
+      cv::imwrite(path, seamMasks[i]);
+      
+      path = "image_in_" + itoa(i) + ".tif";
+      cv::Mat temp;
+      umatImages[i].convertTo(temp, CV_8U);
+      cv::imwrite(path, temp);
+    }*/
+    
+    // Initialize the blender
+    cv::Ptr<cv::detail::Blender> blender;
+    
+    // Use the feather blender
+    blender = cv::detail::Blender::createDefault(cv::detail::Blender::FEATHER, TRY_GPU); // Feather or pyramid blend
+    cv::detail::FeatherBlender* fb = dynamic_cast<cv::detail::FeatherBlender*>(blender.get());
+    fb->setSharpness(1.0/FEATHER_BLEND_DIST);
+    blender->prepare(corners, sizes);
+    
+    // Feed all the tiles into the blender
+    for (size_t i=0; i<numImages; ++i)
+    {
+      //cv::Mat tempImg; // TODO: Have a seperate array of Mat images?
+      //umatImages[i].convertTo(tempImg, CV_16S); // Image must be CV_16SC3 and mask must be CV_8U
+      //baseImage.convertTo(tempImg, CV_16S);
+      blender->feed(pasteImages16s[i], seamMasks[i], corners[i]);
+    }
+    
+    // Generate the feather blender weight masks
+    std::vector<cv::Mat > imageWeights;
+    std::vector<cv::UMat> imageWeightsUmat;
+    cv::Rect r = fb->createWeightMaps(seamMasks, corners, imageWeightsUmat);
+    
+    imageWeights.resize(imageWeightsUmat.size());
+    for (size_t i=0; i<imageWeightsUmat.size(); ++i)
+    {
+      imageWeightsUmat[i].convertTo(imageWeights[i], CV_32F);
+        
+      //cv::Mat temp;
+      //imageWeightsUmat[i].convertTo(temp, CV_8U, 255.0);
+      //std::string path = "weight_mask_" + itoa(i) + ".tif";
+      //cv::imwrite(path, temp);
+    }
+       
+    // Using manual image pasting because the OpenCV functions are not working!
+    outputImage = cv::Mat::zeros(baseImage.rows, baseImage.cols, CV_8UC3);
+    
+    // First paste the basemap image on to the blank output image
+    cv::Mat basemapMask(baseImage.rows, baseImage.cols, CV_8UC1, 255);
+    cv::Mat basemapTransform = cv::Mat::eye(3, 3, CV_32F);
+    int colOffset = static_cast<int>(basemapTransform.at<float>(0, 2));
+    int rowOffset = static_cast<int>(basemapTransform.at<float>(1, 2));
+    pasteWeightedImage(outputImage, baseImage, baseMaskShrunk, imageWeights[numImages-1], colOffset, rowOffset);
+  
+    // For now, just dump all of the HRSC images in one at a time.  
+    for (size_t i=0; i<numImages-1; ++i) {
+      colOffset = static_cast<int>(spatialTransforms[i].at<float>(0, 2));
+      rowOffset = static_cast<int>(spatialTransforms[i].at<float>(1, 2));
+      pasteWeightedImage(outputImage, pasteImages[i], pasteMasks[i], imageWeights[i], colOffset, rowOffset);
+    }    
+        
+    // Note: Images are stored in BGR format
+    //cv::imwrite("blended.tif", outputImage);
+}
 
 
 
@@ -627,9 +703,8 @@ int main(int argc, char** argv)
 
 #ifndef USE_SIMPLE_PASTE  
   // OpenCV based image blending
-  std::vector<cv::Mat> imageWeights;
   cv::Mat outputImage, basemapFloat;
-  pasteImagesGraphCut(basemapImage, hrscImages, hrscMasks, spatialTransforms, imageWeights, outputImage);
+  pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
 #else
   /*
   cv::Mat outputImage =cv::Mat::zeros(basemapImage.rows, basemapImage.cols, CV_8UC3);

@@ -1,13 +1,12 @@
 
-
-
-
 import os
 import sys
 import copy
 import re
 import json
 import numpy
+import multiprocessing
+import functools
 
 import IrgGeoFunctions
 
@@ -175,7 +174,7 @@ class HrscImage():
     
     # TODO: Add setup/teardown functions that remove large image data but keep the small outputs on disk
     
-    def __init__(self, setName, inputFolder, outputFolder, basemapInstance, force=False):
+    def __init__(self, setName, inputFolder, outputFolder, basemapInstance, force=False, threadPool=None):
         '''Set up all the low resolution HRSC products.'''
         
         print 'Initializing HRSC image: ' + setName
@@ -184,7 +183,8 @@ class HrscImage():
         self._tileDict = None #
         
         # Set up some paths
-        self._setName = setName
+        self._setName    = setName
+        self._threadPool = threadPool
         self._outputFolder        = outputFolder
         self._basemapInstance     = basemapInstance
         self._hrscBasePathIn      = os.path.join(inputFolder,  setName)
@@ -279,17 +279,14 @@ class HrscImage():
     def prepHighResolutionProducts(self, force=False):
         '''Generates all of the high resolution HRSC products'''
         
-        # TODO: Accept an input Degree region and only generate the tiles
-        #       surrounding that region.
+        # TODO: Accept an input Degree region and only generate the tiles surrounding that region.
         
         # Convert each high res input image into the output format
         
         # TODO: Could avoid this expensive step by handling the transform in the c++ programs
         # Generate a copy of each input HRSC channel at the high output resolution
         print 'Generating high resolution warped channel images...'
-        self._highResWarpedPaths = [self._warpToProjection(path, self._outputFolder, '_output_res', 
-                                                          self._basemapInstance.getHighResMpp(), force)
-                                   for path in self._inputHrscPaths]
+        self._generateHighResWarpedPaths(force)
         
         # Build up a string containing all the high res paths for convenience
         self._highResPathString = ''
@@ -416,6 +413,49 @@ class HrscImage():
         
         print 'Finished generating high resolution content for HRSC image.'
         
+        
+        
+    def _getWarpToProjectionCmd(self, sourcePath, outputFolder, postfix, metersPerPixel):
+        '''Get the command needed by _warpToProjection'''
+        if not os.path.exists(outputFolder):
+            os.mkdir(outputFolder)
+        fileName   = sourcePath[sourcePath.rfind('/')+1:]
+        warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
+        cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
+                 +' -t_srs "'+self._basemapInstance.getProj4String()+'" -tr '
+                 + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
+        return (cmd, warpedPath)
+    
+    def _warpToProjection(self, sourcePath, outputFolder, postfix, metersPerPixel, force=False):
+        '''Warps an HRSC file into the specified projection space'''
+        (cmd, warpedPath) = self._getWarpToProjectionCmd(sourcePath, outputFolder, postfix, metersPerPixel)
+        MosaicUtilities.cmdRunner(cmd, warpedPath, force)
+        return warpedPath
+    
+        
+    def _generateHighResWarpedPaths(self, force):
+        '''Generate all of the high resolution warped HRSC images using multiple threads'''
+    
+        if self._threadPool:
+            print 'Launching multiple gdalwarp threads...'
+            
+            # TODO: Apply the force command!
+            
+            # For each path, make the command line call we want executed.
+            cmdList = []
+            for path in self._inputHrscPaths:
+                warpCmd, warpedPath = self._getWarpToProjectionCmd(path, self._outputFolder,
+                                                                   '_output_res', self._basemapInstance.getHighResMpp())
+                cmdList.append(str(warpCmd))
+            # Pass all of these commands to a multiprocessing worker pool
+            self._threadPool.map(MosaicUtilities.cmdRunner, cmdList)
+        
+        else: # No pool, run single threaded.
+            self._highResWarpedPaths = [self._warpToProjection(path, self._outputFolder, '_output_res', 
+                                                      self._basemapInstance.getHighResMpp(), force)
+                               for path in self._inputHrscPaths]        
+        
+        
     def getTileInfo(self, boundsDegrees=None):
         '''Return the high resolution tile information.
            If an ROI in degrees is passed in, only tiles that intersect that ROI will be returned.'''
@@ -471,19 +511,6 @@ class HrscImage():
                 hrscBasePath+'_nd3.tif')
     
     
-    def _warpToProjection(self, sourcePath, outputFolder, postfix, metersPerPixel, force=False):
-        '''Warps an HRSC file into the specified projection space'''
-        if not os.path.exists(outputFolder):
-            os.mkdir(outputFolder)
-        fileName   = sourcePath[sourcePath.rfind('/')+1:]
-        warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
-        cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
-                 +' -t_srs "'+self._basemapInstance.getProj4String()+'" -tr '
-                 + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
-        MosaicUtilities.cmdRunner(cmd, warpedPath, force)
-        return warpedPath
-            
-        
     def _estimateRegistration(self, baseImage, otherImage, outputPath):
         '''Writes an estimated registration transform to a file based on geo metadata.'''
         # This function assumes the images are in the same projection system!

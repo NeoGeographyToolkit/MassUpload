@@ -42,9 +42,9 @@ typedef Rectangle_<int> Rectangle; //< Convience typedef
 /// - Returns false if there is no overlap
 bool constrainCvRoi(cv::Rect &roi, const int imageWidth, const int imageHeight)
 {
-  std::cout << "roi    = " << roi << std::endl;
-  std::cout << "width  = " << imageWidth << std::endl;
-  std::cout << "height = " << imageHeight << std::endl;
+  //std::cout << "roi    = " << roi << std::endl;
+  //std::cout << "width  = " << imageWidth << std::endl;
+  //std::cout << "height = " << imageHeight << std::endl;
   cv::Rect imageRoi(0, 0, imageWidth, imageHeight);
   roi &= imageRoi;
   return (roi.area() > 0);
@@ -62,10 +62,10 @@ bool constrainMatchedCvRois(cv::Rect &roi, const int imageWidth, const int image
   cv::Point tlDiff = roi.tl()   - roiIn.tl(); // TL corner can only have increased
   //cv::Point brDiff = roiIn.br() - roi.br();
   
-  std::cout << "tlDiff  = " << tlDiff << std::endl;
+  //std::cout << "tlDiff  = " << tlDiff << std::endl;
   
   roi2 = cv::Rect(roi2.tl() + tlDiff, roi.size()); // Use the new size
-  std::cout << "roi2  = " << roi2<< std::endl;
+  //std::cout << "roi2  = " << roi2<< std::endl;
   return true;
 }
 

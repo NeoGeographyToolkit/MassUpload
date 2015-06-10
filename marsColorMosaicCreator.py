@@ -4,6 +4,8 @@ import sys
 import re
 import subprocess
 import numpy
+import multiprocessing
+
 import IrgGeoFunctions
 import copyGeoTiffInfo
 import mosaicTileManager # TODO: Normalize caps!
@@ -51,9 +53,9 @@ def getHrscImageList():
     
     # TODO: Search our database to perform this function!
     return ['h0022_0000',
-            'h0506_0000']#,
-            #'h2411_0000',
-            #'h6419_0000')
+            'h0506_0000',
+            'h2411_0000',
+            'h6419_0000']
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
@@ -114,6 +116,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
     
     print 'Found overlapping output tiles:  ' + str(outputTilesRect)
     
+    # TODO: Use multiple threads here!
     # Loop through all the tiles
     for row in range(outputTilesRect.minY, outputTilesRect.maxY):
         for col in range(outputTilesRect.minX, outputTilesRect.maxX):
@@ -173,6 +176,10 @@ print 'Starting basemap enhancement script...'
 # TODO: Go down to 20 to 10 meters!
 OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 
+NUM_WORKER_THREADS = 2
+
+pool = multiprocessing.Pool(processes=NUM_WORKER_THREADS)
+
 print '\n==== Initializing the base map object ===='
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
 mainLogPath = basemapInstance.getMainLogPath()
@@ -198,7 +205,7 @@ for hrscSetName in hrscImageList:
 
     # Fetch and preprocess the HRSC image
     # - TODO: Use the manager class to handle this!
-    hrscInstance = hrscImageManager.HrscImage(hrscSetName, sourceHrscFolder, thisHrscFolder, basemapInstance)
+    hrscInstance = hrscImageManager.HrscImage(hrscSetName, sourceHrscFolder, thisHrscFolder, basemapInstance, False, pool)
 
     print '--- Now initializing high res HRSC content ---'
 
@@ -214,7 +221,7 @@ for hrscSetName in hrscImageList:
 
     # TODO: Clean up if necessary
 
-    raise Exception('DEBUG')
+    #raise Exception('DEBUG')
 
 
 

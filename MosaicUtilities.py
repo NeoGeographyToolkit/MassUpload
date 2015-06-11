@@ -25,12 +25,23 @@ def cmdRunner(cmd, outputPath=None, force=False):
     '''Executes a command if the output file does not exist and
        throws if the output file is not created'''
 
+    if cmd == '': # An empty task
+        return
+
     if force or (not outputPath) or (not os.path.exists(outputPath)):
         print cmd
         os.system(cmd)
     if outputPath and (not os.path.exists(outputPath)):
         raise CmdRunException('Failed to create output file: ' + outputPath)
     return True
+
+def cmdRunnerWrapper(params):
+    '''Wrapper function to call cmdRunner from a tuple'''
+    cmd        = params[0]
+    outputPath = params[1]
+    force      = params[2]
+    cmdRunner(cmd, outputPath, force)
+
 
 #def getImageSize(imagePath):
 #    """Returns the size [rows, columns] in an image"""

@@ -287,11 +287,6 @@ class HrscImage():
         # Generate a copy of each input HRSC channel at the high output resolution
         print 'Generating high resolution warped channel images...'
         self._generateHighResWarpedPaths(force)
-        
-        # Build up a string containing all the high res paths for convenience
-        self._highResPathString = ''
-        for path in self._highResWarpedPaths:
-            self._highResPathString += path + ' '
 
         # Make a mask at the output resolution
         # - This mask is actually pretty small on disk since it compresses so well.
@@ -300,9 +295,11 @@ class HrscImage():
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)            
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath        
         
+        
         # Split the image up into tiles at the full output resolution       
         # - There is one list of tiles per HRSC channel
         # - Each channel gets its own subfolder
+        # - Due to ImageMagick's implementation this step is already multithreaded!
         print 'Splitting warped images into tiles...'
         self._tileFolder = os.path.join(os.path.dirname(self._hrscBasePathOut), 'tiles') # TODO: Do we need no divide up the folders more?
         if not os.path.exists(self._tileFolder):
@@ -384,7 +381,7 @@ class HrscImage():
         # Generate a "personalized" brightness file for each tile
         self._splitScaleBrightnessGains(self._brightnessGainsPath, self._tileDict, force)
 
-
+        # TODO: Multithread these at some point, this is pretty fast though.
         # Generate the color transform for each tile
         # - HRSC colors are written with the brightness correction already applied
         # - Color pairs are computed between the high resolution HRSC tile and the low resolution input basemap.
@@ -404,11 +401,9 @@ class HrscImage():
             MosaicUtilities.cmdRunner(cmd, tile['colorTransformPath'], force)
 
         # Now that we have all the color transforms, generate the new color image for each tile.
-        for tile in self._tileDict.itervalues():
+        # - This function utilizes the thread pool
+        self._generateNewHrscColorTiles(self._tileDict, force)
         
-            # New color generation is handled in this function
-            self._generateNewHrscColor(tile, self._tileDict, force)
-            
         #raise Exception('STOP TEST')
         
         print 'Finished generating high resolution content for HRSC image.'
@@ -439,42 +434,49 @@ class HrscImage():
         if self._threadPool:
             print 'Launching multiple gdalwarp threads...'
             
-            # TODO: Apply the force command!
-            
             # For each path, make the command line call we want executed.
             cmdList = []
+            self._highResWarpedPaths = []
             for path in self._inputHrscPaths:
                 warpCmd, warpedPath = self._getWarpToProjectionCmd(path, self._outputFolder,
                                                                    '_output_res', self._basemapInstance.getHighResMpp())
-                cmdList.append(str(warpCmd))
+                cmdList.append((warpCmd, warpedPath, force))
+                self._highResWarpedPaths.append(warpedPath)
             # Pass all of these commands to a multiprocessing worker pool
-            self._threadPool.map(MosaicUtilities.cmdRunner, cmdList)
+            self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
         
         else: # No pool, run single threaded.
             self._highResWarpedPaths = [self._warpToProjection(path, self._outputFolder, '_output_res', 
                                                       self._basemapInstance.getHighResMpp(), force)
                                for path in self._inputHrscPaths]        
         
+        # Build up a string containing all the high res paths for convenience
+        self._highResPathString = ''
+        for path in self._highResWarpedPaths:
+            self._highResPathString += path + ' '
         
-    def getTileInfo(self, boundsDegrees=None):
+        
+    def getTileInfo(self, boundsDegrees=None, transformId=''):
         '''Return the high resolution tile information.
-           If an ROI in degrees is passed in, only tiles that intersect that ROI will be returned.'''
+           If an ROI in degrees is passed in, only tiles that intersect that ROI will be returned and
+           a transform to that ROI will be created under 'tileToTileTransformPath'.  Pass in the ID argument
+           if you want the path to be unique!'''
         if boundsDegrees == None:
             return self._tileDict
         
         # Otherwise we need to make a new dictionary containing only the intersecting tiles
         outputDict = {}
-        #print boundsDegrees
-        for k in self._tileDict:
-            tile = self._tileDict[k]
-            #print tile['prefix']
-            #print tile['degreeRect']
+        for key in self._tileDict:
+            tile = copy.copy(self._tileDict[key])
             if boundsDegrees.overlaps(tile['degreeRect']):
                 # Compute the transform to the provided ROI
-                # TODO: Don't overwrite these transforms each time!
-                tile['tileToTileTransformPath'] = os.path.join(self._tileFolder, 'tile_to_tile_transform_' + tile['prefix'] + '.csv')
+                if transformId:
+                    transformFileName = 'tile_to_tile_transform_' + tile['prefix'] + '_' + transformId+ '.csv'
+                else: # Use a unique tile path
+                    transformFileName = 'tile_to_tile_transform_' + tile['prefix'] + '.csv'
+                tile['tileToTileTransformPath'] = os.path.join(self._tileFolder, transformFileName)
                 self.getTransformToBasemapRoi(tile, boundsDegrees, tile['tileToTileTransformPath'])
-                outputDict[k] = tile
+                outputDict[key] = tile
         return outputDict
         
     
@@ -690,24 +692,23 @@ class HrscImage():
         return adjacentTileList    
     
     
-    def _generateNewHrscColor(self, tile, tileDict, force=False):
-        '''Generate a new color image from a single HRSC tile'''
-        
-        if not tile['stillValid']: # Skip tiles which have already failed
-            return False
+    def _generateNewHrscColorTiles(self, tileDict, force=False):
+        '''Generate a new color image for each HRSC tile'''
 
-        # TODO: Should we include tiles up to two distance away?  Need to make
-        #       sure that there are no sharp changes is the color transform function.
+        # Make one pass through all the tiles just to generate the required commands
+        tileCommandList = []
+        for tile in self._tileDict.itervalues():
             
-        try:
+            if not tile['stillValid']: # Skip tiles which have already failed
+                return False
+
+            #try:
             # Get a list af adjacent tiles to pass in to the color transformer
             adjacentTiles = self._getAdjacentTiles(tile, tileDict)
             
             # Compute a weighting for each tile based on the pixel count
             totalWeight = 1.0 # The main image is the reference so it has weight 1 initially
             for adjTile in adjacentTiles:
-                #if force:
-                #    print adjTile
                 totalWeight += (adjTile['percentValid'] / tile['percentValid'])
                 
             # Generate the parameter sequence for the next program call
@@ -723,15 +724,20 @@ class HrscImage():
             cmd = ('./transformHrscImageColor ' + tile['allChannelsStringAndMask'] +' '+ tile['brightnessGainsPath'] +' '+ tile['newColorPath'] +' '+
                                                   tile['colorTransformPath'] +' '+ str(mainWeight) +' '+ adjacentTileString
                                                   )
-            MosaicUtilities.cmdRunner(cmd, tile['newColorPath'], force)
-        except CmdRunException:
-            tile['stillValid'] = False
+            tileCommandList.append((cmd, tile['newColorPath'], force))
+            #except CmdRunException:
+            #    tile['stillValid'] = False
         
-        #raise Exception('DEBUG')
+        # Make a second pass to execute the commands
+        # - Doing this in two passes lets us easily utilize a thread pool.
+        
+        if self._threadPool: # Dispatch the commands to the worker pool
+            self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, tileCommandList)
+        else: # Run the commands one after the other
+            for command in tileCommandList:
+                MosaicUtilities.cmdRunnerWrapper(command)
 
 
-    
-    
     
 #    
 #    

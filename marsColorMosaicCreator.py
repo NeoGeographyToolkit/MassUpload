@@ -4,6 +4,7 @@ import sys
 import re
 import subprocess
 import numpy
+import copy
 import multiprocessing
 
 import IrgGeoFunctions
@@ -54,8 +55,8 @@ def getHrscImageList():
     # TODO: Search our database to perform this function!
     return ['h0022_0000',
             'h0506_0000',
-            'h2411_0000',
-            'h6419_0000']
+            'h2411_0000']#,
+            #'h6419_0000']
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
@@ -65,42 +66,45 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
 
     #return MosaicUtilities.Rectangle(196, 197, 92, 93) # DEBUG
 
-def updateTileWithHrscImage(basemapInstance, tileIndex, outputTilePath, hrscInstance):
-    '''Update a single output tile with the given HRSC image'''
+
+
+
+
+def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
+    '''Gets the dictionary of HRSC tiles that need to update the given basemap tile index'''
 
     thisTileBounds = basemapInstance.getTileRectDegree(tileIndex)
-    #hrscSetName    = hrscInstance.getSetName()
-
 
     # Get the tile information from the HRSC image
-    tileDict = hrscInstance.getTileInfo(thisTileBounds)
+    tileDict = hrscInstance.getTileInfo(thisTileBounds, tileIndex.getPostfix())
     print 'Found these tile intersections:'
     for hrscTile in tileDict.itervalues():
         print hrscTile['prefix']
 
+    return tileDict
+    
+    
+
+def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
+    '''Update a single output tile with the given HRSC image'''
 
     # TODO: This C++ program can do multiple tiles in one call.
 
     # For each tile...
-    i = 0
-    for hrscTile in tileDict.itervalues(): 
-    
+    for hrscTile in hrscTileInfoDict.itervalues():    
         #try:
         cmd = ('./hrscMosaic ' + outputTilePath +' '+ outputTilePath +' '+ hrscTile['newColorPath'] +' '+
                                   hrscTile['tileMaskPath'] +' '+ hrscTile['tileToTileTransformPath'])
         MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
-
-        #i += 1
-        #if i == 3:
-        #    raise Exception('DEBUG')
-    
-        # TODO: Make sure the output tiles still have their geo info
-
         #raise Exception('DEBUG')
 
+    # Return the path to log the success to
+    return tileLogPath
+    
+    
 
 
-def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
+def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     '''Updates all output tiles containing this HRSC image'''
 
     # Find all the output tiles that intersect with this
@@ -115,9 +119,11 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
         return
     
     print 'Found overlapping output tiles:  ' + str(outputTilesRect)
+    if pool:
+        print 'Initializing tile output tasks...'
     
-    # TODO: Use multiple threads here!
     # Loop through all the tiles
+    tileResults = []
     for row in range(outputTilesRect.minY, outputTilesRect.maxY):
         for col in range(outputTilesRect.minX, outputTilesRect.maxX):
     
@@ -134,22 +140,46 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance):
             (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath) =  \
                         basemapInstance.generateTileImages(tileIndex, False)
         
-            print '\nPasting on HRSC tiles...'
+            #print '\nPasting on HRSC tiles...'
 
-            #raise Exception('DEBUG')
-        
             # Have we already written this HRSC image to this tile?
             comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
             if comboAlreadyWritten:
                 print '-- Skipping already written tile!' #Don't want to double-write the same image.
                 continue
         
+            # Get information about which HRSC tiles to paste on to the basemap
+            hrscTileInfoDict = getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance)
+            if not hrscTileInfoDict: # If there are no tiles to use, move on to the next output tile!
+                continue
+        
             # Update the selected tile with the HRSC image
-            updateTileWithHrscImage(basemapInstance, tileIndex, outputTilePath, hrscInstance)
+            if pool:
+                # Send the function and arguments to the thread pool
+                dictCopy = copy.copy(hrscTileInfoDict)
+                tileResults.append(pool.apply_async(updateTileWithHrscImage,
+                                                    args=(dictCopy, outputTilePath, tileLogPath)))
+            else: # Just run the function
+                updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath)
             
-            # Record that we have used this HRSC/tile combination.
+            # DEBUG breaks
+            #break
+        #break
+
+
+    if pool: # Wait for all the tasks to complete
+        print 'Finished initializing tile output tasks.'
+        print 'Waiting for tile processes to complete...'
+        for result in tileResults:
+            # Each task finishes by returning the log path for that tile.
+            # - Record that we have used this HRSC/tile combination.
+            # - This requires that tiles with no HRSC tiles do not get assigned a task.
+            tileLogPath = result.get()
             basemapInstance.updateLog(tileLogPath, hrscSetName)
             
+            
+        print 'All tile writing processes have completed'
+
     #raise Exception('DEBUG')
         
     # Log the fact that we have finished adding this HRSC image    
@@ -176,9 +206,13 @@ print 'Starting basemap enhancement script...'
 # TODO: Go down to 20 to 10 meters!
 OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 
-NUM_WORKER_THREADS = 2
+NUM_WORKER_THREADS = 3
 
-pool = multiprocessing.Pool(processes=NUM_WORKER_THREADS)
+# Initialize the multi-threading worker pool
+pool = None
+if NUM_WORKER_THREADS > 1:
+    pool = multiprocessing.Pool(processes=NUM_WORKER_THREADS)
+
 
 print '\n==== Initializing the base map object ===='
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
@@ -215,7 +249,7 @@ for hrscSetName in hrscImageList:
     print '--- Finished initializing HRSC image ---\n'
 
     # Call the function to update all the output images for this HRSC image
-    updateTilesContainingHrscImage(basemapInstance, hrscInstance)  
+    updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool)
 
     print '<<<<< Finished writing all tiles for this HRSC image! >>>>>'
 
@@ -223,6 +257,11 @@ for hrscSetName in hrscImageList:
 
     #raise Exception('DEBUG')
 
+
+if pool:
+    print 'Cleaning up the thread pool...'
+    pool.close()
+    pool.join()
 
 
 print 'Basemap enhancement script completed!'

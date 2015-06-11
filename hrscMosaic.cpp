@@ -55,6 +55,7 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
   std::string baseImagePath = argv[1];
   outputPath = argv[2];
   
+  // Pick out the three arguments for each input image
   for (size_t i=0; i<numHrscImages; ++i)
   {
     hrscPaths[i]             = argv[3 + 2*i];
@@ -681,6 +682,9 @@ int main(int argc, char** argv)
   }
 
   printf("Loading input data...\n");
+  
+  
+  TODO: Load the input images one at a time!
   
   // Load the input images  
   cv::Mat basemapImage;

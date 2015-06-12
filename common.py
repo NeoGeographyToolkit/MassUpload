@@ -19,6 +19,7 @@
 import sys
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
+import datetime
 
 '''
     Common definitions and utilities
@@ -146,5 +147,19 @@ def removeDataRecord(db, sensor, subType, setName):
                       (str(sensor), subType, setName))
     db.commit()
     return True
+
+
+#--------------------------------------------------------------------------------
+# Miscellaneous functions
+
+def isFileThisOld(filePath, numDays=0, numHours=0):
+    '''Return true if a file is old'''
+    fileTime = datetime.datetime.fromtimestamp(os.stat(filePath).st_ctime)
+    today    = datetime.datetime.now()
+    return (today > (fileTime + datetime.timedelta(days=numDays, hours=numHours)) )
+
+
+
+
 
 

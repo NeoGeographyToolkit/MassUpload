@@ -617,9 +617,6 @@ bool pasteImagesFeather(const             cv::Mat  &baseImage,
     // Feed all the tiles into the blender
     for (size_t i=0; i<numImages; ++i)
     {
-      //cv::Mat tempImg; // TODO: Have a seperate array of Mat images?
-      //umatImages[i].convertTo(tempImg, CV_16S); // Image must be CV_16SC3 and mask must be CV_8U
-      //baseImage.convertTo(tempImg, CV_16S);
       blender->feed(pasteImages16s[i], seamMasks[i], corners[i]);
     }
     

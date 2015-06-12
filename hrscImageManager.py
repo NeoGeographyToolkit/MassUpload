@@ -174,9 +174,10 @@ class HrscImage():
     
     # TODO: Add setup/teardown functions that remove large image data but keep the small outputs on disk
     
-    def __init__(self, setName, inputFolder, outputFolder, basemapInstance, force=False, threadPool=None):
+    def __init__(self, sourceFileInfoDict, outputFolder, basemapInstance, force=False, threadPool=None):
         '''Set up all the low resolution HRSC products.'''
         
+        setName = sourceFileInfoDict['setName']
         print 'Initializing HRSC image: ' + setName
         
         # Initialize some values to empty in case they are accessed prematurely
@@ -187,7 +188,6 @@ class HrscImage():
         self._threadPool = threadPool
         self._outputFolder        = outputFolder
         self._basemapInstance     = basemapInstance
-        self._hrscBasePathIn      = os.path.join(inputFolder,  setName)
         self._hrscBasePathOut     = os.path.join(outputFolder, setName)
         self._tileFolder          = self._hrscBasePathOut + '_tiles'
         self._lowResMaskPath      = self._hrscBasePathOut + '_low_res_mask.tif'
@@ -205,8 +205,8 @@ class HrscImage():
         self._basemapColorPath = basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
         #self._basemapGrayPath  = basemapInstance.getGrayBasemapPath()  # Path to the grayscale low res entire base map
         
-        # Get full list of input paths
-        self._inputHrscPaths = self._getHrscChannelPaths(self._hrscBasePathIn)
+        # Get full list of input paths from the input dictionary
+        self._inputHrscPaths = sourceFileInfoDict['allChannelPaths']
         
         
         print 'Generating low res image copies...'
@@ -736,11 +736,3 @@ class HrscImage():
         else: # Run the commands one after the other
             for command in tileCommandList:
                 MosaicUtilities.cmdRunnerWrapper(command)
-
-
-    
-#    
-#    
-#class HrscImageManager():
-#    '''Class to manage which HRSC images are stored locally on disk'''
-#    pass

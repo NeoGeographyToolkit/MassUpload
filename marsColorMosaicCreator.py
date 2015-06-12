@@ -7,24 +7,17 @@ import numpy
 import copy
 import multiprocessing
 
+#import sqlite3
+from pysqlite2 import dbapi2 as sqlite3
+
 import IrgGeoFunctions
 import copyGeoTiffInfo
 import mosaicTileManager # TODO: Normalize caps!
 import MosaicUtilities
 import hrscImageManager
+import hrscFileCacher
 
 """
-TODO:
-
-- Algorithm to smooth out transitions.
-- Generate a good result image.
-- Generate a list of features Earth Engine would need to replicate all steps.
-- Switch the code to a real tiling scheme.
-- Make sure the same set HRSC images line up properly
-    - This will become apparent at higher resolutions!
-    - We can't just treat them as perfectly aligned!
-    --> Treat Nadir image as the standard and align other images to it.
-- Better mask handling
 
 Existing tools:
 - RegisterHrsc.cpp
@@ -44,9 +37,9 @@ Existing tools:
 #----------------------------------------------------------------------------
 # Constants
 
-
 #-----------------------------------------------------------------------------------------
 # Functions
+
 
 
 def getHrscImageList():
@@ -57,6 +50,9 @@ def getHrscImageList():
             'h0506_0000',
             'h2411_0000']#,
             #'h6419_0000']
+
+
+
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
@@ -198,7 +194,7 @@ hrscOutputFolder = '/home/smcmich1/data/hrscMapTest/hrscFiles'
 
 outputTileFolder = '/home/smcmich1/data/hrscMapTest/outputTiles'
 
-
+databasePath = 'TODO'
 
 print 'Starting basemap enhancement script...'
 
@@ -219,6 +215,11 @@ basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolde
 mainLogPath = basemapInstance.getMainLogPath()
 print '--- Finished initializing the base map object ---\n'
 
+
+# Set up the HRSC file manager object
+hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, hrscOutputFolder)
+
+# TODO: Replace with call to the file manager!
 # Get a list of all the HRSC images we are testing with
 hrscImageList = getHrscImageList()
 
@@ -230,16 +231,18 @@ for hrscSetName in hrscImageList:
         print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
         continue
     
-    # Pick a location to store the data for this HRSC image
-    thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
+    ## Pick a location to store the data for this HRSC image
+    #thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
 
     #try:
 
     print '\n=== Initializing HRSC image ' + hrscSetName + ' ==='
 
-    # Fetch and preprocess the HRSC image
-    # - TODO: Use the manager class to handle this!
-    hrscInstance = hrscImageManager.HrscImage(hrscSetName, sourceHrscFolder, thisHrscFolder, basemapInstance, False, pool)
+    # Fetch the HRSC data from the web
+    hrscFileInfoDict = hrscFileFetcher.fetchHrscDataSet(hrscSetName)
+
+    # Preprocess the HRSC image
+    hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, pool)
 
     print '--- Now initializing high res HRSC content ---'
 

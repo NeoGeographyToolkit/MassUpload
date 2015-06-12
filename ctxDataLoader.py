@@ -18,7 +18,7 @@
 
 import sys
 
-from bs4 import BeautifulSoup
+from BeautifulSoup import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
@@ -34,7 +34,10 @@ import common
 
 def getUploadList(fileList):
     '''Returns the subset of the fileList that needs to be uploaded to GME'''
-    return [fileList[0], fileList[1]] # Image file and the sidecar header file
+    if len(fileList) == 3: # ASU processed image
+        return [fileList[0], fileList[1]] # Image file (JP2) and the sidecar header file
+    else: # Our processed image
+        return [fileList[0]] # Just the image file (TIFF)
 
 def putIsisHeaderIn180(headerPath):
     '''Make sure the header info is for +/- 180 degrees!'''
@@ -101,22 +104,22 @@ def getCreationTime(fileList):
     
     if len(fileList) < 2:
         raise Exception('Error, missing label file path!')
-    filePath = fileList[2]
+    filePath = fileList[-1]
 
     timeString = ''
     f = open(filePath, 'r')
-#    OUR METHOD
-#    # The exact time string is the only thing written to this file so just read it out!    
-#    for line in f:
-#        timeString = line.strip()
-
-#   ASU METHOD
-#   Extract the time string from the label file
+    #OUR METHOD
+    # The exact time string is the only thing written to this file so just read it out!    
     for line in f:
-        if 'StartTime             = ' in line:
-            eqPos = line.find('=')
-            timeString = line[eqPos+1:].strip() + 'Z'
-            break
+        timeString = line.strip()
+
+##   ASU METHOD
+##   Extract the time string from the label file
+#    for line in f:
+#        if 'StartTime             = ' in line:
+#            eqPos = line.find('=')
+#            timeString = line[eqPos+1:].strip() + 'Z'
+#            break
 
     f.close()    
   
@@ -149,10 +152,45 @@ def getCreationTimeHelper(filePath):
     timeString = timeString + 'Z'
     return timeString
     
+def checkForBadFile(imgUrl):
+    '''Checks for a number of features in the header that flag the file as unusable'''
+
+    # Images with this in the name are always bad
+    if '99N999W' in imgUrl:
+        print 'Skipping invalid test image:'
+        print imgUrl
+        return True
+
+    # Download the first 2k bytes of the file containing the header
+    #  and directly extract the text out of it.  
+    ps         = subprocess.Popen(('curl', '-s', imgUrl), stdout=subprocess.PIPE)
+    outputText = subprocess.Popen(('head', '-c', '2048'), stdin=ps.stdout, stdout=subprocess.PIPE).communicate()
+    #print outputText    
+    outputTextLines = outputText[0].split('\n')
+    print outputTextLines
+    
+    #raise Exception('DEBUG')
+    
+    # Check each line of the text for the calibration indicator
+    for line in outputTextLines:
+        if ('RATIONALE_DESC' in line) and  ('field calibration' in line):
+            print 'Skipping flat field file!'
+            print line
+            return True
+        if ('TARGET_NAME' in line) and not ('MARS' in line):
+            print 'Skipping non-mars target!'
+            print line
+            return True    
+
+    return False
 
 def getBoundingBox(fileList):
     """Return the bounding box for this data set in the format (minLon, maxLon, minLat, maxLat)"""
-    return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[2])
+    if len(fileList) == 3: # ASU method
+        # Read plain text from the label file
+        return IrgGeoFunctions.getBoundingBoxFromIsisLabel(fileList[-1])
+    else: # Compute the corners from a geotiff
+        return IrgGeoFunctions.getGeoTiffBoundingBox(fileList[0])
 
 def findAllDataSets(db, sensorCode):
     '''Add all known data sets to the SQL database'''
@@ -194,6 +232,8 @@ def findAllDataSets(db, sensorCode):
             prefix = dataName[:-4] # Strip off .IMG
             common.addDataRecord(db, sensorCode, volumeName[:-1], prefix, url)
 
+    # There are no official CTX DEMs!
+
     print 'Added CTX data files to database!'
     
     
@@ -203,7 +243,7 @@ def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
     
     #print 'Uploading file ' + setName
     
-    # Images with a center over this latitude will use stereographic projection
+    # Images with a center over this latitude will use polar stereographic projection
     #   instead of simple cylindrical projection.
     HIGH_LATITUDE_CUTOFF = 65 # Degrees
     
@@ -215,13 +255,19 @@ def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
     #calPath     = os.path.join(workDir, setName + '.cal.cub')    # Output of ctxcal
     mapPath       = os.path.join(workDir, setName + '.map.cub')   # Output of cam2map
     mapLabelPath  = os.path.join(workDir, setName + '.map.pvl')   # Specify projection to cam2map
-    localFilePath = os.path.join(workDir, setName + '.jp2')       # The output file we will upload
     
     # Generate the remote URLs from the data prefix and volume stored in these parameters
     asuImageUrl, asuLabelUrl, edrUrl = generatePdsPath(setName, subtype)
     
-    if False: # Map project the EDR ourselves <-- Going with this approach!
+    if True: # Map project the EDR ourselves <-- This takes way too long!
         print 'Projecting the EDR image using ISIS...'
+
+        localFilePath = os.path.join(workDir, setName + '.tif') # The output file we will upload
+
+        # Check if this is a "flat" calibration image
+        badImage = checkForBadFile(edrUrl)       
+        if badImage:
+            raise Exception('TODO: Remove bad images from the DB!')
         
         if not os.path.exists(edrPath):
             # Download the EDR file
@@ -237,26 +283,28 @@ def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
             f.close()
       
         # Convert and apply calibration to the CTX file
-        calPath = IrgIsisFunctions.prepareCtxImage(edrPath, workDir, True)
+        calPath = IrgIsisFunctions.prepareCtxImage(edrPath, workDir, False)
 
-        # Find out the center latitude of the file and determine if it is high latitude
+        ## Find out the center latitude of the file and determine if it is high latitude
         centerLat = IrgIsisFunctions.getCubeCenterLatitude(calPath, workDir)
-        highLat   = abs(centerLat) > HIGH_LATITUDE_CUTOFF
+        print centerLat
+        highLat   = abs(float(centerLat)) > HIGH_LATITUDE_CUTOFF
 
         if True:#not os.path.exists(mapLabelPath):
             # Generate the map label file           
             generateDefaultMappingPvl(mapLabelPath, highLat)
         
+        
         if True:#not os.path.exists(mapPath):
             # Generate the map projected file
-            cmd = ['timeout', '20h', 'cam2map', 'matchmap=','False', 'from=', calPath, 'to=', mapPath, 'map=', mapLabelPath]
+            cmd = ['timeout', '6h', 'cam2map', 'matchmap=','False', 'from=', calPath, 'to=', mapPath, 'map=', mapLabelPath]
             print cmd
             #os.system(cmd)
             p = subprocess.Popen(cmd)
             p.communicate()
             if (p.returncode != 0):
                 raise Exception('Error or timeout running cam2map, returnCode = ' + str(p.returncode))
-        
+       
         if True: #not os.path.exists(localFilePath):
             # Generate the final image to upload
             cmd = 'gdal_translate -of GTiff ' + mapPath + ' ' + localFilePath
@@ -264,16 +312,18 @@ def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
             os.system(cmd)
         
         # Clean up intermediate files    
-        #os.remove(mapLabelPath)
-        #os.remove(edrPath)
-        #os.remove(calPath)
-        #os.remove(mapPath)
+        os.remove(mapLabelPath)
+        os.remove(edrPath)
+        os.remove(calPath)
+        os.remove(mapPath)
         
         # Two local files are left around, the first should be uploaded.
         return [localFilePath, timePath]
         
     else: # Use the map projected image from the ASU web site
         print 'Using ASU projected image...'
+        
+        localFilePath = os.path.join(workDir, setName + '.jp2')  # The output file we will upload
         
         # Note: ASU seems to be missing some files!
         # We are using the label path in both projection cases
@@ -282,14 +332,25 @@ def fetchAndPrepFile(db, setName, subtype, remoteURL, workDir):
             cmd = 'wget "' + asuLabelUrl + '" -O ' + asuLabelPath
             print cmd
             os.system(cmd)
-        if not IrgFileFunctions.fileIsNonZero(asuLabelPath):
-            raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
+        if not IrgFileFunctions.fileIsNonZero(asuLabelPath): # Try the alternate label path
+            os.remove(asuLabelPath)
+            asuLabelUrl  = asuLabelUrl.replace( '.scyl.', '.ps.')
+            asuLabelPath = asuLabelPath.replace('.scyl.', '.ps.')
+            print 'Trying alternate label path: ' + asuLabelUrl
+            # Download the label file
+            cmd = 'wget "' + asuLabelUrl + '" -O ' + asuLabelPath
+            print cmd
+            os.system(cmd)
+            if not IrgFileFunctions.fileIsNonZero(asuLabelPath):
+                raise Exception('Failed to download file label at URL: ' + asuLabelUrl)
         
         # Check the projection type
         projType = IrgGeoFunctions.getProjectionFromIsisLabel(asuLabelPath)
         if projType != 'SimpleCylindrical':
-            os.remove(asuLabelPath)
-            raise Exception(projType + ' images on hold until Google fixes a bug!')
+            print 'WARNING: projType = ' + projType
+            print 'Maps Engine may fail to ingest this file!'
+            #os.remove(asuLabelPath)
+            #raise Exception(projType + ' images on hold until Google fixes a bug!')
         
         if not os.path.exists(asuImagePath):
             # Download the image file
@@ -391,7 +452,7 @@ def generateDefaultMappingPvl(outputPath, highLat):
     
     # Define the default map projection parameters
     # - Many of the parameters are left blank so ISIS can compute them.
-    if highLat:
+    if highLat: # High latitude ==> Polar stereographic
         linesToWrite = ['Group = Mapping',
                             '  TargetName         = Mars',
                             '  ProjectionName     = PolarStereographic',

@@ -18,15 +18,15 @@
 
 import sys
 
-#from BeautifulSoup import BeautifulSoup
-from bs4 import BeautifulSoup
+from BeautifulSoup import BeautifulSoup
+#from bs4 import BeautifulSoup
 
 import os, glob, optparse, re, shutil, subprocess, string, time, urllib, urllib2
 
 import multiprocessing, traceback
 
-#import sqlite3
-from pysqlite2 import dbapi2 as sqlite3
+import sqlite3
+#from pysqlite2 import dbapi2 as sqlite3
 
 import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
@@ -186,8 +186,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
             
         # Delete all the local files left by the prep function
         for f in localFileList:
-            os.remove(f)
-            #print 'REMOVE DISABLED'
+            #os.remove(f)
+            print 'REMOVE DISABLED'
     
     except Exception, e:# Make sure an error does not stop other uploads
     
@@ -202,8 +202,8 @@ def uploadFile(dbPath, fileInfo, logQueue, workDir):
 
         try: # Delete localFileList if it exists
             for f in localFileList:
-                os.remove(f)
-                #print 'REMOVE DISABLED!'
+                #os.remove(f)
+                print 'REMOVE DISABLED!'
         except:
             pass
 
@@ -333,7 +333,7 @@ def checkUploads(db, sensorType):
                 # Update the file info in the database to show it was not updated correctly.
                 # - TODO: Is there a way to make sure we re-upload to the same asset ID?
                 cursor.execute("UPDATE Files SET status=? WHERE idx=?",
-                               (str(STATUS_NONE), str(o.tableId())))
+                               (str(STATUS_ERROR), str(o.tableId())))
                 db.commit()
             else:
                 print 'Never got a valid response, failure count = ' + str(failureCount)
@@ -460,8 +460,8 @@ def checkForBadUploads(sensorCode, db = None):
     '''Search the local SQL database to find bad uploads that the DB has missed.'''
 
     # TODO: Parse user inputs to get these!
-    tag         = 'HiRISE'
-    cacheFolder = '/home/pirl/smcmich1/tempCache3' # Web API query results are backed up in to this folder as JSON files.
+    tag         = 'CTX'#'HiRISE'
+    cacheFolder = '/home/smcmich1/tempCache3' # Web API query results are backed up in to this folder as JSON files.
     
     print 'Retrieving asset list for sensor ' + tag + ' in folder ' + cacheFolder
     if not os.path.exists(cacheFolder):
@@ -573,13 +573,13 @@ def main():
     #    return 1;
     #options.outputFolder = args[1]
     # The output path is hardcoded for now with subfolders for each sensor
-    options.outputFolder = os.path.join('/home/pirl/smcmich1/Data/google/', args[0].lower())
+    options.outputFolder = os.path.join('/home/smcmich1/data/google/', args[0].lower())
     # -- Done parsing input arguments --
 
     # Check the database connection
     # - Default should be to db = a thread-safe connection
     # - TODO: Find this database without hard coding it!
-    dbPath = '/home/pirl/smcmich1/Data/google/googlePlanetary.db'
+    dbPath = '/byss/smcmich1/data/google/googlePlanetary.db'
     db = sqlite3.connect(dbPath)
     print 'Connected to database'
     

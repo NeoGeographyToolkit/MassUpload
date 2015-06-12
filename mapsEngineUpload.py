@@ -111,6 +111,8 @@ def queryUploadedFile(bearerToken, assetId = '04070367133797133737-1507989215589
     headers     = {'Authorization': tokenString}
     response    = requests.get(url, headers=headers)
     
+    #print response.text
+
     # Check status code
     DESIRED_CODE = 200
     printErrorInfo(DESIRED_CODE, response.status_code, response.text)
@@ -153,10 +155,9 @@ def deleteUploadedAsset(bearerToken, assetId):
     tokenString = 'Bearer '+bearerToken
     headers     = {'Authorization': tokenString}
     response    = requests.delete(url, headers=headers)
-    
-    print url
 
     #print response.text
+    print response.status_code
 
     # Check status code
     DESIRED_CODE = 200
@@ -192,6 +193,8 @@ def deleteAssetsInList(bearerToken, assetListPath):
         parts   = line.split(',')
         name    = parts[0]
         assetId = parts[1]
+
+        # TODO: Update this with more accurate status reporting!
 
         print 'Deleting asset: ' + line
         try:
@@ -528,6 +531,12 @@ def createRasterAsset(bearerToken, inputPathList, sensorType, acqTime=None, extr
 
     if extraTags: # Add extra user tags if they were passed in
         data["tags"] += extraTags
+
+    # Test code for uploading other data
+#        data["name"]        = 'UAVSAR_'+justFilename  # REQUIRED
+#        data["description"] = "UAV SAR map projected data"
+#        data["attribution"] = "Copyright flood detection" # REQUIRED
+#        data["tags"]        = ["UAVSAR", "RADAR"]
 
         
     #print(data)

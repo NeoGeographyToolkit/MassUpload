@@ -97,7 +97,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
         
         # Build the list of output files
         outputTileInfoList = []
-        for f in os.listdir(outputFolder):
+        for f in sorted(os.listdir(outputFolder)):
             if ('_tile_' not in f) or ('json' in f): # Skip metadata files and any junk
                 continue
             thisPath = os.path.join(outputFolder, f)
@@ -323,7 +323,8 @@ class HrscImage():
         print 'Generated ' +str(numTiles)+ ' tiles.'
         
         # TODO: We can probably delete the original warped images now
-        
+        # TODO: Don't assume the tiles are sorted properly!
+
         # Loop through each of the tiles we created and consolidate information across channels
         print 'Consolidating tile information...'
         self._tileDict = {}
@@ -332,7 +333,7 @@ class HrscImage():
             # Check the percent valid to see if there is any content in this tile
             # - Percent valid is the only field that varies by channel
             # - All the other information can just be read from the first channel
-            
+
             thisTileInfo = tileInfoLists[0][i] # Copy misc info from the first channel
             percentValid = 1.0
             for c in range(0,NUM_HRSC_CHANNELS):
@@ -347,6 +348,7 @@ class HrscImage():
             # Add in paths to the tile for each channel, including a joint string for convenience.
             allChannelsString = ''
             for c in range(NUM_HRSC_CHANNELS):
+                print tileInfoLists[c][i]['path']
                 pathKey = CHANNEL_STRINGS[c] + '_path'
                 thisTileInfo[pathKey]  = tileInfoLists[c][i]['path'],
                 allChannelsString     += tileInfoLists[c][i]['path'] + ' '
@@ -396,7 +398,7 @@ class HrscImage():
 
             # Now compute the actual transform
             # TODO: Make this a function call!
-            cmd = ('python /home/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath']
+            cmd = ('python /byss/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath']
                                                                               +' '+ tile['colorPairPath'])
             MosaicUtilities.cmdRunner(cmd, tile['colorTransformPath'], force)
 

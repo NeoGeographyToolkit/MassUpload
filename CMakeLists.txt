@@ -80,7 +80,7 @@ message("Found vision workbench include directory: ${VISIONWORKBENCH_INCLUDE_DIR
 
 find_package( OpenCV REQUIRED )
 
-#message("dir = ${OpenCV_INCLUDE_DIRS}")
+message("dir = ${OpenCV_INCLUDE_DIRS}")
 
 
 
@@ -106,8 +106,8 @@ link_directories(${Boost_LIBRARY_DIRS})
 #==================================================================================
 # Executables
 
-add_executable( sample_rotation_stitcher sample_rotation_stitcher.cpp )
-target_link_libraries( sample_rotation_stitcher ${OpenCV_LIBS})
+#add_executable( sample_rotation_stitcher sample_rotation_stitcher.cpp )
+#target_link_libraries( sample_rotation_stitcher ${OpenCV_LIBS})
 
 add_executable( RegisterHrsc RegisterHrsc.cpp )
 target_link_libraries( RegisterHrsc ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})

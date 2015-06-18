@@ -9,10 +9,6 @@ import copyGeoTiffInfo
 import MosaicUtilities
 
 
-
-   
-    
-
 class MarsBasemap:
     '''
        Class to manage the tiles of the input basemap and output image.
@@ -74,7 +70,7 @@ class MarsBasemap:
         '''Creates a grayscale version of the basemap if it does not already exist'''
         if not os.path.exists(self.fullBasemapGrayPath):
             cmd = 'gdal_translate -b 1 ' + self.fullBasemapPath +' '+ self.fullBasemapGrayPath
-            cmdRunner(cmd, self.fullBasemapGrayPath, False)
+            MosaicUtilities.cmdRunner(cmd, self.fullBasemapGrayPath, False)
 
     #------------------------------------------------------------
     # Helper functions

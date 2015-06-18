@@ -6,12 +6,12 @@ import subprocess
 import numpy
 import copy
 import multiprocessing
-
-#import sqlite3
-from pysqlite2 import dbapi2 as sqlite3
+import threading
+import logging
+import datetime
 
 import IrgGeoFunctions
-import copyGeoTiffInfo
+#import copyGeoTiffInfo
 import mosaicTileManager # TODO: Normalize caps!
 import MosaicUtilities
 import hrscImageManager
@@ -37,15 +37,96 @@ Existing tools:
 #----------------------------------------------------------------------------
 # Constants
 
+# TODO: Go down to 20 to 10 meters!
+OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
+
+# 
+NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
+NUM_PROCESS_THREADS  = 6
+
+# --> Downloading the HRSC files seems to be the major bottleneck.
+
+# Set up the log path here.
+# - Log tiles are timestamped as is each line in the log file
+currentTime = datetime.datetime.now()
+logPath = ('/byss/smcmich1/data/hrscMosaicLogs/hrscMosaicLog_%s.txt' % currentTime.isoformat() )
+logging.basicConfig(filename=logPath,
+                    format='%(asctime)s %(name)s %(message)s',
+                    level=logging.DEBUG)
+
+
+
 #-----------------------------------------------------------------------------------------
 # Functions
 
 
 
+def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQueue):
+    '''Thread to allow downloading of HRSC data in parallel with image processing.
+       The input queue recieves three types of commands:
+           "STOP" --> Finish current tasks, then exit.
+           "KILL" --> Immediately kill all the threads and exit.
+           "FETCH data_set_name" --> Fetch the specified data set
+           "FINISHED data_set_name" --> Signals that this data set can be safely deleted
+'''
+
+    logger = logging.getLogger('DownloadThread')
+
+    # Initialize a process pool to be managed by this thread
+    downloadPool = None
+    if NUM_DOWNLOAD_THREADS > 1:
+        downloadPool = multiprocessing.Pool(processes=NUM_DOWNLOAD_THREADS)
+
+    # Set up the HRSC file manager object
+    print 'Initializing HRSC file caching object'
+    hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, outputFolder, downloadPool)
+
+    while True:
+
+        # Fetch the next requested data set from the input queue
+        request = inputQueue.get() 
+
+        # Handle stop request
+        if request == 'STOP':
+            logger.info('Download thread manager received stop request, stopping download threads...')
+            # Gracefully wait for current work to finish
+            if downloadPool:
+                downloadPool.close()
+                downloadPool.join()  
+            break
+            
+        if request == 'KILL':
+            logger.info('Download thread manager received kill request, killing download threads...')
+            # Immediately stop all work
+            if downloadPool:
+                downloadPool.terminate()
+                downloadPool.join()  
+            break
+      
+        if 'FETCH' in request:
+            dataSet = request[len('FETCH'):].strip()
+            logger.info('Got request to fetch data set ' + dataSet)
+            # Download this HRSC image using the thread pool
+            # - TODO: Allow download overlap of multiple data sets at once!
+            hrscInfoDict = hrscFileFetcher.fetchHrscDataSet(dataSet)
+            logger.info('Finished fetching data set ' + dataSet)
+            # Put the output information on the output queue
+            outputQueue.put(hrscInfoDict)
+
+   
+        
+        #--> Need to make sure we never delete an image until we are finished using it
+
+        # TODO: Implement 'finished' message?
+
+    # We only get here when we break out of the main loop
+    outputQueue.put('STOPPED')
+    logger.info('Download manager thread stopped.')
+
+
+# For debugging only, the hrscFileCacher class does the actual call from the database.
 def getHrscImageList():
-    '''For just returns a fixed list of HRSC images for testing'''
-    
-    # TODO: Search our database to perform this function!
+    '''For just returns a fixed list of HRSC images for testing'''   
     return ['h0022_0000',
             'h0506_0000',
             'h2411_0000']#,
@@ -59,11 +140,7 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
     
     hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
     return basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
-
     #return MosaicUtilities.Rectangle(196, 197, 92, 93) # DEBUG
-
-
-
 
 
 def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
@@ -103,6 +180,8 @@ def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
 def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     '''Updates all output tiles containing this HRSC image'''
 
+    logger = logging.getLogger('MainProgram')
+
     # Find all the output tiles that intersect with this
     outputTilesRect = getCoveredOutputTiles(basemapInstance, hrscInstance)
 
@@ -114,6 +193,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
         return
     
+    logger.info('Started updating tiles for HRSC image ' + hrscSetName)
+
     print 'Found overlapping output tiles:  ' + str(outputTilesRect)
     if pool:
         print 'Initializing tile output tasks...'
@@ -182,33 +263,37 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     basemapInstance.updateLog(mainLogPath, hrscSetName)
     
     print '\n---> Finished updating tiles for HRSC image ' + hrscSetName
+    logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
 #-----------------------------------------------------------------------------------------
 
+# Laptop
+#testDirectory    = '/home/smcmich1/data/hrscMapTest/'
+#fullBasemapPath  = testDirectory + 'projection_space_basemap.tif'
+#sourceHrscFolder = testDirectory + 'external_data'
+#hrscOutputFolder = testDirectory + 'hrscFiles'
+#outputTileFolder = testDirectory + 'outputTiles'
+#databasePath     = 'FAIL'
 
-fullBasemapPath  = '/home/smcmich1/data/hrscMapTest/projection_space_basemap.tif'
-
-sourceHrscFolder = '/home/smcmich1/data/hrscMapTest/external_data'
-
-hrscOutputFolder = '/home/smcmich1/data/hrscMapTest/hrscFiles'
-
-outputTileFolder = '/home/smcmich1/data/hrscMapTest/outputTiles'
-
-databasePath = 'TODO'
+# Lunokhod 2
+fullBasemapPath  = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
+sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
+hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
+outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles'
+databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
 
 print 'Starting basemap enhancement script...'
 
+logger = logging.getLogger('MainProgram')
 
-# TODO: Go down to 20 to 10 meters!
-OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
-
-NUM_WORKER_THREADS = 3
-
-# Initialize the multi-threading worker pool
-pool = None
-if NUM_WORKER_THREADS > 1:
-    pool = multiprocessing.Pool(processes=NUM_WORKER_THREADS)
-
+# Initialize the multi-threading worker pools
+# - Seperate pools for downloads and processing
+#downloadPool = None
+processPool  = None
+#if NUM_DOWNLOAD_THREADS > 1:
+#    downloadPool = multiprocessing.Pool(processes=NUM_DOWNLOAD_THREADS)
+if NUM_PROCESS_THREADS > 1:
+    processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
 
 print '\n==== Initializing the base map object ===='
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
@@ -216,33 +301,96 @@ mainLogPath = basemapInstance.getMainLogPath()
 print '--- Finished initializing the base map object ---\n'
 
 
-# Set up the HRSC file manager object
-hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, hrscOutputFolder)
 
-# TODO: Replace with call to the file manager!
 # Get a list of all the HRSC images we are testing with
-hrscImageList = getHrscImageList()
+#fullImageList = getHrscImageList()
+tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder)
+fullImageList = tempFileFinder.getAllHrscSetList()
+tempFileFinder = None # Delet this temporary object
 
-# Loop through input HRSC images
-for hrscSetName in hrscImageList: 
-    
-    # Skip this HRSC image if we have already finished adding it!
+print len(fullImageList)
+print fullImageList[:10]
+
+raise Exception('DEBUG!')
+
+# Prune out all the HRSC images that we have already added to the mosaic.
+hrscImageList = []
+for hrscSetName in fullImageList:
     if basemapInstance.checkLog(mainLogPath, hrscSetName):
         print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
-        continue
+    else:
+        hrscImageList.append(hrscSetName)
+
+print 'image list = ' + str(hrscImageList)
+
+
+
+## Set up the HRSC file manager object
+print 'Starting communication queues'
+#hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, downloadPool)
+downloadCommandQueue  = multiprocessing.Queue()
+downloadResponseQueue = multiprocessing.Queue()
+print 'Initializing HRSC file caching thread'
+downloadThread = threading.Thread(target=cacheManagerThreadFunction,
+                                  args  =(databasePath, sourceHrscFolder,            
+                                          downloadCommandQueue, downloadResponseQueue)
+                                 )
+downloadThread.daemon = True # Needed for ctrl-c to work
+print 'Running thread...'
+downloadThread.start()
+
+
+# Go ahead and send a request to fetch the first HRSC image
+logger.info('Sending FETCH command: ' + hrscImageList[0])
+downloadCommandQueue.put('FETCH ' + hrscImageList[0])
+
+
+# Loop through input HRSC images
+numHrscDataSets = len(hrscImageList) 
+for i in range(0,numHrscDataSets): 
     
+    # Get the name of this and the next data set
+    hrscSetName = hrscImageList[i]
+    nextSetName = None
+    if i < numHrscDataSets-1:
+        nextSetName = hrscImageList[i+1]
+        # Go ahead and submit the fetch request for the next set name.
+        logger.info('Sending FETCH command: ' + nextSetName)
+        downloadCommandQueue.put('FETCH ' + nextSetName)
+
+    # Notes on downloading:
+    # - Each iteration of this loop commands one download, and waits for one download.
+    # - The queues keep things in order, and the download thread handles one data set at a time.
+    # - This means that we can have one data set downloading while one data set is being processed.
+    # - The next improvement to be made would be to download multiple data sets at the same time.
+
+   
     ## Pick a location to store the data for this HRSC image
-    #thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
+    thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
 
     #try:
 
-    print '\n=== Initializing HRSC image ' + hrscSetName + ' ==='
+    print '\n=== Fetching HRSC image ' + hrscSetName + ' ==='
 
     # Fetch the HRSC data from the web
-    hrscFileInfoDict = hrscFileFetcher.fetchHrscDataSet(hrscSetName)
+    #hrscFileInfoDict = hrscFileFetcher.fetchHrscDataSet(hrscSetName)
+    hrscFileInfoDict = downloadResponseQueue.get() # Wait for the parallel thread to provide the data
+    if not 'setName' in hrscFileInfoDict:
+        raise Exception('Ran out of HRSC files, processing stopped!!!')
+    if hrscFileInfoDict['setName'] != hrscSetName:
+        raise Exception('Set fetch mismatch!  Expected %s, got %s instead!' % 
+                         (hrscSetName, hrscFileInfoDict['setName']))
+    logger.info('Received fetch information for ' + hrscSetName)
+
+    #print 'SKIPPING IMAGE PROCESSING!!!'
+    #continue
+
+    print '\n=== Initializing HRSC image ' + hrscSetName + ' ==='
 
     # Preprocess the HRSC image
-    hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, pool)
+    hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
+
+    # TODO: Need to make the HRSC manager clean up the processed folder too!
 
     print '--- Now initializing high res HRSC content ---'
 
@@ -252,7 +400,7 @@ for hrscSetName in hrscImageList:
     print '--- Finished initializing HRSC image ---\n'
 
     # Call the function to update all the output images for this HRSC image
-    updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool)
+    updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
     print '<<<<< Finished writing all tiles for this HRSC image! >>>>>'
 
@@ -261,104 +409,17 @@ for hrscSetName in hrscImageList:
     #raise Exception('DEBUG')
 
 
-if pool:
-    print 'Cleaning up the thread pool...'
-    pool.close()
-    pool.join()
+if processPool:
+    print 'Cleaning up the processing thread pool...'
+    processPool.close()
+    processPool.join()
 
+downloadCommandQueue.put('STOP') # Stop the download thread
+downloadThread.join()
+#if downloadPool:
+#    print 'Cleaning up the download thread pool...'
+#    downloadPool.close()
+#    downloadPool.join()
 
 print 'Basemap enhancement script completed!'
-
-"""
-== pansharp prototype ==
-
-Generate RED version of Noel's map (ONCE)
-Equitorial circumference = 21338954.25548 / 2 = 10669477.1 <--- x span
-Polar      circumference = 21338954.25548 / 4 =  5334738.6 <--- y span
-gdal_translate mars_full_albedo.tif projection_space_basemap.tif -a_srs "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr -10669477.1 5334738.6 10669477.1 -5334738.6
-gdal_translate noel_basemap.tif noel_basemap_red.tif -b 1
-DONE
-
-Generate a reduced-resolution of the file to match Noel's map using GDAL_translate.
-- Noel's map resolution is (circumference 21,344 km/ 11520 pixels) = 1852.4 meters per pixel.
-
-Get a bounding box surrounding the HRSC image and extract that region from Noel's map.
-
-Manually checked spatial transforms (200% resolution):
-h0022 = 282, 1190
-h0506 = 80.6, 1323
-h2411 = 243, 2389
-h6419 = 295, 1829
----> Need to be able to compute these automatically!
-
-Basemap resolution transforms:
-h0022 = 41, 49
-h0506 = -61, 115
-h2411 = 122, 583
-h6419 = 
-
-DB command to find a list of overlapping HRSC files:
-select setname from Files where sensor=1 and minLon<102.64 and maxLon>98.2023 and minLat<-18.6077 and maxLat>-50.1955 and subtype="nd3";
-
-
-A professionally made partial mosaic: http://maps.planet.fu-berlin.de/
-    - This is a hard problem, our only advantages are Earth Engine and the color reference map!
-
-Query sqlite3 database to get a list of all the HRSC data sets after a certain date
-    3500 sets -> 18000 files!
-
-
-List of overlapping images for h0022_0000_nd3:
-
-Use these:
-h0506_0000_nd3 <-- Feels like there should be overlap =)
-h2411_0000_nd3 <-- Lots of overlap!
-h6419_0000_nd3 <-- Higher resolution shot of middle of image
-
-
-h0248_0000_nd3
-h0300_0000_nd3
-h0440_0000_nd3 <-- Big image, but no overlap =(
-h0451_0000_nd3 <-- Messed up top!
-h0462_0000_nd3
-h0506_0000_nd3 <-- Feels like there should be overlap =)
-h0637_0000_nd3
-h0648_0000_nd3
-h1592_0000_nd3 <-- Weird polar image
-h1774_0000_nd3
-h1786_0001_nd3
-h1942_0000_nd3 <-- Small image in the center
-h2345_0000_nd3
-h2389_0000_nd3
-h2400_0001_nd3 <-- Lots of overlap, but not all components =()
-h2411_0000_nd3 <-- Lots of overlap!
-h2466_0000_nd3 
-h2510_0001_nd3
-h2619_0000_nd3
-h2652_0000_nd3
-h2663_0001_nd3
-h2726_0000_nd3
-h2729_0000_nd3
-h4261_0000_nd3 <-- Maybe aligned?
-h4272_0000_nd3
-h4294_0000_nd3
-h4469_0001_nd3
-h4642_0000_nd3
-h4817_0000_nd3
-h6411_0000_nd3
-h6419_0000_nd3 <-- Higher resolution shot of middle of image
-h6437_0000_nd3
-h8429_0000_nd3
-h8474_0000_nd3
-h8562_0000_nd3
-h8990_0000_nd3
-ha526_0000_nd3
-ha688_0000_nd3
-ha776_0000_nd3
-hc598_0017_nd3
-
-"""
-
-
-
 

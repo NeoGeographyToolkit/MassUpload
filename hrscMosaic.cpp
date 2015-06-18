@@ -681,7 +681,7 @@ int main(int argc, char** argv)
   printf("Loading input data...\n");
   
   
-  TODO: Load the input images one at a time!
+  //TODO: Load the input images one at a time!
   
   // Load the input images  
   cv::Mat basemapImage;

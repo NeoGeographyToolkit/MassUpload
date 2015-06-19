@@ -115,7 +115,6 @@ class TileIndex:
         return ('%04d_%04d' % (self.row, self.col))
     
     
-# TODO: Make changes so this can work with integers?
 class Rectangle:
     '''Simple rectangle class for ROIs. Max values are NON-INCLUSIVE'''
     def __init__(self, minX=0, maxX=0, minY=0, maxY=0):
@@ -129,6 +128,13 @@ class Rectangle:
     
     def __str__(self):
         return ('minX: %f, maxX: %f, minY: %f, maxY: %f' % (self.minX, self.maxX, self.minY, self.maxY))
+    
+    def indexGenerator(self):
+        '''Generator function used to iterate over all integer indices.
+           Only use this with integer boundaries!'''
+        for row in range(self.minY, self.maxY):
+            for col in range(self.minX, self.maxX):
+                yield(TileIndex(row,col))
     
     def getBounds(self):
         '''Returns (minX, maxX, minY, maxY)'''
@@ -245,7 +251,6 @@ class Tiling:
         tileRect.maxY += 1
         return tileRect
     
-    
     def getTileBounds(self, tileIndex):
         '''Returns the boundaries of a given tile'''
         # Compute the nominal bounds
@@ -255,6 +260,10 @@ class Tiling:
                            yStart, yStart+self._tileHeight)
         # Restrict the bounds to the initialized boundary
         return bb.getIntersection(self._bounds)
+
+    def getTileIndexRect(self):
+        '''Returns a Rectangle containing all the tile indices'''
+        return Rectangle(0, self._numTileCols, 0, self._numTileRows)
     
     def __str__(self):
         return ('numTilesCols: %d, numTileRows: %d, bounds: %s' %

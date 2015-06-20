@@ -60,6 +60,9 @@ class KmlTreeMaker:
         self._addTileLayer(0) # Go ahead and set up the first tile layer
         # Other layers are added as they are requested
         
+        # TODO: Make filler image!
+        self._fillerTilePath = os.path.join(outputFolder, 'filler.tif')
+        
         
     def makeLevel(self, level):
         '''Make all the tiles for the given level.
@@ -78,16 +81,21 @@ class KmlTreeMaker:
 
         # TODO: Run this in parallel!
         force = False
+        numTilesCreated = 0
         for tileIndex in tileBounds.indexGenerator():
             try:
                 gotTile = self.makeTile(level, tileIndex, force)
             except Exception, e:
+                gotTile = False
                 print 'Caught exception processing tile ' + str(tileIndex)
                 print str(e)
                 traceback.print_exc(file=sys.stdout)
                 
-            #if gotTile:
+            if gotTile:
+                numTilesCreated += 1
             #    raise Exception('DEBUG')
+        print 'Created ' + str(numTilesCreated) + ' tiles'
+        return numTilesCreated
 
     def _hasTileLayer(self, level):
         return len(self._layerTilings) > level
@@ -130,7 +138,8 @@ class KmlTreeMaker:
         return indexList
     
     def _getInputTileString(self, level, tileIndex):
-        '''Make an input string listing all the input tiles to a new tile'''
+        '''Make an input string listing all the input tiles to a new tile.
+           Returns an empty string if none of the files exist.'''
         
         # Get the indices of all the input tiles
         indexList  = self._getInputTiles(tileIndex)
@@ -138,9 +147,17 @@ class KmlTreeMaker:
         
         # Build a string containing the paths to each of the input tiles
         tileString = ''
+        foundOne = False
         for index in indexList:
-            tilePath = getTilePath(inputLevel, index, True) # Only need the image paths here
-            tileString += tilePath + ' '
+            tilePath = self.getTilePath(inputLevel, index, True) # Only need the image paths here
+            if os.path.exists(tilePath): # Only add existing file paths
+                foundOne = True
+                tileString += tilePath + ' '
+            else:
+                tileString += self._fillerTilePath + ' '
+        if not foundOne: # If none of the files exist, return an empty string!
+            return ''
+        return tileString
         
     def makeTile(self, level, tileIndex, force=False):
         '''Create an input tile.
@@ -165,8 +182,12 @@ class KmlTreeMaker:
             # TODO: Verify that all the source images exist!
         
             # Create the image file
-            inputTileTiffString = self._getInputTileString(tileIndex)
-            cmd = 'montage -resize 50% -background black -mode Concatenate -tile 2x2 ' + inputTileString +' '+ outputTilePath
+            inputTileTiffString = self._getInputTileString(level, tileIndex)
+            print inputTileTiffString
+            if not inputTileTiffString:
+                return False # None of the four input files exist
+            cmd = ('montage -resize 50% -background black -mode Concatenate -tile 2x2 ' +
+                   inputTileTiffString +' '+ outputTilePath)
             
         MosaicUtilities.cmdRunner(cmd, outputTilePath, force)
 
@@ -180,8 +201,12 @@ class KmlTreeMaker:
     
     def _makeKmlRegion(self, level, tileIndex):
         '''Sets up the KML region object for a single tile'''
+        # Stop showing the low res tiles when they exceed their natural size
+        maxLod = self._tileSize+128
+        if level == 0: # The highest res tiles stay regardless of zoom level
+            maxLod = -1
         return simplekml.Region(latlonaltbox=self._getLatLonAltBox(level, tileIndex),
-                                lod=simplekml.Lod(minlodpixels=128, maxlodpixels=-1)) # TODO: Set this?
+                                lod=simplekml.Lod(minlodpixels=128, maxlodpixels=maxLod)) # TODO: Set this?
         
     def makeKmlFile(self, level, tileIndex):
         '''Creates the KML file for a given image tile.
@@ -194,11 +219,11 @@ class KmlTreeMaker:
         tileKmlPath   = self.getTilePath(level, tileIndex, KML)
         tileImagePath = self.getTilePath(level, tileIndex, TIF)
            
-        ## There should be no need to recreate the KML files!
-        #if os.path.exists(tileKmlPath):
-        #    return True
+        # There should be no need to recreate the KML files!
+        if os.path.exists(tileKmlPath):
+            return True
         
-        kml     = simplekml.Kml()
+        kml = simplekml.Kml()
         # Region for this file
         kml.document.region = self._makeKmlRegion(level, tileIndex)
         
@@ -210,14 +235,14 @@ class KmlTreeMaker:
                 sourceTilePath = self.getTilePath(levelDown, index, KML)
                 if not os.path.exists(sourceTilePath):
                     continue # Don't link to non-existant tiles
-                netlink = doc.newnetworklink(name=index.getPostFix(),
+                netLink = kml.document.newnetworklink(name=index.getPostfix(),
                                              region=self._makeKmlRegion(levelDown, index))
                 netLink.link.href = sourceTilePath
                 netLink.link.viewrefreshmode = simplekml.ViewRefreshMode.onrequest
         
         # Ground overlay
         kml.document.groundoverlay = kml.newgroundoverlay(icon=simplekml.Icon(href=tileImagePath),
-                                                             latlonbox=self._getLatLonAltBox(level, tileIndex))
+                                                          latlonbox=self._getLatLonAltBox(level, tileIndex))
 
         # Save the completed file
         kml.save(tileKmlPath)
@@ -263,12 +288,14 @@ def main():
 
     sourceFolder = '/home/smcmich1/data/hrscMapTest/outputTiles/'
     outputFolder = '/home/smcmich1/data/hrscMapTest/kmlTree/'
-    numLevels    = 1
+    maxNumLevels    = 8
     
     treeMaker = KmlTreeMaker(sourceFolder, outputFolder)
 
-    for level in range(0, numLevels):
-        treeMaker.makeLevel(level)
+    for level in range(0, maxNumLevels):
+        numTilesCreated = treeMaker.makeLevel(level)
+        if numTilesCreated <= 1:
+            break
 
     return 0
 

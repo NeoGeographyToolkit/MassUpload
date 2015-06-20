@@ -215,15 +215,23 @@ class Rectangle:
 class Tiling:
     '''Sets up a tiling scheme'''
     
-    def __init__(self, boundsRect, tileWidth, tileHeight):
+    def __init__(self, boundsRect, tileWidth, tileHeight, invertTileRows=False):
         '''Init with the region to cover and the tile size.
            All units are the same as is used in boundsRect.'''
-        self._bounds      = boundsRect
-        self._numTileCols = math.ceil(boundsRect.width()  / tileWidth)
-        self._numTileRows = math.ceil(boundsRect.height() / tileHeight)
-        self._tileWidth   = tileWidth  # Nominal size, some tiles will be smaller.
-        self._tileHeight  = tileHeight
+        self._bounds         = boundsRect
+        self._numTileCols    = int(math.ceil(boundsRect.width()  / tileWidth ))
+        self._numTileRows    = int(math.ceil(boundsRect.height() / tileHeight))
+        self._tileWidth      = tileWidth  # Nominal size, some tiles will be smaller.
+        self._tileHeight     = tileHeight
+        self._invertTileRows = invertTileRows
         #print 'Init tiling = ' + self.__str__()
+
+    def _handleTileRowInvert(self, tileRow):
+        '''If tile row inversion is on, inverts the tile row.'''
+        if self._invertTileRows:
+            return self._numTileRows - tileRow - 1
+        else:
+            return tileRow
         
     def getNominalTileSize(self):
         '''Get the nominal tile size'''
@@ -238,7 +246,7 @@ class Tiling:
         '''Computes the tile that contains the input location'''
         tileCol = (x - self._bounds.minX) / self._tileWidth
         tileRow = (y - self._bounds.minY) / self._tileHeight
-        return TileIndex(tileRow, tileCol)
+        return TileIndex(self._handleTileRowInvert(tileRow), tileCol)
     
     def getIntersectingTiles(self, rect):
         '''Returns a rectangle containing all the intersecting tiles'''
@@ -254,8 +262,9 @@ class Tiling:
     def getTileBounds(self, tileIndex):
         '''Returns the boundaries of a given tile'''
         # Compute the nominal bounds
+        safeRow = self._handleTileRowInvert(tileIndex.row)
         xStart = self._bounds.minX + tileIndex.col * self._tileWidth
-        yStart = self._bounds.minY + tileIndex.row * self._tileHeight
+        yStart = self._bounds.minY + safeRow       * self._tileHeight
         bb     = Rectangle(xStart, xStart+self._tileWidth,
                            yStart, yStart+self._tileHeight)
         # Restrict the bounds to the initialized boundary
@@ -410,6 +419,7 @@ class ImageCoverage:
         return self._metersPerPixelY
     
     # Point conversion functions ----------------------------------------
+    # - Note that image rows increase down while projected increases going up!
     def projectedToPixel(self, projX, projY):
         '''Convert projected coordinates to pixels, low res'''
         return ( (projX - self._geoBounds.minX) / self._metersPerPixelX,

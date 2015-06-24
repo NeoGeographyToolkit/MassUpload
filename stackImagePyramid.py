@@ -251,10 +251,8 @@ class KmlTreeMaker:
 
 def main():
 
-
-    #outputPath = ''
-    #
-    #
+    # TODO: Input handling!
+    
     #try:
     #    usage = "usage: geoTiffTool.py [--help][--manual] geotiffPath\n"# [lat] [lon] [lat2] [lon2]\n  "
     #    parser = optparse.OptionParser(usage=usage)

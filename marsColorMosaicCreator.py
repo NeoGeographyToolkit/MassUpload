@@ -32,13 +32,28 @@ Existing tools:
     - TODO   = Add cleanup/pansharp
 
 
+
+Total Mars map width meters = 21338954.2
+height = 10669477.2
+
+Input basemap is 128x256 tiles, each tile 45x45, mpp = ~1852
+- Total 32768 tiles.
+- Between +/-60 degrees, 86x256 tiles = 22016 tiles
+With 32x  increase, each tile is 1440x1440,   ~6MB,  190GB, mpp = ~58
+With 64x  increase, each tile is 2880x2880,  ~24MB,  760GB, mpp = ~29
+With 128x increase, each tile is 5760x5760,  ~95MB,    3TB, mpp = ~14.5 <-- Probably fine
+With 160x increase, each tile is 7200x7200, ~150MB,  4.6TB, mpp = ~11.6 <--- PLENTY of resolution!
+
+Each of those large sizes assumes all tiles used.  The number of tiles
+touched by each HRSC image will be much smaller, maybe 5%.
+
 """
 
 #----------------------------------------------------------------------------
 # Constants
 
-# TODO: Go down to 20 to 10 meters!
-OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
+## TODO: Go down to 20 to 10 meters!
+#OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
 
 # 
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
@@ -55,6 +70,9 @@ logging.basicConfig(filename=logPath,
                     level=logging.DEBUG)
 
 
+# Currently used to control the area we operate over
+#HRSC_FETCH_ROI = None # Fetch ALL hrsc images
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a region
 
 #-----------------------------------------------------------------------------------------
 # Functions
@@ -134,12 +152,25 @@ def getHrscImageList():
 
 
 
+#def getBasemapTileSet():
+#    '''Returns a limited basemap ROI for debugging'''
+#    return MosaicUtilities.Rectangle(100, 102, 64, 66)
+
+
+
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
     
     hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
-    return basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
+    
+    # DEBUG!  Restrict to a selected area.
+    hrscBoundingBoxDegrees = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxDegrees)
+    
+    intersectRect = basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
+    return intersectRect
+    
+    #return intersectRect.getIntersection(debugRect)
     #return MosaicUtilities.Rectangle(196, 197, 92, 93) # DEBUG
 
 
@@ -301,14 +332,13 @@ mainLogPath = basemapInstance.getMainLogPath()
 print '--- Finished initializing the base map object ---\n'
 
 
-
-# Get a list of all the HRSC images we are testing with
+# Get a list of the HRSC images we are testing with
 #fullImageList = getHrscImageList()
 tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder)
-fullImageList = tempFileFinder.getAllHrscSetList()
+fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempFileFinder = None # Delet this temporary object
 
-print len(fullImageList)
+print 'Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:'
 print fullImageList[:10]
 
 raise Exception('DEBUG!')
@@ -321,7 +351,7 @@ for hrscSetName in fullImageList:
     else:
         hrscImageList.append(hrscSetName)
 
-print 'image list = ' + str(hrscImageList)
+#print 'image list = ' + str(hrscImageList)
 
 
 

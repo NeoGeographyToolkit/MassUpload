@@ -28,6 +28,7 @@ class MarsBasemap:
         
         BASEMAP_TILE_HEIGHT = 45 # In pixels, chosen to divide evenly.
         BASEMAP_TILE_WIDTH  = 45
+        # --> Basemap size is 256 x 128 tiles
         
         #self.NOEL_MAP_METERS_PER_PIXEL = 1852.340625 # TODO: Make sure this is accurate before reprojecting everything        
 

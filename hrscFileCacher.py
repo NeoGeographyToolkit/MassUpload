@@ -104,15 +104,20 @@ class HrscFileCacher():
             #    print 'Confirmed file ' + filePath
         return True # All files found
 
-    def getAllHrscSetList(self):
-        '''Retrieve a list of ALL the HRSC data sets from the local database'''
+    def getHrscSetList(self, lonlatRect=None):
+        '''Retrieve a list of HRSC data sets from the local database'''
         
         hrscSetList = []
         cursor = self._db.cursor()
     
         # Only need to retrieve the nadir files here
-        cursor.execute('SELECT * FROM Files WHERE sensor=? AND subtype="nd3" AND status=? LIMIT 5',
-                       (str(common.SENSOR_TYPE_HRSC), str(common.STATUS_CONFIRMED)))
+        query = ('SELECT * FROM Files WHERE sensor=%d AND subtype="nd3" AND status=%d' %
+                      (common.SENSOR_TYPE_HRSC, common.STATUS_CONFIRMED))
+        if lonlatRect != None: # Incorporate a bounding box
+            query += (' AND minLat<%d AND maxLat>%d AND minLon<%d AND maxLon>%d' %
+                      (lonlatRect.maxY, lonlatRect.minY, lonlatRect.maxX, lonlatRect.minX))
+        #query += ' LIMIT 5'  # DEBUG!!!
+        cursor.execute(query)
         rows = cursor.fetchall()
         
         if rows == []: # Make sure we found the next lines

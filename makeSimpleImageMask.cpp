@@ -40,9 +40,16 @@ bool generateSimpleImageMask(const std::vector<cv::Mat> &inputImages, cv::Mat &o
 {
   const size_t numBands = inputImages.size();
     
-  // Initialize the output image
-  const size_t numRows = inputImages[0].rows;
-  const size_t numCols = inputImages[0].cols;
+  // Initialize the output image to the smallest size of any input image
+  // - The inputs should be the exact same size but they can vary by 
+  //   one or two pixels in a dimension.
+  size_t numRows = inputImages[0].rows;
+  size_t numCols = inputImages[0].cols;
+  for (size_t i=1; i<numBands; ++i)
+  {
+    if (inputImages[i].rows < numRows) numRows = inputImages[i].rows;
+    if (inputImages[i].cols < numCols) numCols = inputImages[i].cols;
+  }
   outputImage = cv::Mat(numRows, numCols, CV_8UC1);
  
   // Iterate over the pixels of the HRSC image

@@ -10,7 +10,7 @@ import sqlite3
 import MosaicUtilities
 
 # Set the size limit of our data set cache
-MAX_STORED_DATA_SETS = 10
+MAX_STORED_DATA_SETS = 20
     
 
 
@@ -129,9 +129,7 @@ class HrscFileCacher():
             setName = fileInfo.setName()[:-4] # Strip off '_nd3' from the end
             hrscSetList.append(setName)
             
-        print hrscSetList
-        
-        raise Exception('DEBUG')
+        return hrscSetList
     
     def fetchHrscDataSet(self, setName):
         '''Downloads all the files for a data set (if needed) and returns paths to them.'''
@@ -234,7 +232,7 @@ class HrscFileCacher():
         setName = hrscDataDict['setName']
     
         if setName not in self._cachedDataSets: # If we don't currently have the data available
-            
+
             # Make sure all the required channels exist in the database
             for c in self._NEEDED_CHANNELS:
                 if not c in hrscDataDict:

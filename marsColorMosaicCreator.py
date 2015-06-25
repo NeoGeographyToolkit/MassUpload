@@ -57,7 +57,7 @@ touched by each HRSC image will be much smaller, maybe 5%.
 
 # 
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 6
+NUM_PROCESS_THREADS  = 8
 
 # --> Downloading the HRSC files seems to be the major bottleneck.
 
@@ -72,6 +72,7 @@ logging.basicConfig(filename=logPath,
 
 # Currently used to control the area we operate over
 #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
 HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a region
 
 #-----------------------------------------------------------------------------------------
@@ -310,7 +311,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 fullBasemapPath  = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
 sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
-outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles'
+outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_64'
 databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
 
 print 'Starting basemap enhancement script...'
@@ -327,7 +328,7 @@ if NUM_PROCESS_THREADS > 1:
     processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
 
 print '\n==== Initializing the base map object ===='
-basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, OUTPUT_RESOLUTION_METERS_PER_PIXEL)
+basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder)
 mainLogPath = basemapInstance.getMainLogPath()
 print '--- Finished initializing the base map object ---\n'
 
@@ -336,12 +337,15 @@ print '--- Finished initializing the base map object ---\n'
 #fullImageList = getHrscImageList()
 tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder)
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
-tempFileFinder = None # Delet this temporary object
+tempFileFinder = None # Delete this temporary object
 
 print 'Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:'
-print fullImageList[:10]
 
-raise Exception('DEBUG!')
+# DEBUG --> Test this image!
+#fullImageList = [ fullImageList[0] ]
+#print fullImageList
+
+#raise Exception('DEBUG!')
 
 # Prune out all the HRSC images that we have already added to the mosaic.
 hrscImageList = []
@@ -351,7 +355,7 @@ for hrscSetName in fullImageList:
     else:
         hrscImageList.append(hrscSetName)
 
-#print 'image list = ' + str(hrscImageList)
+print 'image list = ' + str(hrscImageList)
 
 
 

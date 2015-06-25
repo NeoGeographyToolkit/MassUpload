@@ -31,7 +31,7 @@
  */
 
 // TODO: Increase this as we increase the resolution!
-const int BLEND_DIST_GLOBAL = 64;
+const int BLEND_DIST_GLOBAL = 128;
 
 // Set this to use the simple, no blending mosaic method.
 //#define USE_SIMPLE_PASTE

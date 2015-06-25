@@ -206,9 +206,15 @@ class HrscImage():
         #self._basemapGrayPath  = basemapInstance.getGrayBasemapPath()  # Path to the grayscale low res entire base map
         
         # Get full list of input paths from the input dictionary
-        self._inputHrscPaths = sourceFileInfoDict['allChannelPaths']
-        
-        
+        # - Sort them into a fixed order defined at the top of the file
+        self._inputHrscPaths = []
+        rawList = sourceFileInfoDict['allChannelPaths']
+        self._inputHrscPaths.append( [s for s in rawList if 're3' in s][0] )
+        self._inputHrscPaths.append( [s for s in rawList if 'gr3' in s][0] )
+        self._inputHrscPaths.append( [s for s in rawList if 'bl3' in s][0] )
+        self._inputHrscPaths.append( [s for s in rawList if 'ir3' in s][0] )
+        self._inputHrscPaths.append( [s for s in rawList if 'nd3' in s][0] )
+
         print 'Generating low res image copies...'
         
         # Generate a copy of each input HRSC channel at the low basemap resolution

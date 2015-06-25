@@ -19,7 +19,7 @@ class MarsBasemap:
        The top left tile in index 0,0.
     '''
     
-    def __init__(self, fullBasemapPath, outputTileFolder, metersPerPixelOut):
+    def __init__(self, fullBasemapPath, outputTileFolder):
         
         # Info about Noel's base map
         DEGREES_TO_PROJECTION_METERS = 59274.9
@@ -33,7 +33,7 @@ class MarsBasemap:
         #self.NOEL_MAP_METERS_PER_PIXEL = 1852.340625 # TODO: Make sure this is accurate before reprojecting everything        
 
         # Derived output parameters
-        self.resolutionIncrease = 32 #(self.NOEL_MAP_METERS_PER_PIXEL / metersPerPixelOut)
+        self.resolutionIncrease = 64 #(self.NOEL_MAP_METERS_PER_PIXEL / metersPerPixelOut)
         outputHeight = FULL_BASEMAP_HEIGHT*self.resolutionIncrease
         outputWidth  = FULL_BASEMAP_WIDTH *self.resolutionIncrease
         numTileRows = FULL_BASEMAP_HEIGHT / BASEMAP_TILE_HEIGHT

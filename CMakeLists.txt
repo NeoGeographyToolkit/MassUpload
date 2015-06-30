@@ -20,6 +20,8 @@ if(NOT BASESYSTEM_INSTALL_DIR)
   message(SEND_ERROR "You need to set BASESYSTEM_INSTALL_DIR: ${BASESYSTEM_INSTALL_DIR}")
 endif()
 
+set(CMAKE_FIND_PREFIX_PATH ${BASESYSTEM_INSTALL_DIR})
+
 set(VISIONWORKBENCH_INSTALL_DIR "" CACHE FILEPATH "Path to Vision Workbench installation directory")
 if(NOT VISIONWORKBENCH_INSTALL_DIR)
   message(SEND_ERROR "You need to set VISIONWORKBENCH_INSTALL_DIR: ${VISIONWORKBENCH_INSTALL_DIR}")
@@ -77,25 +79,45 @@ find_package(VisionWorkbench REQUIRED COMPONENTS  core math image camera fileio
 
 message("Found vision workbench include directory: ${VISIONWORKBENCH_INCLUDE_DIRS}")
 
+#--- Find OpenCV
 
-find_package( OpenCV REQUIRED )
+#find_package( OpenCV 3.0.0 REQUIRED )
 
-message("dir = ${OpenCV_INCLUDE_DIRS}")
+# Manually force it to find the correct path!
+set(OpenCV_FOUND True)
+set(OpenCV_LIBS "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_core.so" 
+                "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_highgui.so" 
+                "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_stitching.so")
+set(OpenCV_INCLUDE_DIR "/byss/smcmich1/programs/opencv_3.0_install/include"
+                       "/byss/smcmich1/programs/opencv_3.0_install/include/opencv"
+                       "/byss/smcmich1/programs/opencv_3.0_install/include/opencv2")
+set(OpenCV_INCLUDE_DIRS "${OpenCV_INCLUDE_DIR}")
+#set(OpenCV_VERSION (OpenCV_VERSION_MAJOR, OpenCV_VERSION_MINOR, OpenCV_VERSION_PATCH)
+
+message("Found OpenCV ${OpenCV_INCLUDE_DIRS}")
+
+
+#find_package(TIFF REQUIRED)
+#if(TIFF_FOUND)
+#  message("Found TIFF " ${TIFF_LIBRARY})
+#endif()
+
+set(TIFF_INCLUDE_DIR "${BASESYSTEM_INSTALL_DIR}/include")
+set(TIFF_LIBRARIES "${BASESYSTEM_INSTALL_DIR}/lib/libtiff.so")
+set(TIFF_FOUND TRUE)
 
 
 
-
-#set(PROTOBUF_FOUND)
-#set(PROTOBUF_INCLUDE_DIR ${BASESYSTEM_INSTALL_DIR}/include   )
-#set(PROTOBUF_LIBRARY     ${BASESYSTEM_INSTALL_DIR}/lib/libprotobuf.so)
-#include_directories("${PROTOBUF_INCLUDE_DIR}")
+set(PROTOBUF_FOUND)
+set(PROTOBUF_INCLUDE_DIR ${BASESYSTEM_INSTALL_DIR}/include   )
+set(PROTOBUF_LIBRARY     ${BASESYSTEM_INSTALL_DIR}/lib/libprotobuf.so)
+include_directories("${PROTOBUF_INCLUDE_DIR}")
 #include_directories("${QT_INCLUDE_DIRS}")
-##include_directories("${NAIF_INCLUDE_DIRS}")
+#include_directories("${NAIF_INCLUDE_DIRS}")
 
 include_directories(${VISIONWORKBENCH_INCLUDE_DIRS})
 #include_directories(${StereoPipeline_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
-#include_directories(${PROTOBUF_INCLUDE_DIR})
 include_directories( ${OpenCV_INCLUDE_DIRS} )
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -126,5 +148,9 @@ target_link_libraries( computeBrightnessCorrection ${OpenCV_LIBS} ${Boost_LIBRAR
 
 add_executable( makeSimpleImageMask makeSimpleImageMask.cpp )
 target_link_libraries( makeSimpleImageMask ${OpenCV_LIBS} ${Boost_LIBRARIES})
+
+
+add_executable( bigMaskMaker bigMaskMaker.cc )
+target_link_libraries( bigMaskMaker ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
 
 

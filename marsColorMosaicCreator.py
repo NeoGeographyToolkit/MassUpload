@@ -70,6 +70,8 @@ logging.basicConfig(filename=logPath,
                     level=logging.DEBUG)
 
 
+BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
+
 # Currently used to control the area we operate over
 #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
@@ -98,7 +100,7 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
 
     # Set up the HRSC file manager object
     print 'Initializing HRSC file caching object'
-    hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, outputFolder, downloadPool)
+    hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, outputFolder, BAD_HRSC_FILE_PATH, downloadPool)
 
     while True:
 
@@ -196,15 +198,17 @@ def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
     # TODO: This C++ program can do multiple tiles in one call.
 
     # For each tile...
+    hrscTiles = ''
     for hrscTile in hrscTileInfoDict.itervalues():    
         #try:
         cmd = ('./hrscMosaic ' + outputTilePath +' '+ outputTilePath +' '+ hrscTile['newColorPath'] +' '+
                                   hrscTile['tileMaskPath'] +' '+ hrscTile['tileToTileTransformPath'])
         MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
         #raise Exception('DEBUG')
+        hrscTiles += hrscTile['prefix'] + ', '
 
     # Return the path to log the success to
-    return tileLogPath
+    return (tileLogPath, hrscTiles)
     
     
 
@@ -283,8 +287,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             # Each task finishes by returning the log path for that tile.
             # - Record that we have used this HRSC/tile combination.
             # - This requires that tiles with no HRSC tiles do not get assigned a task.
-            tileLogPath = result.get()
-            basemapInstance.updateLog(tileLogPath, hrscSetName)
+            (tileLogPath, hrscTilePrefixList) = result.get()
+            basemapInstance.updateLog(tileLogPath, hrscSetName, hrscTilePrefixList)
             
             
         print 'All tile writing processes have completed'
@@ -335,22 +339,20 @@ print '--- Finished initializing the base map object ---\n'
 
 # Get a list of the HRSC images we are testing with
 #fullImageList = getHrscImageList()
-tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder)
+tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, BAD_HRSC_FILE_PATH)
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempFileFinder = None # Delete this temporary object
 
 print 'Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:'
 
 # DEBUG --> Test this image!
-#fullImageList = [ fullImageList[0] ]
+fullImageList = fullImageList[0:5]
 #print fullImageList
-
-#raise Exception('DEBUG!')
 
 # Prune out all the HRSC images that we have already added to the mosaic.
 hrscImageList = []
 for hrscSetName in fullImageList:
-    if basemapInstance.checkLog(mainLogPath, hrscSetName):
+    if False:#basemapInstance.checkLog(mainLogPath, hrscSetName):
         print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
     else:
         hrscImageList.append(hrscSetName)
@@ -432,6 +434,8 @@ for i in range(0,numHrscDataSets):
     hrscInstance.prepHighResolutionProducts()
     
     print '--- Finished initializing HRSC image ---\n'
+
+    #continue # DEBUG - Just update the registration
 
     # Call the function to update all the output images for this HRSC image
     updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)

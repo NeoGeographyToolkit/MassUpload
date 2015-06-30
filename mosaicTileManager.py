@@ -229,11 +229,11 @@ class MarsBasemap:
         '''Return True if the name exists in the log file'''
         with open(logPath, 'r') as f:
             for line in f:
-                if name in line:
+                if name in line: # Additional information is ignored
                     return True
         return False
     
-    def updateLog(self, logPath, name):
+    def updateLog(self, logPath, name, extra=None):
         '''Update a log file with a name'''
         with open(logPath, 'a+') as f:
             # Check if we have already written this HRSC file here
@@ -241,7 +241,10 @@ class MarsBasemap:
                 if name in line:
                     print 'WARNING: ' + name + ' added to tile but is already present!'
             # Append the hrsc set name to the tile log
-            f.write(name + '\n')
+            if extra: # Append additional information
+                f.write(name + ' - ' + extra + '\n')
+            else:
+                f.write(name + '\n')
     
     
     

@@ -35,11 +35,37 @@ def downloadHrscFile(remoteURL, localFilePath):
         os.remove(downloadPath)
 
 
+class BadHrscFileChecker():
+    '''Simple class to monitor a list of known bad HRSC files'''
+
+    def __init__(self, csvPath):
+        '''Init with list of bad files'''
+        # Load the sets into an internal list
+        self._badList = []
+        with open(csvPath, 'r') as handle:
+            for line in handle:
+                name = line.strip()
+                if '_' not in line: # Lines may not include the 'default' second part
+                    name += '_0000' 
+                if 'h' not in line: # Lines may not include the leading 'h'
+                    name = 'h' + name
+                self._badList.append(name)
+        print 'Loaded bad HRSC list: '
+        print self._badList
+
+
+
+    def isSetBad(self, setName):
+        '''Returns True if this is a known bad data set'''
+        return (setName in self._badList)
+
+
+
 class HrscFileCacher():
     '''Class to manage which HRSC images are stored locally on disk'''
     
     
-    def __init__(self, dbPath, outputFolder, pool=None):
+    def __init__(self, dbPath, outputFolder, badHrscFilePath, pool=None):
         '''Load the DB from disk'''
 
         # The input dictionary contains some channels we don't need for the basemap
@@ -53,6 +79,8 @@ class HrscFileCacher():
         self._db = sqlite3.connect(dbPath)
         
         self._pool = pool
+
+        self._badChecker = BadHrscFileChecker(badHrscFilePath)
 
         # Create the output folder
         self._outputFolder = outputFolder
@@ -116,6 +144,7 @@ class HrscFileCacher():
         if lonlatRect != None: # Incorporate a bounding box
             query += (' AND minLat<%d AND maxLat>%d AND minLon<%d AND maxLon>%d' %
                       (lonlatRect.maxY, lonlatRect.minY, lonlatRect.maxX, lonlatRect.minX))
+        query += ' AND (maxLon - minLon) < 10.0' # FOR NOW: Skip wraparound images.  Later we need to fix!
         #query += ' LIMIT 5'  # DEBUG!!!
         cursor.execute(query)
         rows = cursor.fetchall()
@@ -127,7 +156,12 @@ class HrscFileCacher():
         for line in rows:
             fileInfo = common.TableRecord(line) # Wrap the data line
             setName = fileInfo.setName()[:-4] # Strip off '_nd3' from the end
-            hrscSetList.append(setName)
+
+            if not self._badChecker.isSetBad(setName):
+                hrscSetList.append(setName)
+                #print fileInfo.setName() + ' --> ' + fileInfo.bbString()
+            else:
+                print 'Skipping known bad set ' + setName
             
         return hrscSetList
     

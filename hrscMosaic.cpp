@@ -31,10 +31,10 @@
  */
 
 // TODO: Increase this as we increase the resolution!
-const int BLEND_DIST_GLOBAL = 128;
+const int BLEND_DIST_GLOBAL = 256;
 
 // Set this to use the simple, no blending mosaic method.
-//#define USE_SIMPLE_PASTE
+const bool FORCE_SIMPLE_PASTE = false;
 
 //=============================================================
 
@@ -157,8 +157,7 @@ bool pasteImage(cv::Mat &outputImage,
     {        
       // Compute the equivalent location in the added image
       affineTransform(spatialTransform, c, r, interpX, interpY);
-      
-      // TODO: Don't use mirrored pixel over real pixel!
+      //printf("c = %d, r = %d, interpX = %f, interpY = %f\n", c, r, interpX, interpY);
       
       // Extract all of the basemap values at that location.
       // - Call the mirror version of the function so we retain all edges.
@@ -167,6 +166,7 @@ bool pasteImage(cv::Mat &outputImage,
       // Skip masked pixels and out of bounds pixels
       if (!gotValue)
       {
+        //printf("SKIP\n");
         continue;
       }
       
@@ -280,74 +280,6 @@ bool pasteWeightedImage(cv::Mat &outputImage,
 }
 
 
-
-/// Sets up the base and paste masks so we get the desired images in the right places
-void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &pasteMasks,
-                                               const std::vector<cv::Mat> &spatialTransforms,
-                         cv::Mat &baseMaskOut)
-{
-  //  We want the base mask to be invalid underneath the paste mask except for the edges.
-  //  Tile edges do not count as edges for this purpose.
-  const int EDGE_SIZE = BLEND_DIST_GLOBAL;
-  
-  const size_t numMasks = pasteMasks.size();
-  const cv::Rect baseRoi(0, 0, baseMask.cols, baseMask.rows);
-  
-  baseMask.copyTo(baseMaskOut); 
-  
-  cv::Mat kernel(EDGE_SIZE, EDGE_SIZE, CV_8UC1, 255);
-  cv::Mat oneKernel(3, 3, CV_8UC1, 255);
-  cv::Mat shrunkPasteMask, invertPasteMask, tempMat;
-  for (size_t i=0; i<numMasks; ++i)
-  {    
-    // Generate a shrunk version to mask the base map for blending
-    cv::erode(pasteMasks[i], shrunkPasteMask, kernel);
-    
-    // Subtract the the shrunk version from the base mask
-    cv::absdiff(shrunkPasteMask, 255, invertPasteMask);
-    
-    
-    // TODO: Improve image ROI handling so this does not break on certain images!
-    
-    // ROI of the small image in the base image
-    cv::Rect pasteRoiInBase(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
-                            static_cast<int>(-spatialTransforms[i].at<float>(1, 2)),
-                            invertPasteMask.cols, invertPasteMask.rows);
-    
-    // The portion of small ROI that is contained in the base image, base image coordinates.
-    cv::Rect pasteRoiInBaseSafe = pasteRoiInBase & baseRoi;
-    
-    // The full ROI internal to the paste image
-    cv::Rect pasteRoiInPaste(0, 0, invertPasteMask.cols, invertPasteMask.rows);
-    // The full base ROI in the paste image
-    cv::Rect baseRoiInPaste(static_cast<int>(spatialTransforms[i].at<float>(0, 2)),
-                            static_cast<int>(spatialTransforms[i].at<float>(1, 2)),
-                            baseMask.cols, baseMask.rows);
-    // The portion of small ROI that is contained in the base image, paste image coordinates.
-    cv::Rect pasteRoiInPasteSafe = pasteRoiInPaste & baseRoiInPaste;
-    
-    
-    //std::cout << "Paste ROI: " << pasteRoiSafe << std::endl;
-    baseMaskOut.copyTo(tempMat);
-    cv::Mat outSection(baseMaskOut, pasteRoiInBaseSafe);
-    cv::min(invertPasteMask(pasteRoiInPasteSafe), tempMat(pasteRoiInBaseSafe), outSection);
-    
-    // Expand base mask by a single pixel to help clean up strange
-    //  pixel artifacts seen at the top and bottom of a pasted tile.
-    cv::Mat tempBase = baseMaskOut;
-    cv::dilate(tempBase, baseMaskOut, oneKernel);
-    
-    /*
-    // DEBUG
-    std::string path = "shrunkPasteMask" + itoa(i) + ".tif";
-    cv::imwrite(path, shrunkPasteMask);
-    path = "invertPasteMask" + itoa(i) + ".tif";
-    cv::imwrite(path, invertPasteMask);
-    path = "baseMaskOut_" + itoa(i) + ".tif";
-    cv::imwrite(path, baseMaskOut);*/
-  }
-  
-}
 /*
 /// Paste new images using a graph cut to blend the seams.
 bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
@@ -547,6 +479,76 @@ bool pasteImagesGraphCut(const             cv::Mat  &baseImage,
 }
 */
 
+
+/// Sets up the base mask so we get the desired images in the right places.
+/// - This means setting the base mask to invalid in the "inner" regions of paste 
+///   images, leaving a border around each paste image that is valid so that blending occurs.
+void setImageMasks(const cv::Mat &baseMask,    const std::vector<cv::Mat> &pasteMasks,
+                                               const std::vector<cv::Mat> &spatialTransforms,
+                         cv::Mat &baseMaskOut)
+{
+  //  We want the base mask to be invalid underneath the paste mask except for the edges.
+  //  Tile edges do not count as edges for this purpose.
+  const int EDGE_SIZE = BLEND_DIST_GLOBAL;
+  
+  const size_t numMasks = pasteMasks.size();
+  const cv::Rect baseRoi(0, 0, baseMask.cols, baseMask.rows);
+  
+  baseMask.copyTo(baseMaskOut); 
+  
+  cv::Mat kernel(EDGE_SIZE, EDGE_SIZE, CV_8UC1, 255);
+  cv::Mat oneKernel(3, 3, CV_8UC1, 255);
+  cv::Mat shrunkPasteMask, invertPasteMask, tempMat;
+  for (size_t i=0; i<numMasks; ++i)
+  {    
+    // Generate a shrunk version of the paste mask
+    cv::erode(pasteMasks[i], shrunkPasteMask, kernel);
+    
+    // Subtract the the shrunk version of the paste mask to get a mask which is
+    // true where there is no paste image content.
+    cv::absdiff(shrunkPasteMask, 255, invertPasteMask);
+    
+    // ROI of the small image in the base image
+    cv::Rect pasteRoiInBase(static_cast<int>(-spatialTransforms[i].at<float>(0, 2)),
+                            static_cast<int>(-spatialTransforms[i].at<float>(1, 2)),
+                            invertPasteMask.cols, invertPasteMask.rows);
+    
+    // The portion of small ROI that is contained in the base image, base image coordinates.
+    cv::Rect pasteRoiInBaseSafe = pasteRoiInBase & baseRoi;
+    
+    // The full ROI internal to the paste image
+    cv::Rect pasteRoiInPaste(0, 0, invertPasteMask.cols, invertPasteMask.rows);
+    // The full base ROI in the paste image
+    cv::Rect baseRoiInPaste(static_cast<int>(spatialTransforms[i].at<float>(0, 2)),
+                            static_cast<int>(spatialTransforms[i].at<float>(1, 2)),
+                            baseMask.cols, baseMask.rows);
+    // The portion of small ROI that is contained in the base image, paste image coordinates.
+    cv::Rect pasteRoiInPasteSafe = pasteRoiInPaste & baseRoiInPaste;
+    
+    // "Subtract" out the region where the paste image is valid
+    //std::cout << "Paste ROI: " << pasteRoiSafe << std::endl;
+    baseMaskOut.copyTo(tempMat);
+    cv::Mat outSection(baseMaskOut, pasteRoiInBaseSafe);
+    cv::min(invertPasteMask(pasteRoiInPasteSafe), tempMat(pasteRoiInBaseSafe), outSection);
+    
+    // Expand base mask by a single pixel to help clean up strange
+    //  pixel artifacts seen at the top and bottom of a pasted tile.
+    cv::Mat tempBase = baseMaskOut;
+    cv::dilate(tempBase, baseMaskOut, oneKernel);
+    
+    /*
+    // DEBUG
+    std::string path = "shrunkPasteMask" + itoa(i) + ".tif";
+    cv::imwrite(path, shrunkPasteMask);
+    path = "invertPasteMask" + itoa(i) + ".tif";
+    cv::imwrite(path, invertPasteMask);
+    path = "baseMaskOut_" + itoa(i) + ".tif";
+    cv::imwrite(path, baseMaskOut);*/
+  } // End loop through paste images
+  
+}
+
+
 /// Slimmed down version of the previous function.
 /// - This version only supports the feather blender with manual pasting of the images.
 bool pasteImagesFeather(const             cv::Mat  &baseImage,
@@ -621,6 +623,7 @@ bool pasteImagesFeather(const             cv::Mat  &baseImage,
     }
     
     // Generate the feather blender weight masks
+    // - These create a gradient blend along the regions where both masks are valid.
     std::vector<cv::Mat > imageWeights;
     std::vector<cv::UMat> imageWeightsUmat;
     cv::Rect r = fb->createWeightMaps(seamMasks, corners, imageWeightsUmat);
@@ -701,32 +704,26 @@ int main(int argc, char** argv)
   
 
   printf("Pasting on HRSC images...\n");
+  cv::Mat outputImage;
 
-#ifndef USE_SIMPLE_PASTE  
-  // OpenCV based image blending
-  cv::Mat outputImage, basemapFloat;
-  pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
-#else
-  /*
-  cv::Mat outputImage =cv::Mat::zeros(basemapImage.rows, basemapImage.cols, CV_8UC3);
-  
-  printf("Ready to paste weighted...\n");
-  
-  cv::Mat basemapMask(basemapImage.rows, basemapImage.cols, CV_8UC1, 255);
-  cv::Mat basemapTransform = cv::Mat::eye(3, 3, CV_32F);
-  pasteWeightedImage(outputImage, basemapImage, basemapMask, imageWeights[numHrscImages], basemapTransform);
-  
-  printf("Pasted the base.\n");
-  */
-  // For now, just dump all of the HRSC images in one at a time.
-  cv::Mat outputImage(basemapImage);
-  for (size_t i=0; i<numHrscImages; ++i)
+  // Hack to use the simple paste method for the tiny debug images
+  if ( (FORCE_SIMPLE_PASTE == false) && (basemapImage.cols > 500) )
   {
-    //pasteWeightedImage(outputImage, hrscImages[i], hrscMasks[i], imageWeights[i], spatialTransforms[i]);
-    pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
+    // OpenCV based image blending
+    pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
   }
-  
-#endif  
+  else // Use the simple paste
+  {
+    printf("Using the no-blend paste method...\n");
+
+    // For now, just dump all of the HRSC images in one at a time.
+    outputImage = basemapImage.clone();
+    for (size_t i=0; i<numHrscImages; ++i)
+    {
+      pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
+    }
+    
+  }
   printf("Writing output file...\n");
   
   // Write the output image

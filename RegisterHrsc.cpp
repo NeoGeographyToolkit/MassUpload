@@ -102,6 +102,7 @@ enum DetectorType {DETECTOR_TYPE_BRISK = 0,
 /// Returns the number of inliers
 int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn,
                           const cv::Mat &estimatedTransform, cv::Mat &transform,
+                          const std::string debugFolder,
                           const int          kernelSize  =5, 
                           const DetectorType detectorType=DETECTOR_TYPE_ORB)
 {
@@ -109,8 +110,6 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
   
   // Preprocess the images to improve feature detection
   cv::Mat refImage, matchImage, temp;
-  //GaussianBlur( src, src, Size(3,3), 0, 0, BORDER_DEFAULT );
-  //cv::GaussianBlur( matchImageIn, matchImageIn, cv::Size(3,3), 0, 0, cv::BORDER_DEFAULT );
   
   const int scale = 1;
   const int delta = 0;
@@ -119,10 +118,8 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
   cv::Laplacian( matchImageIn, temp, CV_16S, kernelSize, scale, delta, cv::BORDER_DEFAULT );
   cv::convertScaleAbs( temp, matchImage, 0.3 );
 
-  //TODO: Improve input image quality?
-  
-  cv::imwrite( "basemapProcessed.jpeg", refImage );
-  cv::imwrite( "nadirProcessed.jpeg", matchImage );
+  //cv::imwrite( "basemapProcessed.jpeg", refImage );
+  //cv::imwrite( "nadirProcessed.jpeg", matchImage );
     
   std::vector<cv::KeyPoint> keypointsA, keypointsB;
   cv::Mat descriptorsA, descriptorsB;  
@@ -281,11 +278,7 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
     cv::line(matches_image, matchPt, refPt, cv::Scalar(0, 255, 0), 3);
   }
                        
-  //cv::imshow( "BRISK All Matches", matches_image );
-  //cv::waitKey(0);
-
-  //cv::IplImage* outrecog = new cv::IplImage(matches_image);
-  cv::imwrite( "match_image.jpeg", matches_image );
+  cv::imwrite( debugFolder+"match_debug_image.tif", matches_image );
 
   // Return the number of inliers found
   return static_cast<int>(inlierIndices.size());
@@ -293,7 +286,8 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
 
 /// Calls computImageTransform with multiple parameters until one succeeds
 int computeImageTransformRobust(const cv::Mat &refImageIn, const cv::Mat &matchImageIn,
-                          const cv::Mat &estimatedTransform, cv::Mat &transform)
+                                const std::string &debugFolder,
+                                const cv::Mat &estimatedTransform, cv::Mat &transform)
 {
   // Try not to accept solutions with fewer outliers
   const int DESIRED_NUM_INLIERS  = 10;
@@ -310,7 +304,7 @@ int computeImageTransformRobust(const cv::Mat &refImageIn, const cv::Mat &matchI
     {
       printf("Attempting transform with kernel size = %d and detector type = %d\n",
              kernelSize, detectorType);
-      numInliers = computeImageTransform(refImageIn, matchImageIn, estimatedTransform, transform,
+      numInliers = computeImageTransform(refImageIn, matchImageIn, estimatedTransform, transform, debugFolder,
                                          kernelSize, static_cast<DetectorType>(detectorType));
       if (numInliers >= DESIRED_NUM_INLIERS)
         return numInliers; // This transform is good enough, return it.
@@ -377,27 +371,12 @@ int main(int argc, char** argv )
     return -1;
   }
 
-  /*
-  // To simplify things, only run image processing on a certain region outside the estimated
-  //   transform location.
-  const int PROCESS_RADIUS = 500; // The buffer size in the reference image
-  cv::Rect processRoi(estimatedTransform.at<float>(0, 2) - PROCESS_RADIUS,
-                      estimatedTransform.at<float>(1, 2) - PROCESS_RADIUS,
-                      matchImageIn.cols + 2*PROCESS_RADIUS,
-                      matchImageIn.rows + 2*PROCESS_RADIUS);
-  cv::Rect refImageRoi(0, 0, refImageIn.cols, refImageIn.rows);
-  processRoi = processRoi & refImageRoi;
-  cv::Mat croppedRefImage = refImageIn(processRoi);
-
-  // Update the estimated transform to apply to the cropped ROI
-  cv::Mat croppedEstimatedTransform = estimatedTransform;
-  croppedEstimatedTransform.at<float>(0, 2) -= processRoi.x;
-  croppedEstimatedTransform.at<float>(1, 2) -= processRoi.y;
-  */
+  size_t stop = outputPath.rfind("/");
+  std::string debugFolder = outputPath.substr(0,stop+1);
 
   // First compute the transform between the two images
   cv::Mat transform(3, 3, CV_32FC1);
-  int numInliers = computeImageTransformRobust(refImageIn, matchImageIn, estimatedTransform, transform);
+  int numInliers = computeImageTransformRobust(refImageIn, matchImageIn, debugFolder, estimatedTransform, transform);
   if (!numInliers)
   {
     printf("Failed to compute image transform!\n");
@@ -405,27 +384,14 @@ int main(int argc, char** argv )
   }
   printf("Computed transform with %d inliers.\n", numInliers);
   
-  //std::cout << "H = \n" << transform << std::endl;
-  
+ 
   // Convert the transform to apply to the higher resolution images
   // - Also convert the transform back into the frame of the full input reference image.
   // - Since we are only computing the translation this is easy!
-  //transform.at<float>(0, 2) = (transform.at<float>(0, 2) + processRoi.x) * outputScale;
-  //transform.at<float>(1, 2) = (transform.at<float>(1, 2) + processRoi.y) * outputScale;
   transform.at<float>(0, 2) = transform.at<float>(0, 2) * outputScale;
   transform.at<float>(1, 2) = transform.at<float>(1, 2) * outputScale;  
-
-  //std::cout << "H adjusted = \n" << transform << std::endl;
-  
-  /*
-  // For the next step the transform needs to be from reference to match!
-  cv::Mat invTransform(transform);
-  double check = cv::invert(transform, invTransform);
-  std::cout << "H_inv = \n" << invTransform << std::endl;
-  */
   
   // The output transform is from the HRSC image to the base map
-  //transform = estimatedTransform; //DEBUG!!!
   writeTransform(outputPath, transform);
   
   return 0;

@@ -254,6 +254,7 @@ class HrscImage():
         self._makeGrayscaleImage(self._basemapCropPath, self._basemapGrayCropPath)
         
         # Compute the spatial registration from the HRSC image to the base map
+        #print 'DEBUG- forcing registration!'
         self._computeBaseSpatialRegistration(basemapInstance, lowResNadirPath, force)
         
         # Compute the brightness scaling gains relative to the cropped base map
@@ -329,10 +330,10 @@ class HrscImage():
         print 'Generated ' +str(numTiles)+ ' tiles.'
         
         # TODO: We can probably delete the original warped images now
-        # TODO: Don't assume the tiles are sorted properly!
 
         # Loop through each of the tiles we created and consolidate information across channels
         print 'Consolidating tile information...'
+        MIN_TILE_PERCENT_PIXELS_VALID = 0.0001 # Useful to have the tiles even with extremely few pixels!
         self._tileDict = {}
         for i in range(numTiles):
     
@@ -347,7 +348,7 @@ class HrscImage():
                 if chanInfo['percentValid'] < percentValid:
                     percentValid = chanInfo['percentValid']
             thisTileInfo['percentValid'] = percentValid
-            if percentValid < 0.01:
+            if percentValid < MIN_TILE_PERCENT_PIXELS_VALID:
                 #print 'Dropping empty tile' + thisTileInfo['prefix']
                 continue
     
@@ -394,8 +395,6 @@ class HrscImage():
         # - HRSC colors are written with the brightness correction already applied
         # - Color pairs are computed between the high resolution HRSC tile and the low resolution input basemap.
         for tile in self._tileDict.itervalues():
-            
-            # TODO: In the future we may need another tile size for color transform computation!
             
             # Generate a set of color pairs
             cmd = ('./writeHrscColorPairs ' + self._basemapColorPath +' '+ tile['allChannelsStringAndMask']
@@ -560,16 +559,6 @@ class HrscImage():
     def _computeBaseSpatialRegistration(self, basemapInstance, hrscPath, force=False):
         '''Compute the spatial registration from the HRSC image to the base image'''
     
-        ## Estimate the spatial transform using the image metadata
-        ## - This is against the full basemap image
-        #estimatedTransformPath = self._hrscBasePathOut + 'spatial_transform_basemap_estimated.csv'
-        #estX, estY = self._estimateRegistration(self._basemapColorPath, hrscPath, estimatedTransformPath)
-        #
-        ## Update the estimated transform to apply to the cropped region
-        #estimatedCroppedTransformPath = self._hrscBasePathOut + 'spatial_transform_cropped_estimated.csv'
-        #basemapInstance.updateTransformToBoundsDegrees(estimatedTransformPath, estimatedCroppedTransformPath,
-        #                                               self._croppedRegionBoundingBoxDegrees, False)
-
         # Estimate the spatial transform using the image metadata
         # - This is against the cropped basemap image
         estimatedCroppedTransformPath = self._hrscBasePathOut + '_spatial_transform_cropped_estimated.csv'
@@ -581,6 +570,14 @@ class HrscImage():
         cmd = ('./RegisterHrsc ' + self._basemapGrayCropPath +' '+ hrscPath
                +' '+ self._lowResSpatialCroppedRegistrationPath +' '+ str(1.0) +' '+ estimatedCroppedTransformPath)
         MosaicUtilities.cmdRunner(cmd, self._lowResSpatialCroppedRegistrationPath, force)
+
+
+        # DEBUG - Paste the low resolution aligned images so we can evaluate the registration
+        registrationDebugImagePath = self._hrscBasePathOut + '_registration_debug_mosaic.tif'
+        cmd = ('./hrscMosaic ' + self._basemapGrayCropPath +' '+ registrationDebugImagePath +' '+ hrscPath +' '+
+                                  self._lowResMaskPath +' '+ self._lowResSpatialCroppedRegistrationPath)
+        MosaicUtilities.cmdRunner(cmd, registrationDebugImagePath, True)
+
 
         # Load the transform we just computed and convert it to a bounding box
         lowResCroppedPixelRoi  = self._transformToRect(MosaicUtilities.SpatialTransform(self._lowResSpatialCroppedRegistrationPath), False)

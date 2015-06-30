@@ -86,8 +86,24 @@ class TableRecord:
         return self.data[8]
     def uploadTime(self): # Time file uploaded to Maps Engine
         return self.data[9]
-    #def minLat(self): # TODO: Nice Bounding Box wrapper
-    #    return self.data[10]
+    def minLon(self):
+        return self.data[10]
+    def maxLon(self):
+        return self.data[11]
+    def minLat(self):
+        return self.data[12]
+    def maxLat(self):
+        return self.data[13]
+
+    def bbString(self):
+        s = (str(self.minLon()) + ', ' + str(self.maxLon()) + ', ' + 
+             str(self.minLat()) + ', ' + str(self.maxLat()))
+        return s
+
+    def __str__(self):
+        s = ''
+        for d in self.data:
+            s += str(d)
 
 #--------------------------------------------------------------------------------
 # List of functions that need to be provided for each of the sensors!

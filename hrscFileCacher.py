@@ -38,7 +38,7 @@ def downloadHrscFile(remoteURL, localFilePath):
 class BadHrscFileChecker():
     '''Simple class to monitor a list of known bad HRSC files'''
 
-    def __init__(self, csvPath):
+    def __init__(self, csvPath, logger):
         '''Init with list of bad files'''
         # Load the sets into an internal list
         self._badList = []
@@ -50,10 +50,8 @@ class BadHrscFileChecker():
                 if 'h' not in line: # Lines may not include the leading 'h'
                     name = 'h' + name
                 self._badList.append(name)
-        print 'Loaded bad HRSC list: '
-        print self._badList
 
-
+        logger.info('Loaded bad HRSC list: \n' + str(self._badList))
 
     def isSetBad(self, setName):
         '''Returns True if this is a known bad data set'''
@@ -80,7 +78,7 @@ class HrscFileCacher():
         
         self._pool = pool
 
-        self._badChecker = BadHrscFileChecker(badHrscFilePath)
+        self._badChecker = BadHrscFileChecker(badHrscFilePath, self._logger)
 
         # Create the output folder
         self._outputFolder = outputFolder
@@ -116,7 +114,7 @@ class HrscFileCacher():
                 setFolder = os.path.join(self._outputFolder, f)
                 if self._checkIfSetIsComplete(f):
                     self._cachedDataSets.append( (f, currentTime) )
-                    print 'hrscFileCacher: Found existing cached file ' + f
+                    self._logger.info('hrscFileCacher: Found existing cached file ' + f)
                 else:
                     self._incompleteDataSets.append(setFolder)
                     self._logger.warning('Incomplete data set found: ' + setFolder)
@@ -161,7 +159,7 @@ class HrscFileCacher():
                 hrscSetList.append(setName)
                 #print fileInfo.setName() + ' --> ' + fileInfo.bbString()
             else:
-                print 'Skipping known bad set ' + setName
+                self._logger.info('Skipping known bad set ' + setName)
             
         return hrscSetList
     
@@ -186,12 +184,11 @@ class HrscFileCacher():
                             (common.SENSOR_TYPE_HRSC, setMatchString, common.STATUS_CONFIRMED))
         cursor.execute(searchString)
         rows = cursor.fetchall()
-        
+      
         if rows == []: # Make sure we found the next lines
-            print searchString
-            print rows
+            self._logger.info(searchString + '\n' + str(rows))
             raise Exception('Could not find any data files for data set: ' + setName)
-    
+   
         # Build a dict containing the URL for each channel
         dataDict = {}
         dataDict['setName'] = setName

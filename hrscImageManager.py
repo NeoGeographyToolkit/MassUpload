@@ -528,7 +528,7 @@ class HrscImage():
         registrationDebugImagePath = self._hrscBasePathOut + '_registration_debug_mosaic.tif'
         cmd = ('./hrscMosaic ' + self._basemapGrayCropPath +' '+ registrationDebugImagePath +' '+ hrscPath +' '+
                                   self._lowResMaskPath +' '+ self._lowResSpatialCroppedRegistrationPath)
-        MosaicUtilities.cmdRunner(cmd, registrationDebugImagePath, True)
+        MosaicUtilities.cmdRunner(cmd, registrationDebugImagePath, force)
 
 
         # Load the transform we just computed and convert it to a bounding box

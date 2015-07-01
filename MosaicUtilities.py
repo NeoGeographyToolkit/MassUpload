@@ -358,7 +358,7 @@ class GeoReference:
         self._lonLatBounds    = Rectangle(-180, 180, -90, 90)
         self._projectionBounds = copy.copy(self._lonLatBounds)
         self._projectionBounds.scaleByConstant(degreesToMeters)
-        print 'GeoReference init: ' + str(self)
+        #print 'GeoReference init: ' + str(self)
     
     def degreesToProjected(self, lon, lat):
         '''Given a (lon, lat) coordinate, convert to the projected coordinate system.'''
@@ -401,7 +401,7 @@ class ImageCoverage:
         self._numRows   = numRows
         self._metersPerPixelX = self._geoBounds.width()  / numCols
         self._metersPerPixelY = self._geoBounds.height() / numRows
-        print 'ImageCoverage init: ' + str(self)
+        #print 'ImageCoverage init: ' + str(self)
         
     def __str__(self):
         return ('geoBounds: %s, numCols: %d, numRows: %d, mppX: %lf, mppy: %lf'

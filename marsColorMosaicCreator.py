@@ -63,12 +63,12 @@ NUM_PROCESS_THREADS  = 8
 
 # Set up the log path here.
 # - Log tiles are timestamped as is each line in the log file
+LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
 currentTime = datetime.datetime.now()
 logPath = ('/byss/smcmich1/data/hrscMosaicLogs/hrscMosaicLog_%s.txt' % currentTime.isoformat() )
 logging.basicConfig(filename=logPath,
-                    format='%(asctime)s %(name)s %(message)s',
+                    format=LOG_FORMAT_STR,
                     level=logging.DEBUG)
-
 
 BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 
@@ -99,7 +99,7 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
         downloadPool = multiprocessing.Pool(processes=NUM_DOWNLOAD_THREADS)
 
     # Set up the HRSC file manager object
-    print 'Initializing HRSC file caching object'
+    logger.info('Initializing HRSC file caching object')
     hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, outputFolder, BAD_HRSC_FILE_PATH, downloadPool)
 
     while True:
@@ -129,7 +129,14 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
             logger.info('Got request to fetch data set ' + dataSet)
             # Download this HRSC image using the thread pool
             # - TODO: Allow download overlap of multiple data sets at once!
-            hrscInfoDict = hrscFileFetcher.fetchHrscDataSet(dataSet)
+            try:
+                hrscInfoDict = hrscFileFetcher.fetchHrscDataSet(dataSet)
+            except Exception, e:
+                # When we fail to fetch a data set, send out a failure message and keep going.
+                logger.error('Caught exception fetching data set ' + dataSet + '\n' + str(e))
+                hrscInfoDict = {'setName': dataSet, 'error': True}
+                outputQueue.put(hrscInfoDict)
+                continue    
             logger.info('Finished fetching data set ' + dataSet)
             # Put the output information on the output queue
             outputQueue.put(hrscInfoDict)
@@ -226,14 +233,14 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     
     # Skip this function if we have completed adding this HRSC image
     if basemapInstance.checkLog(mainLogPath, hrscSetName):
-        print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
+        logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
         return
     
     logger.info('Started updating tiles for HRSC image ' + hrscSetName)
 
-    print 'Found overlapping output tiles:  ' + str(outputTilesRect)
+    logger.info('Found overlapping output tiles:  ' + str(outputTilesRect))
     if pool:
-        print 'Initializing tile output tasks...'
+        logger.info('Initializing tile output tasks...')
     
     # Loop through all the tiles
     tileResults = []
@@ -244,10 +251,10 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             tileIndex  = MosaicUtilities.TileIndex(row, col) #basemapInstance.getTileIndex(98.5, -27.5)
             tileBounds = basemapInstance.getTileRectDegree(tileIndex)
             
-            print 'Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex)
-            print '--> Tile bounds = ' + str(tileBounds)
+            logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
+            logger.info('--> Tile bounds = ' + str(tileBounds))
 
-            print '\nMaking sure basemap info is present...'
+            logger.info('\nMaking sure basemap info is present...')
             
             # Now that we have selected a tile, generate all of the tile images for it.
             (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath) =  \
@@ -258,7 +265,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             # Have we already written this HRSC image to this tile?
             comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
             if comboAlreadyWritten:
-                print '-- Skipping already written tile!' #Don't want to double-write the same image.
+                logger.info('-- Skipping already written tile!') #Don't want to double-write the same image.
                 continue
         
             # Get information about which HRSC tiles to paste on to the basemap
@@ -281,8 +288,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
 
     if pool: # Wait for all the tasks to complete
-        print 'Finished initializing tile output tasks.'
-        print 'Waiting for tile processes to complete...'
+        logger.info('Finished initializing tile output tasks.')
+        logger.info('Waiting for tile processes to complete...')
         for result in tileResults:
             # Each task finishes by returning the log path for that tile.
             # - Record that we have used this HRSC/tile combination.
@@ -291,14 +298,13 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             basemapInstance.updateLog(tileLogPath, hrscSetName, hrscTilePrefixList)
             
             
-        print 'All tile writing processes have completed'
+        logger.info('All tile writing processes have completed')
 
     #raise Exception('DEBUG')
         
     # Log the fact that we have finished adding this HRSC image    
     basemapInstance.updateLog(mainLogPath, hrscSetName)
-    
-    print '\n---> Finished updating tiles for HRSC image ' + hrscSetName
+
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
 #-----------------------------------------------------------------------------------------
@@ -322,6 +328,13 @@ print 'Starting basemap enhancement script...'
 
 logger = logging.getLogger('MainProgram')
 
+# Echo logging to stdout
+echo = logging.StreamHandler(sys.stdout)
+echo.setLevel(logging.DEBUG)
+echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+logger.addHandler(echo)
+
+
 # Initialize the multi-threading worker pools
 # - Seperate pools for downloads and processing
 #downloadPool = None
@@ -331,10 +344,10 @@ processPool  = None
 if NUM_PROCESS_THREADS > 1:
     processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
 
-print '\n==== Initializing the base map object ===='
+logger.info('==== Initializing the base map object ====')
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder)
 mainLogPath = basemapInstance.getMainLogPath()
-print '--- Finished initializing the base map object ---\n'
+logger.info('--- Finished initializing the base map object ---\n')
 
 
 # Get a list of the HRSC images we are testing with
@@ -343,17 +356,17 @@ tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, B
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempFileFinder = None # Delete this temporary object
 
-print 'Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:'
+logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:')
 
 # DEBUG --> Test this image!
-fullImageList = fullImageList[0:5]
+#fullImageList = fullImageList[6:8]
 #print fullImageList
 
 # Prune out all the HRSC images that we have already added to the mosaic.
 hrscImageList = []
 for hrscSetName in fullImageList:
     if False:#basemapInstance.checkLog(mainLogPath, hrscSetName):
-        print 'Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.'
+        logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
 
@@ -363,17 +376,17 @@ print 'image list = ' + str(hrscImageList)
 
 
 ## Set up the HRSC file manager object
-print 'Starting communication queues'
+logger.info('Starting communication queues')
 #hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, downloadPool)
 downloadCommandQueue  = multiprocessing.Queue()
 downloadResponseQueue = multiprocessing.Queue()
-print 'Initializing HRSC file caching thread'
+logger.info('Initializing HRSC file caching thread')
 downloadThread = threading.Thread(target=cacheManagerThreadFunction,
                                   args  =(databasePath, sourceHrscFolder,            
                                           downloadCommandQueue, downloadResponseQueue)
                                  )
 downloadThread.daemon = True # Needed for ctrl-c to work
-print 'Running thread...'
+logger.info('Running thread...')
 downloadThread.start()
 
 
@@ -407,7 +420,7 @@ for i in range(0,numHrscDataSets):
 
     #try:
 
-    print '\n=== Fetching HRSC image ' + hrscSetName + ' ==='
+    logger.info('=== Fetching HRSC image ' + hrscSetName + ' ===')
 
     # Fetch the HRSC data from the web
     #hrscFileInfoDict = hrscFileFetcher.fetchHrscDataSet(hrscSetName)
@@ -419,29 +432,33 @@ for i in range(0,numHrscDataSets):
                          (hrscSetName, hrscFileInfoDict['setName']))
     logger.info('Received fetch information for ' + hrscSetName)
 
+    if 'error' in hrscFileInfoDict:
+        logger.info('Skipping data set ' + hrscSetName + ' which could not be fetched.')
+        continue
+
     #print 'SKIPPING IMAGE PROCESSING!!!'
     #continue
 
-    print '\n=== Initializing HRSC image ' + hrscSetName + ' ==='
+    logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
 
     # Preprocess the HRSC image
     hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
 
     # TODO: Need to make the HRSC manager clean up the processed folder too!
 
-    print '--- Now initializing high res HRSC content ---'
+    logger.info('--- Now initializing high res HRSC content ---')
 
     # Complete the high resolution components
     hrscInstance.prepHighResolutionProducts()
     
-    print '--- Finished initializing HRSC image ---\n'
+    logger.info('--- Finished initializing HRSC image ---\n')
 
     #continue # DEBUG - Just update the registration
 
     # Call the function to update all the output images for this HRSC image
     updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
-    print '<<<<< Finished writing all tiles for this HRSC image! >>>>>'
+    logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
 
     # TODO: Clean up if necessary
 
@@ -449,7 +466,7 @@ for i in range(0,numHrscDataSets):
 
 
 if processPool:
-    print 'Cleaning up the processing thread pool...'
+    logger.info('Cleaning up the processing thread pool...')
     processPool.close()
     processPool.join()
 
@@ -460,5 +477,5 @@ downloadThread.join()
 #    downloadPool.close()
 #    downloadPool.join()
 
-print 'Basemap enhancement script completed!'
+logger.info('Basemap generation script completed!')
 

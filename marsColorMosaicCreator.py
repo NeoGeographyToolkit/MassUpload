@@ -184,9 +184,9 @@ def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
 
     # Get the tile information from the HRSC image
     tileDict = hrscInstance.getTileInfo(thisTileBounds, tileIndex.getPostfix())
-    print 'Found these tile intersections:'
-    for hrscTile in tileDict.itervalues():
-        print hrscTile['prefix']
+    #print 'Found these tile intersections:'
+    #for hrscTile in tileDict.itervalues():
+    #    print hrscTile['prefix']
 
     return tileDict
     
@@ -357,6 +357,7 @@ for hrscSetName in fullImageList:
     else:
         hrscImageList.append(hrscSetName)
 
+#hrscImageList = ['h3276_0000']
 print 'image list = ' + str(hrscImageList)
 
 

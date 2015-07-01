@@ -41,144 +41,6 @@ const bool FORCE_SIMPLE_PASTE = false;
 
 
 
-/// Load all the input files
-bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
-                     std::vector<cv::Mat> &hrscImages,
-                     std::vector<cv::Mat> &hrscMasks,
-                     std::vector<cv::Mat> &spatialTransforms, std::string &outputPath)
-{
-  // Parse the input arguments
-  const size_t numHrscImages = (argc - 3)/3;
-  std::vector<std::string> hrscPaths(numHrscImages),
-                           hrscMaskPaths(numHrscImages),
-                           spatialTransformPaths(numHrscImages);
-  std::string baseImagePath = argv[1];
-  outputPath = argv[2];
-  
-  // Pick out the three arguments for each input image
-  for (size_t i=0; i<numHrscImages; ++i)
-  {
-    hrscPaths[i]             = argv[3 + 2*i];
-    hrscMaskPaths[i]         = argv[4 + 2*i];
-    spatialTransformPaths[i] = argv[5 + 2*i];
-  }
-
-  const int LOAD_GRAY = 0;
-  const int LOAD_RGB  = 1;
-  
-  // Load the base map
-  if (!readOpenCvImage(baseImagePath, basemapImage, LOAD_RGB))
-      return false;
-  
-  // Load all of the HRSC images and their spatial transforms
-  cv::Mat tempTransform;
-  hrscImages.resize(numHrscImages);
-  hrscMasks.resize(numHrscImages);
-  spatialTransforms.resize(numHrscImages);
-  for (size_t i=0; i<numHrscImages; ++i)
-  {
-    if (!readOpenCvImage(hrscPaths[i], hrscImages[i], LOAD_RGB))
-      return false;
-    if (!readOpenCvImage(hrscMaskPaths[i], hrscMasks[i], LOAD_GRAY))
-    {
-      printf("Mask read error!\n");
-      return false;
-    }
-    
-    if (!readTransform(spatialTransformPaths[i], tempTransform))
-    {
-      printf("Failed to load HRSC spatial transform: %s\n", spatialTransformPaths[i].c_str());
-      return false;
-    }
-    // Each transform is read in HRSC_to_basemap but we want basemap_to_HRSC so invert.
-    double check = cv::invert(tempTransform, spatialTransforms[i]);
-  }
-  printf("Loaded %d images.\n", numHrscImages);
-
-  return true;
-}
-
-// Without supporting classes this function is a mess
-void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
-                         int &minX, int &minY, int &maxX, int &maxY)
-{
-  // Init the bounds
-  maxX = 0;
-  maxY = 0;
-  minX = outputImage.cols-1;
-  minY = outputImage.rows-1;
-  
-  // Compute the four corners
-  const int NUM_CORNERS = 4;
-  float interpX[NUM_CORNERS], interpY[NUM_CORNERS];
-  affineTransform(spatialTransform, 0,               0,               interpX[0], interpY[0]);
-  affineTransform(spatialTransform, 0,               imageToAdd.rows, interpX[1], interpY[1]);
-  affineTransform(spatialTransform, imageToAdd.cols, 0,               interpX[2], interpY[2]);
-  affineTransform(spatialTransform, imageToAdd.cols, imageToAdd.rows, interpX[3], interpY[3]);
-  
-  // Adjust the bounds to match the corners
-  for (int i=0; i<NUM_CORNERS; ++i)
-  {
-    if (floor(interpX[i]) < minX) minX = interpX[i];
-    if (ceil( interpX[i]) > maxX) maxX = interpX[i];
-    if (floor(interpY[i]) < minY) minY = interpY[i];
-    if (ceil( interpY[i]) > maxY) maxY = interpY[i];
-  }
-}
-
-// TODO: Need a bounding box class!
-
-/// Just do a simple paste of one image on to another.
-/// - This is not a pretty looking as a blended image paste but it is
-///   simple, faster, and good for testing.
-bool pasteImage(cv::Mat &outputImage,
-                const cv::Mat &imageToAdd, const cv::Mat &imageMask, const cv::Mat &spatialTransform)
-{
-  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
-  int minCol, minRow, maxCol, maxRow;
-  cv::Mat newToOutput;
-  cv::invert(spatialTransform, newToOutput);
-  getPasteBoundingBox(outputImage, imageToAdd, newToOutput, minCol, minRow, maxCol, maxRow);
-  
-  // Restrict the paste ROI to valid bounds --> Should use a class function!
-  if (minCol < 0)                minCol = 0;
-  if (maxCol > outputImage.cols) maxCol = outputImage.cols;
-  if (minRow < 0)                minRow = 0;
-  if (maxRow > outputImage.rows) maxRow = outputImage.rows;
-  //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
-  
-  // Iterate over the pixels of the output image
-  bool gotValue;
-  cv::Vec3b pastePixel;
-  float interpX, interpY;
-  for (int r=minRow; r<maxRow; r++)
-  {
-    for (int c=minCol; c<maxCol; c++)
-    {        
-      // Compute the equivalent location in the added image
-      affineTransform(spatialTransform, c, r, interpX, interpY);
-      //printf("c = %d, r = %d, interpX = %f, interpY = %f\n", c, r, interpX, interpY);
-      
-      // Extract all of the basemap values at that location.
-      // - Call the mirror version of the function so we retain all edges.
-      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);      
-      
-      // Skip masked pixels and out of bounds pixels
-      if (!gotValue)
-      {
-        //printf("SKIP\n");
-        continue;
-      }
-      
-      // If the interpolated pixel is good just overwrite the current value in the output image
-      outputImage.at<cv::Vec3b>(r, c) = pastePixel;
-
-    } // End col loop
-  } // End row loop
-
-  return true;
-}
-
 
 /// A weighted simple paste of one image on to another.
 /// - To increase speed, this function just takes a translation offset instead of a full transform.
@@ -661,11 +523,209 @@ bool pasteImagesFeather(const             cv::Mat  &baseImage,
 }
 
 
+// Functions above here are no longer used!
+//========================================================
+
+
+
+/// Load all the input files
+bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
+                     std::vector<cv::Mat> &hrscImages,
+                     std::vector<cv::Mat> &hrscMasks,
+                     std::vector<cv::Mat> &spatialTransforms, std::string &outputPath)
+{
+  // Parse the input arguments
+  const size_t numHrscImages = (argc - 3)/3;
+  std::vector<std::string> hrscPaths(numHrscImages),
+                           hrscMaskPaths(numHrscImages),
+                           spatialTransformPaths(numHrscImages);
+  std::string baseImagePath = argv[1];
+  outputPath = argv[2];
+  
+  // Pick out the three arguments for each input image
+  for (size_t i=0; i<numHrscImages; ++i)
+  {
+    hrscPaths[i]             = argv[3 + 2*i];
+    hrscMaskPaths[i]         = argv[4 + 2*i];
+    spatialTransformPaths[i] = argv[5 + 2*i];
+  }
+
+  const int LOAD_GRAY = 0;
+  const int LOAD_RGB  = 1;
+  
+  // Load the base map
+  if (!readOpenCvImage(baseImagePath, basemapImage, LOAD_RGB))
+      return false;
+  
+  // Load all of the HRSC images and their spatial transforms
+  cv::Mat tempTransform;
+  hrscImages.resize(numHrscImages);
+  hrscMasks.resize(numHrscImages);
+  spatialTransforms.resize(numHrscImages);
+  for (size_t i=0; i<numHrscImages; ++i)
+  {
+    if (!readOpenCvImage(hrscPaths[i], hrscImages[i], LOAD_RGB))
+      return false;
+    if (!readOpenCvImage(hrscMaskPaths[i], hrscMasks[i], LOAD_GRAY))
+    {
+      printf("Mask read error!\n");
+      return false;
+    }
+    
+    if (!readTransform(spatialTransformPaths[i], tempTransform))
+    {
+      printf("Failed to load HRSC spatial transform: %s\n", spatialTransformPaths[i].c_str());
+      return false;
+    }
+    // Each transform is read in HRSC_to_basemap but we want basemap_to_HRSC so invert.
+    double check = cv::invert(tempTransform, spatialTransforms[i]);
+  }
+  printf("Loaded %d images.\n", numHrscImages);
+
+  return true;
+}
+
+// Without supporting classes this function is a mess
+void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
+                         int &minX, int &minY, int &maxX, int &maxY)
+{
+  // Init the bounds
+  maxX = 0;
+  maxY = 0;
+  minX = outputImage.cols-1;
+  minY = outputImage.rows-1;
+  
+  // Compute the four corners
+  const int NUM_CORNERS = 4;
+  float interpX[NUM_CORNERS], interpY[NUM_CORNERS];
+  affineTransform(spatialTransform, 0,               0,               interpX[0], interpY[0]);
+  affineTransform(spatialTransform, 0,               imageToAdd.rows, interpX[1], interpY[1]);
+  affineTransform(spatialTransform, imageToAdd.cols, 0,               interpX[2], interpY[2]);
+  affineTransform(spatialTransform, imageToAdd.cols, imageToAdd.rows, interpX[3], interpY[3]);
+  
+  // Adjust the bounds to match the corners
+  for (int i=0; i<NUM_CORNERS; ++i)
+  {
+    if (floor(interpX[i]) < minX) minX = interpX[i];
+    if (ceil( interpX[i]) > maxX) maxX = interpX[i];
+    if (floor(interpY[i]) < minY) minY = interpY[i];
+    if (ceil( interpY[i]) > maxY) maxY = interpY[i];
+  }
+}
+
+/// Just do a simple paste of one image on to another.
+/// - This is not a pretty looking as a blended image paste but it is
+///   simple, faster, and good for testing.
+bool pasteImage(cv::Mat &outputImage,
+                const cv::Mat &imageToAdd, const cv::Mat &imageMask, const cv::Mat &spatialTransform)
+{
+  // Estimate the bounds of the new image so we do not have to iterate over the entire output image
+  int minCol, minRow, maxCol, maxRow;
+  cv::Mat newToOutput;
+  cv::invert(spatialTransform, newToOutput);
+  getPasteBoundingBox(outputImage, imageToAdd, newToOutput, minCol, minRow, maxCol, maxRow);
+  
+  // Restrict the paste ROI to valid bounds --> Should use a class function!
+  if (minCol < 0)                minCol = 0;
+  if (maxCol > outputImage.cols) maxCol = outputImage.cols;
+  if (minRow < 0)                minRow = 0;
+  if (maxRow > outputImage.rows) maxRow = outputImage.rows;
+  //printf("minCol = %d, minRow = %d, maxCol = %d, maxRow = %d\n", minCol, minRow, maxCol, maxRow);
+  
+  // Iterate over the pixels of the output image
+  bool gotValue;
+  cv::Vec3b pastePixel;
+  float interpX, interpY;
+  for (int r=minRow; r<maxRow; r++)
+  {
+    for (int c=minCol; c<maxCol; c++)
+    {        
+      // Compute the equivalent location in the added image
+      affineTransform(spatialTransform, c, r, interpX, interpY);
+      //printf("c = %d, r = %d, interpX = %f, interpY = %f\n", c, r, interpX, interpY);
+      
+      // Extract all of the basemap values at that location.
+      // - Call the mirror version of the function so we retain all edges.
+      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);      
+      
+      // Skip masked pixels and out of bounds pixels
+      if (!gotValue)
+      {
+        //printf("SKIP\n");
+        continue;
+      }
+      
+      // If the interpolated pixel is good just overwrite the current value in the output image
+      outputImage.at<cv::Vec3b>(r, c) = pastePixel;
+
+    } // End col loop
+  } // End row loop
+
+  return true;
+}
 
 
 
 
+/// A weighted simple paste of one image on to another.
+/// - The mask is a uint8 input which is both the mask and the weight of input pixels!
+/// - To increase speed, this function just takes a translation offset instead of a full transform.
+bool pasteMaskWeightedImage(cv::Mat &outputImage,
+                            const cv::Mat &imageToAdd, const cv::Mat &imageWeight,
+                            const int colOffset, const int rowOffset)
+{
+  const int tileHeight = imageToAdd.rows;
+  const int tileWidth  = imageToAdd.cols;
 
+  const unsigned char MASK_MAX = 255;
+
+  
+  int minCol = -colOffset;
+  int minRow = -rowOffset;
+  //std::cout << "col, row offsets = " << colOffset << ", " << rowOffset<< std::endl;
+  
+  cv::Rect outputRoi(minCol, minRow, tileWidth, tileHeight);
+  //std::cout << "output ROI = " << outputRoi << std::endl;
+  
+  cv::Rect pasteRoi(minCol+colOffset, minRow+rowOffset,
+                    tileWidth, tileHeight);
+  //std::cout << "paste ROI = " << pasteRoi << std::endl;
+  
+  
+  if (!constrainMatchedCvRois(outputRoi, outputImage.cols, outputImage.rows, pasteRoi)) {
+    printf("hrscMosaic.cpp WARNING: No ROI match!\n");
+    return true;  // No image intersection, no need for image operations.
+  }
+  
+  //std::cout << "output ROI = " << outputRoi << std::endl;
+  cv::Mat  outputRegion = outputImage(outputRoi);
+  
+  //std::cout << "paste ROI = " << pasteRoi << std::endl;
+
+  // Make the weight apply to all three channels!
+  cv::Mat croppedWeight = imageWeight(pasteRoi);
+  cv::Mat imageWeight3; 
+  cv::Mat linker[] = {croppedWeight, croppedWeight, croppedWeight};
+  cv::merge(linker, 3, imageWeight3); 
+
+  // Get an inverse of the weight for the base image.
+  cv::Mat inverseWeight3;
+  cv::subtract(MASK_MAX, imageWeight3, inverseWeight3, cv::noArray(), CV_8UC3);
+
+  cv::Mat  pasteRegion = imageToAdd (pasteRoi);
+
+  //std::cout << "paste size  = " << pasteRegion.size() << std::endl;
+  //std::cout << "weight size = " << inverseWeight3.size() << std::endl;
+  
+  // outputImage = (outputImage * (1-weight)) + (imageToAdd * weight)
+  const double scale = 1.0 / (double)MASK_MAX; // Lets us multiply by a uint8 image
+  cv::Mat weightedPaste, weightedBase;
+  cv::multiply(outputRegion, inverseWeight3, weightedBase,  scale, CV_8UC3);
+  cv::multiply(pasteRegion,  imageWeight3,   weightedPaste, scale, CV_8UC3);
+  cv::add(weightedBase, weightedPaste, outputRegion);
+  
+  return true;
+}
 
 
 
@@ -703,14 +763,24 @@ int main(int argc, char** argv)
   // Initialize the output image to be identical to the input basemap image
   
 
-  printf("Pasting on HRSC images...\n");
+  printf("Painting on HRSC images...\n");
   cv::Mat outputImage;
 
   // Hack to use the simple paste method for the tiny debug images
   if ( (FORCE_SIMPLE_PASTE == false) && (basemapImage.cols > 500) )
   {
-    // OpenCV based image blending
-    pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
+    //// OpenCV based image blending
+    //pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
+
+    // Blending based on the weighted input masks
+    const size_t numImages = hrscImages.size();
+    outputImage = basemapImage;
+    for (size_t i=0; i<numImages; ++i)
+    {
+      int colOffset = static_cast<int>(spatialTransforms[i].at<float>(0, 2));
+      int rowOffset = static_cast<int>(spatialTransforms[i].at<float>(1, 2));
+      pasteMaskWeightedImage(outputImage, hrscImages[i], hrscMasks[i], colOffset, rowOffset);
+    }
   }
   else // Use the simple paste
   {

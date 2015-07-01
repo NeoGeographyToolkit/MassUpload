@@ -359,8 +359,8 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
   const size_t numOtherTiles = otherOffsets.size();
     
   // Initialize the output image
-  const size_t numRows = hrscChannels[0].rows;
-  const size_t numCols = hrscChannels[0].cols;
+  const size_t numRows = hrscMask.rows; // The mask is the smallest of the input images
+  const size_t numCols = hrscMask.cols;
   outputImage = cv::Mat(numRows, numCols, CV_8UC3);
 
   //printf("numRows = %d, numCols = %d\n", numRows, numCols);
@@ -375,7 +375,6 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
     for (int c=0; c<numCols; c+=1)
     {
       // Handle masked pixels
-      //weightImage.at<unsigned char>(r, c) = 0; //DEBUG
       if (hrscMask.at<unsigned char>(r, c) == 0)
       {
         outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);

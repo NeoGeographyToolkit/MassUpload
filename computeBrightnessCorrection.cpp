@@ -10,7 +10,7 @@
 
 
 bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<cv::Mat> &hrscChannels, 
-                     cv::Mat &transform, std::string &outputPath)
+                     cv::Mat &hrscMask, cv::Mat &transform, std::string &outputPath)
 {
   std::vector<std::string> hrscPaths(NUM_HRSC_CHANNELS);
   std::string baseImagePath = argv[1];
@@ -19,8 +19,9 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   hrscPaths[2] = argv[4]; // B
   hrscPaths[3] = argv[5]; // NIR
   hrscPaths[4] = argv[6]; // NADIR
-  std::string spatialTransformPath = argv[7];
-  outputPath  = argv[8];
+  std::string hrscMaskPath = argv[7];
+  std::string spatialTransformPath = argv[8];
+  outputPath  = argv[9];
   
 
   const int LOAD_GRAY = 0;
@@ -36,6 +37,10 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
     if (!readOpenCvImage(hrscPaths[i], hrscChannels[i], LOAD_GRAY))
       return false;
   }
+
+  // Load the HRSC mask
+  if (!readOpenCvImage(hrscMaskPath, hrscMask, LOAD_GRAY))
+      return false;
 
   // Load the spatial transform
   if (!readTransform(spatialTransformPath, transform))
@@ -77,11 +82,12 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
 
 /// Takes the mean of an HRSC image across its horizontal axis, leaving only a vertical line of values.
 /// - The mean is taken across all HRSC channels.
-bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, cv::Mat &outputProfile)
+bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &hrscMask,
+                     cv::Mat &outputProfile)
 {
   // Allocate the output storage
-  const int numRows = hrscChannels[0].rows;
-  const int numCols = hrscChannels[0].cols;
+  const int numRows = hrscMask.rows;
+  const int numCols = hrscMask.cols;
   outputProfile.create(numRows, 1, CV_32FC1);
   
   // Loop through the input image
@@ -91,6 +97,12 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, cv::Mat &outputPro
     float thisRowMean = 0.0;
     for (int c=0; c<numCols; c++)
     {     
+      
+      // Skip masked out HRSC pixels
+      if (hrscMask.at<unsigned char>(r,c) == 0)
+        continue;
+
+      // For each pixel the brightness is the mean value across all channels
       float thisPixelSum = 0.0;
       for (int channel=0; channel<NUM_HRSC_CHANNELS; channel++)
       {         
@@ -144,17 +156,17 @@ void computeGainOffsets(const cv::Mat &baseProfile, const cv::Mat &hrscProfile,
 int main(int argc, char** argv)
 {
   // Check input arguments
-  if (argc < 9)
+  if (argc < 10)
   {
-    printf("usage: WriteColorPairs <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <Transform File Path> <Output Path>\n");
+    printf("usage: WriteColorPairs <Base Image Path> <HRSC Red> <HRSC Green> <HRSC Blue> <HRSC NIR> <HRSC Nadir> <HRSC Mask> <Transform File Path> <Output Path>\n");
     return -1;
   }
   
   printf("Loading input images...\n");
-  cv::Mat basemapImage, spatialTransform;
+  cv::Mat basemapImage, spatialTransform, hrscMask;
   std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
-  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, spatialTransform, outputPath))
+  if (!loadInputImages(argc, argv, basemapImage, hrscChannels, hrscMask, spatialTransform, outputPath))
     return -1;
 
   printf("Computing brightness profiles...\n");
@@ -162,7 +174,7 @@ int main(int argc, char** argv)
   // Squish the images down to vertical profiles
   cv::Mat basemapProfile, hrscProfile;
   rgbVertProfile(hrscChannels, spatialTransform, basemapImage,  basemapProfile);
-  hrscVertProfile(hrscChannels, hrscProfile);
+  hrscVertProfile(hrscChannels, hrscMask, hrscProfile);
   
   
   //printf("/n/nInput basemapProfile profile\n");

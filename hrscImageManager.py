@@ -37,52 +37,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
                 
         filename     = os.path.basename(imagePath)[:-4] # Strip extension
         outputPrefix = os.path.join(outputFolder, filename + '_tile_')
-        
-        ## Compute the bounding box for each tile
-        #inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
-        #numTilesX = ceil(inputImageSize[0] / tileSize)
-        #numTilesY = ceil(inputImageSize[1] / tileSize)
-        #
-        ## Generate each of the tiles using GDAL
-        #outputTileInfoList = []
-        #for r in range(0,numTilesY):
-        #    for c in range(0,numTilesX):
-        #        
-        #        # Get the pixel ROI for this tile
-        #        # - TODO: This should be handled by a class!
-        #        minCol = c*tileHeight
-        #        minRow = r*tileWidth
-        #        width  = tileWidth
-        #        height = tileHeight
-        #        if (minCol + width ) > inputImageSize[0]: width  = inputImageSize[0] - minCol
-        #        if (minRow + height) > inputImageSize[1]: height = inputImageSize[1] - minRow
-        #        totalNumPixels  = height*width
-        #        
-        #        # Generate the tile
-        #        thisPixelRoi = ('%d %d %d %d' % (minCol, minRow, width, height))
-        #        thisTilePath = outputPrefix + str(r) +'_'+ str(c) + '.tif'
-        #        cmd = 'gdal_translate -srcwin ' + thisPixelRoi +' '+ imagePath +' '+ thisTilePath
-        #        cmdRunner(cmd, thisTilePath, force)
-        #
-        #        # Set up a dictionary entry for this tile
-        #        blackPixelCount = countBlackPixels(thisTilePath)
-        #        validPercentage = 1.0 - (blackPixelCount / totalNumPixels)
-        #        
-        #        # Load all the information into the dictionary
-        #        thisTileInfo = {'path'        : thisTilePath,
-        #                        'tileRow'     : r,
-        #                        'tileCol'     : c,
-        #                        'pixelRow'    : minRow,
-        #                        'pixelCol'    : minCol,
-        #                        'height'      : height,
-        #                        'width'       : width,
-        #                        'percentValid': validPercentage,
-        #                        'prefix'      : getTilePrefix(r, c)
-        #                       }
-        #        outputTileInfoList.append(thisTileInfo)
-        #        
-        #return outputTileInfoList 
-        #
+
         # Skip tile creation if the first tile is present
         # - May need to make the decision smarter later on
         firstTilePath = outputPrefix + '0_0.tif'
@@ -90,7 +45,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
         
             # This tile size is in the warped image (HRSC) resolution
             # TODO: Use gdal to do this so that the regions are preserved?
-            cmd = ('convert %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
+            cmd = ('convert  -colors 256 -colorspace Gray %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
                       % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
             print cmd
             os.system(cmd)
@@ -98,7 +53,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
         # Build the list of output files
         outputTileInfoList = []
         for f in sorted(os.listdir(outputFolder)):
-            if ('_tile_' not in f) or ('json' in f): # Skip metadata files and any junk
+            if ('_tile_' not in f) or ('json' in f) or (filename not in f): # Skip metadata files and any junk
                 continue
             thisPath = os.path.join(outputFolder, f)
             thisMetadataPath = thisPath + '_metadata.json' # Path to record the metadata to
@@ -112,8 +67,8 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False):
             
                 # Figure out the position of the tile
                 numbers  =  re.findall(r"[\d']+", f) # Extract all numbers from the file name
-                tileRow  = int(numbers[3]) # In the tile grid
-                tileCol  = int(numbers[4])
+                tileRow  = int(numbers[-2]) # In the tile grid
+                tileCol  = int(numbers[-1])
                 pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
                 pixelCol = tileCol * tileSize
                 
@@ -260,8 +215,7 @@ class HrscImage():
         # Compute the brightness scaling gains relative to the cropped base map
         # - This is done at low resolution
         # - The low resolution output is smoothed out later to avoid jagged edges.
-        # TODO: Should we use the mask here?
-        cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathString +' '
+        cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathStringAndMask +' '
                 + self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath)
         MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)        
         
@@ -298,11 +252,10 @@ class HrscImage():
         # Make a mask at the output resolution
         # - This mask is actually pretty small on disk since it compresses so well.
         print 'Generating high resolution mask...'
-        cmd = './makeSimpleImageMask ' + self._highResMaskPath +' '+ self._highResPathString
+        cmd = './bigMaskMaker -o ' + self._highResMaskPath +' '+ self._highResPathString
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)            
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath        
-        
-        
+
         # Split the image up into tiles at the full output resolution       
         # - There is one list of tiles per HRSC channel
         # - Each channel gets its own subfolder
@@ -323,6 +276,9 @@ class HrscImage():
                 os.mkdir(channelOutputFolder)
             tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, HRSC_HIGH_RES_TILE_SIZE)
             
+        # Break up the high resolution mask into the same tile structure
+        maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE)
+
         # Verify that each channel generated the same number of tiles
         numTiles = len(tileInfoLists[0])
         for pathList in tileInfoLists:
@@ -355,7 +311,6 @@ class HrscImage():
             # Add in paths to the tile for each channel, including a joint string for convenience.
             allChannelsString = ''
             for c in range(NUM_HRSC_CHANNELS):
-                print tileInfoLists[c][i]['path']
                 pathKey = CHANNEL_STRINGS[c] + '_path'
                 thisTileInfo[pathKey]  = tileInfoLists[c][i]['path'],
                 allChannelsString     += tileInfoLists[c][i]['path'] + ' '
@@ -369,7 +324,6 @@ class HrscImage():
             thisTileInfo['newColorPath'            ] = tileInfoBasePath+'_new_color.tif'
             thisTileInfo['brightnessGainsPath'     ] = tileInfoBasePath+'_brightness_gains.csv'
             thisTileInfo['tileMaskPath'            ] = tileInfoBasePath+'_tile_mask.tif'
-            thisTileInfo['allChannelsStringAndMask'] = allChannelsString + ' ' + thisTileInfo['tileMaskPath']
             #thisTileInfo['lonlatBounds'            ] = None # The data we have is incorrect at this point.
             thisTileInfo['spatialTransformToLowResBasePath'   ] = tileInfoBasePath+'_spatial_transform_to_low_res_base.csv'
             
@@ -378,11 +332,9 @@ class HrscImage():
             # Generate the transform from the high resolution tile to the low resolution basemap
             self._computeTileBoundsAndTransform(thisTileInfo, force)
                
-            # Make a mask of valid pixels for this tile
-            # - It would be great if the input images had a mask.
-            # - Currently all-black pixels anywhere in the image get masked out!
-            cmd = './makeSimpleImageMask ' + thisTileInfo['tileMaskPath'] +' '+ allChannelsString
-            MosaicUtilities.cmdRunner(cmd, thisTileInfo['tileMaskPath'], force)
+            # Locate the path to the high resolution mask tile we created earlier
+            thisTileInfo['tileMaskPath'] = [m['path'] for m in maskTileList if (m['prefix'] == thisTileInfo['prefix'])][0]
+            thisTileInfo['allChannelsStringAndMask'] = allChannelsString + ' ' + thisTileInfo['tileMaskPath']
             
             key = thisTileInfo['prefix']
             self._tileDict[key] = thisTileInfo

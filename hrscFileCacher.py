@@ -142,7 +142,7 @@ class HrscFileCacher():
         if lonlatRect != None: # Incorporate a bounding box
             query += (' AND minLat<%d AND maxLat>%d AND minLon<%d AND maxLon>%d' %
                       (lonlatRect.maxY, lonlatRect.minY, lonlatRect.maxX, lonlatRect.minX))
-        query += ' AND (maxLon - minLon) < 10.0' # FOR NOW: Skip wraparound images.  Later we need to fix!
+        query += ' AND (maxLon - minLon) < 100.0' # FOR NOW: Skip wraparound images.  Later we need to fix!
         #query += ' LIMIT 5'  # DEBUG!!!
         cursor.execute(query)
         rows = cursor.fetchall()

@@ -4,6 +4,7 @@
 
 import os
 import sys
+import logging
 
 import copyGeoTiffInfo
 import MosaicUtilities
@@ -39,8 +40,10 @@ class MarsBasemap:
         numTileRows = FULL_BASEMAP_HEIGHT / BASEMAP_TILE_HEIGHT
         numTileCols = FULL_BASEMAP_WIDTH  / BASEMAP_TILE_WIDTH
 
-        print ('Splitting basemap into %dx%d tiles for %d total tiles.'
-                 % (numTileCols, numTileRows, numTileRows*numTileCols) )
+        self._logger = logging.getLogger('mosaicTileManager')
+
+        self._logger.info('Splitting basemap into %dx%d tiles for %d total tiles.'
+                          % (numTileCols, numTileRows, numTileRows*numTileCols) )
 
         # Initialize two class instance to manage the coordinate systems
         # - The pixel operations are different but GDC/projection calls will return the same results.
@@ -52,9 +55,13 @@ class MarsBasemap:
         self.fullBasemapGrayPath = fullBasemapPath[:-4] + '_gray.tif'
         self._getGrayBasemap()
         
-        self.baseTileFolder = os.path.join(os.path.dirname(fullBasemapPath), 'basemap_tiles')
-        if not os.path.exists(self.baseTileFolder):
-            os.mkdir(self.baseTileFolder)
+        self._baseTileFolder = os.path.join(os.path.dirname(fullBasemapPath), 'basemap_tiles')
+        if not os.path.exists(self._baseTileFolder):
+            os.mkdir(self._baseTileFolder)
+
+        self._backupFolder = os.path.join(os.path.dirname(fullBasemapPath), 'output_tile_backups')
+        if not os.path.exists(self._backupFolder):
+            os.mkdir(self._backupFolder)
             
         self._outputTileFolder = outputTileFolder
         if not os.path.exists(outputTileFolder):
@@ -75,6 +82,9 @@ class MarsBasemap:
 
     #------------------------------------------------------------
     # Helper functions
+
+    def getBackupFolder(self):
+        return self._backupFolder
 
     def getColorBasemapPath(self):
         '''Get the path to the original full basemap image'''
@@ -138,7 +148,7 @@ class MarsBasemap:
     def getTileFolder(self, tileIndex):
         '''Get the folder for storing a given tile'''
         tilename = 'tile_' + tileIndex.getPostfix()
-        return os.path.join(self.baseTileFolder, tilename)
+        return os.path.join(self._baseTileFolder, tilename)
     
     def getOutputTilePath(self, tileIndex):
         return os.path.join(self.getTileFolder(tileIndex), 'output_tile.tif')
@@ -166,27 +176,10 @@ class MarsBasemap:
         '''Returns a bounding box containing all the tiles which intersect the input rectangle'''
         return self._highResImage.getIntersectingTiles(rectDegrees)
     
-    #def updateTransformToBoundsDegrees(self, baseTransformPath, outputPath, boundingBoxDegrees, isHighRes=True):
-    #    '''Updates a base image transform to be relative to a bounding box in the map'''
-    #    
-    #    newTransform = MosaicUtilities.SpatialTransform(baseTransformPath)
-    #    
-    #    # Get the position of the top left corner of the BB in pixels
-    #    boundingBoxProj = self._highResImage.degreeRectToProjectedRect(boundingBoxDegrees)
-    #    (minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
-    #    if isHighRes:
-    #        col, row = self._highResImage.projectedToPixel(minX, maxY)
-    #    else: # Low res
-    #        col, row = self._lowResImage.projectedToPixel(minX, maxY)
-    #    
-    #    # Subtract out that position to get the new transform (which is just a translation)
-    #    newTransform.addShift(-col, -row)
-    #    
-    #    newTransform.write(outputPath)
-    #
     
     def generateTileImages(self, tileIndex, force=False):
-        '''Generate all the basemap sourced images for a tile and return paths'''
+        '''Generate all the basemap sourced images for a tile and return paths.
+           Also generate a backup copy of the output tile if it does not already exist.'''
         
         tileFolder = self.getTileFolder(tileIndex)
         if not os.path.exists(tileFolder):
@@ -197,11 +190,21 @@ class MarsBasemap:
         grayTilePath   = os.path.join(tileFolder, 'basemap_orig_res_gray.tif')
         largeTilePath  = os.path.join(tileFolder, 'basemap_output_res.tif')
         
-        outputTilePath = os.path.join(self._outputTileFolder, 'output_tile_'+tileIndex.getPostfix()+'.tif')
+        outputTileName = 'output_tile_'+tileIndex.getPostfix()+'.tif'
+        outputTilePath = os.path.join(self._outputTileFolder, outputTilePath)
+        tileBackupPath = os.path.join(self._outputTileFolder, outputTilePath)
         tileLogPath    = os.path.join(self._outputTileFolder, 'output_tile_'+tileIndex.getPostfix()+'_log.txt')
 
+        # If this output tile has not already been backed up, make a backup copy now.
+        # - This means that the tile gets backup up to its state right after
+        #    the backup was last cleared.
+        self._logger.info('Backing up tile ' + outputTilePath)
+        backupPath = os.path.join(self._backupFolder, outputTileName)
+        if not os.path.exists(backupPath) and os.path.exists(outputTilePath):
+          shutil.cpy(outputTilePath, backupPath)
+
         degreeRoi = self.getTileRectDegree(tileIndex)
-        print 'MosaicTileManager: Generating tile images for region: ' + str(degreeRoi)
+        self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(degreeRoi))
 
         # Crop out the section of the original base map for this tile
         self.makeCroppedRegionDegrees(degreeRoi, smallTilePath)

@@ -60,8 +60,11 @@ class KmlTreeMaker:
         self._addTileLayer(0) # Go ahead and set up the first tile layer
         # Other layers are added as they are requested
         
-        # TODO: Make filler image!
+        # The ImageMagick mosaic function we use requires a black image on
+        #  disk to fill in for missing tiles so we make one here.
         self._fillerTilePath = os.path.join(outputFolder, 'filler.tif')
+        cmd = 'convert -size 512x512 xc:black ' + self._fillerTilePath
+        MosaicUtilities.cmdRunner(cmd, self._fillerTilePath)
         
         
     def makeLevel(self, level):
@@ -249,7 +252,8 @@ class KmlTreeMaker:
         return os.path.exists(tileKmlPath)
 
 
-def main():
+def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
+         outputFolder='/home/smcmich1/data/hrscMapTest/kmlTree/'):
 
     # TODO: Input handling!
     
@@ -284,9 +288,7 @@ def main():
     # First make a copy of each input tile in the output folder to form the base layer,
     #  but resize each of the tiles to 512 pixels to make the pyramid creation easier.
 
-    sourceFolder = '/home/smcmich1/data/hrscMapTest/outputTiles/'
-    outputFolder = '/home/smcmich1/data/hrscMapTest/kmlTree/'
-    maxNumLevels    = 8
+    maxNumLevels = 20 # Make sure the tree does not get enormous
     
     treeMaker = KmlTreeMaker(sourceFolder, outputFolder)
 

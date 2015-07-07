@@ -8,7 +8,10 @@
 #include <vw/Math/RANSAC.h>
 #include <vw/InterestPoint/InterestData.h>
 
-
+#include <vw/FileIO/DiskImageView.h>
+#include <vw/FileIO/DiskImageResourceGDAL.h>
+#include <vw/FileIO/DiskImageUtils.h>
+#include <vw/Cartography/GeoReference.h>
 
 const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
@@ -438,6 +441,44 @@ bool replaceValue(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, 
   printf("Finished replacing value\n");
   return true;
 
+}
+
+
+
+
+//=========================================================================================
+// Functions copied from ASP
+// - Maybe these functions should live in Vision Workbench?
+
+template <class ImageT>
+vw::DiskImageResourceGDAL*
+build_gdal_rsrc( const std::string &filename,
+               vw::ImageViewBase<ImageT> const& image) 
+{
+  vw::DiskImageResourceGDAL::Options gdal_options;
+  vw::Vector2i raster_tile_size(1024, 1024);
+  return new vw::DiskImageResourceGDAL(filename, image.impl().format(), raster_tile_size, gdal_options);
+}
+
+
+// Block write image with georef and keywords to geoheader.
+template <class ImageT>
+void block_write_gdal_image( const std::string &filename,
+                             vw::ImageViewBase<ImageT> const& image,
+                             vw::cartography::GeoReference const& georef,
+                             vw::ProgressCallback const& progress_callback =                     
+                                               vw::ProgressCallback::dummy_instance(),
+                             std::map<std::string, std::string> keywords =
+                                               std::map<std::string, std::string>()
+                           ) 
+{
+  boost::scoped_ptr<vw::DiskImageResourceGDAL> rsrc( build_gdal_rsrc( filename, image ) );
+  for (std::map<std::string, std::string>::iterator i = keywords.begin(); i != keywords.end(); i++)
+  {
+    vw::cartography::write_header_string(*rsrc, i->first, i->second);
+  }
+  vw::cartography::write_georeference(*rsrc, georef);
+  vw::block_write_image( *rsrc, image.impl(), progress_callback );
 }
 
 

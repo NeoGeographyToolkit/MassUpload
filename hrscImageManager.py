@@ -141,14 +141,15 @@ class HrscImage():
         # Set up some paths
         self._setName    = setName
         self._threadPool = threadPool
-        self._outputFolder        = outputFolder
-        self._basemapInstance     = basemapInstance
-        self._hrscBasePathOut     = os.path.join(outputFolder, setName)
-        self._tileFolder          = self._hrscBasePathOut + '_tiles'
-        self._lowResMaskPath      = self._hrscBasePathOut + '_low_res_mask.tif'
-        self._highResMaskPath     = self._hrscBasePathOut + '_high_res_mask.tif'
-        self._brightnessGainsPath = self._hrscBasePathOut + '_brightness_gains.csv'
-        self._basemapCropPath     = self._hrscBasePathOut + '_local_cropped_basemap.tif' # A crop of the basemap used in several places
+        self._outputFolder          = outputFolder
+        self._basemapInstance       = basemapInstance
+        self._hrscBasePathOut       = os.path.join(outputFolder, setName)
+        self._tileFolder            = self._hrscBasePathOut + '_tiles'
+        self._lowResMaskPath        = self._hrscBasePathOut + '_low_res_mask.tif'
+        self._highResBinaryMaskPath = self._hrscBasePathOut + '_high_res_binary_mask.tif'
+        self._highResMaskPath       = self._hrscBasePathOut + '_high_res_mask.tif'
+        self._brightnessGainsPath   = self._hrscBasePathOut + '_brightness_gains.csv'
+        self._basemapCropPath       = self._hrscBasePathOut + '_local_cropped_basemap.tif' # A crop of the basemap used in several places
         self._basemapGrayCropPath = self._hrscBasePathOut + '_local_gray_cropped_basemap.tif'
         #self._colorPairPath       = self._hrscBasePathOut + '_low_res_color_pairs.csv'
         self._basemapSpatialRegistrationPath       = self._hrscBasePathOut + '_low_res_spatial_transform_basemap.csv' # Transform to the low res basemap
@@ -251,10 +252,18 @@ class HrscImage():
 
         # Make a mask at the output resolution
         # - This mask is actually pretty small on disk since it compresses so well.
-        print 'Generating high resolution mask...'
-        cmd = './bigMaskMaker -o ' + self._highResMaskPath +' '+ self._highResPathString
-        MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)            
+        print 'Generating high resolution binary mask...'
+        cmd = './bigMaskMaker -o ' + self._highResBinaryMaskPath +' '+ self._highResPathString
+        MosaicUtilities.cmdRunner(cmd, self._highResBinaryMaskPath, force)
+
+
+        # Now call another script to generate a mask with blending information
+        print 'Generating high resolution grassfire mask...'
+        cmd = './bigMaskGrassfire -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
+        MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)        
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath        
+
+        raise Exception('DEBUG MASK')        
 
         # Split the image up into tiles at the full output resolution       
         # - There is one list of tiles per HRSC channel

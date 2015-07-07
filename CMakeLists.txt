@@ -154,3 +154,7 @@ add_executable( bigMaskMaker bigMaskMaker.cc )
 target_link_libraries( bigMaskMaker ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
 
 
+add_executable( bigMaskGrassfire bigMaskGrassfire.cc )
+target_link_libraries( bigMaskGrassfire ${OpenCV_LIBS} ${VISIONWORKBENCH_LIBRARIES})
+
+

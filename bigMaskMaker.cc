@@ -31,6 +31,8 @@
 
 #include <vector>
 
+#include <HrscCommon.h>
+
 #include <boost/program_options.hpp>
 #include <boost/utility/enable_if.hpp>
 #include <boost/foreach.hpp>
@@ -43,67 +45,6 @@ using namespace vw;
   which is 255 in pixels where all of the input images have data.
 
 */
-
-//=================================================================================
-// - Transfer functions that should be in a VW file somewhere
-
-// Linear Transfer Function
-class LinearTransFunc : public vw::UnaryReturnSameType {
-public:
-  LinearTransFunc() {}
-
-  template <class ArgT>
-  ArgT operator()( ArgT const& value ) const { return value; }
-};
-
-
-// Cosine Transfer Function (this tracks 180 degrees with level at high and low)
-template <class PixelT>
-class CosineTransFunc : public vw::UnaryReturnSameType {
-  typedef typename CompoundChannelType<PixelT>::type channel_type;
-  typedef ChannelRange<channel_type> range_type;
-public:
-  CosineTransFunc() {}
-
-  template <class ArgT>
-  inline typename boost::enable_if<typename boost::is_floating_point<ArgT>,ArgT>::type
-  operator()( ArgT const& value ) const {
-    return range_type::max()*((1.0-cos(value/float(range_type::max())*M_PI))/2.0);
-  }
-
-  template <class ArgT>
-  inline typename boost::disable_if<typename boost::is_floating_point<ArgT>,ArgT>::type
-  operator()( ArgT const& value ) const {
-    ArgT result = ArgT(range_type::max()*((1.0-cos(float(value)/float(range_type::max())*M_PI))/2.0));
-    if ( result == 0 && value != 0 )
-      result = 1;
-    return result;
-  }
-};
-
-// 90 degree Cosine transfer function ( high slope at beginning and low slope at end )
-template <class PixelT>
-class Cosine90TransFunc : public vw::UnaryReturnSameType {
-  typedef typename CompoundChannelType<PixelT>::type channel_type;
-  typedef ChannelRange<channel_type> range_type;
-public:
-  Cosine90TransFunc() {}
-
-  template <class ArgT>
-  inline typename boost::enable_if<typename boost::is_floating_point<ArgT>,ArgT>::type
-  operator()( ArgT const& value ) const {
-    return range_type::max()*(-cos(value/float(range_type::max())*(M_PI/2.0) + M_PI/2.0));
-  }
-
-  template <class ArgT>
-  inline typename boost::disable_if<typename boost::is_floating_point<ArgT>,ArgT>::type
-  operator()( ArgT const& value ) const {
-    ArgT result = ArgT(range_type::max()*(-cos(float(value)/float(range_type::max())*(M_PI/2.0) + M_PI/2.0)));
-    if ( result == 0 && value != 0 )
-      result = 1;
-    return result;
-  }
-};
 
 //=================================================================================
 
@@ -127,6 +68,7 @@ public:
   typedef typename ImageT::pixel_type pixel_type;
   typedef typename ImageT::pixel_type result_type;
   
+  typedef PixelGray<unsigned char> Uint8;
 
   // Constructor
   ImageAndView( std::vector<ImageT> & imageVec ) : m_image_vec(imageVec)
@@ -165,6 +107,17 @@ public:
     // Set up for pixel calculations
     size_t num_images = m_image_vec.size();
 
+    // Rasterize all the input images at this particular tile
+    std::vector<ImageView<Uint8> > input_tiles(num_images);
+    for (size_t i=0; i<num_images; ++i)
+    {
+      // Make sure we don't go outside the bounds of this image
+      BBox2i safe_bbox = bbox;
+      safe_bbox.crop(bounding_box(m_image_vec[i]));
+      input_tiles[i] = crop(m_image_vec[i], safe_bbox);
+    }
+
+
     // Loop through each output pixel and compute each output value
     for (int c = 0; c < bbox.width(); c++)
     {
@@ -176,7 +129,7 @@ public:
         outputPixel[0] = 255;
         for (size_t i=0; i<num_images; ++i) 
         {
-          thisPixel = m_image_vec[i](c,r);
+          thisPixel = input_tiles[i](c,r);
           if (thisPixel[0] <= 0) {
             outputPixel[0] = 0;
             break; // Skip looking at the other pixels at this location
@@ -201,41 +154,6 @@ public:
 }; // End class ImageAndView
 
 
-//======================================================================================================
-
-/*
-
-// Function for highlighting spots of data???
-template<class PixelT>
-class NotNoDataFunctor {
-  typedef typename CompoundChannelType<PixelT>::type channel_type;
-  channel_type m_nodata;
-  typedef ChannelRange<channel_type> range_type;
-public:
-  NotNoDataFunctor( channel_type nodata ) : m_nodata(nodata) {}
-
-  template <class Args> struct result {
-    typedef channel_type type;
-  };
-
-  inline channel_type operator()( channel_type const& val ) const {
-    if (val == m_nodata)
-      return range_type::min();
-    else // data
-      return range_type::max();
-  }
-};
-//???
-template <class ImageT, class NoDataT>
-UnaryPerPixelView<ImageT,UnaryCompoundFunctor<NotNoDataFunctor<typename ImageT::pixel_type>, typename ImageT::pixel_type>  >
-inline notnodata( ImageViewBase<ImageT> const& image, NoDataT nodata ) {
-  typedef UnaryCompoundFunctor<NotNoDataFunctor<typename ImageT::pixel_type>, typename ImageT::pixel_type> func_type;
-  func_type func( nodata );
-  return UnaryPerPixelView<ImageT,func_type>( image.impl(), func );
-}
-
-*/
-
 struct Options {
   Options() : nodata(-1), feather_min(0), feather_max(255), filter("linear") {}
   // Input
@@ -249,79 +167,6 @@ struct Options {
 };
 
 
-
-
-// Operation code for data that uses nodata
-template <class PixelT>
-void grassfire_nodata( Options& opt,
-                       cartography::GeoReference const& georef,
-                       ImageView<PixelT> const& input_image,
-                       std::string output_path ) 
-{
-/* DEBUG - No grassfire!
-  vw_out() << "Writing: " << output_path << std::endl;
-  cartography::write_georeferenced_image(output_path, 
-                                         input_image, 
-                                         georef,
-                                         TerminalProgressCallback("bigMaskMaker","Writing:"));
-  return;
-*/
-
-  typedef typename CompoundChannelType<PixelT>::type inter_type;
-  typedef          ChannelRange<inter_type>          range_type;
-
-  //ImageView<int32> distance = grassfire(notnodata(input_image, inter_type(opt.nodata)));
-  //ImageView<int32> distance = grassfire(input_image);
-
-  // Check to see if the user has specified a feather length.  If not,
-  // then we send the feather_max to the max pixel value (which
-  // results in a full grassfire blend all the way to the center of the image.)
-  //if (opt.feather_max < 1)
-  //  opt.feather_max = max_pixel_value(distance);
-  vw_out() << "\t--> Distance range: [ " << opt.feather_min << " " << opt.feather_max << " ]\n";
-
-/*
-  ImageViewRef<inter_type> norm_dist;
-  norm_dist = pixel_cast<inter_type>(range_type::max() / (opt.feather_max - opt.feather_min) *
-                                     clamp(pixel_cast<float>(distance) - opt.feather_min,
-                                           0.0, opt.feather_max - opt.feather_min));
-*/
-
-/*
-  ImageViewRef<typename PixelWithAlpha<PixelT>::type> result;
-  if        ( opt.filter == "linear"   ) { result = per_pixel_filter(norm_dist, LinearTransFunc              ());
-  } else if ( opt.filter == "cosine"   ) { result = per_pixel_filter(norm_dist, CosineTransFunc  <inter_type>());
-  } else if ( opt.filter == "cosine90" ) { result = per_pixel_filter(norm_dist, Cosine90TransFunc<inter_type>());
-  } else {
-    vw_throw( ArgumentErr() << "Unknown transfer function " << opt.filter );
-  }
-*/
-  vw_out() << "Writing: " << output_path << std::endl;
-  cartography::write_georeferenced_image(output_path, 
-                                         //per_pixel_filter(norm_dist, LinearTransFunc()), 
-                                         pixel_cast<PixelT>(clamp(grassfire(input_image), 0, 255)),
-                                         georef,
-                                         TerminalProgressCallback("bigMaskMaker","Writing:"));
-
-
-
-/*
-  GdalOptions gdal_options;
-
-  // Set up the output image writer
-  boost::scoped_ptr<DiskImageResourceGDAL> output_handle( build_gdal_rsrc( output_file,
-                                                                           difference, gdal_options ) );
-  //output_handle->set_nodata_write( opt.nodata_value );
-  write_georeference( *output_handle, output_georef );
-
-  // Do all the computations and write to file
-  block_write_image( *output_handle, 
-                      result,
-                     TerminalProgressCallback("=)", "\t--> Generating Mask ") );
-
-*/
-
-}
 
 
 
@@ -369,24 +214,6 @@ void handle_arguments( int argc, char *argv[], Options& opt ) {
   vw_settings().set_system_cache_size( cache_size*1024*1024 );
 
 }
-
-/*
-// The GDAL output image options format
-typedef vw::DiskImageResourceGDAL::Options GdalOptions;
-
-/// Helper function to set up a GDAL image for writing
-template <class ImageT>
-vw::DiskImageResourceGDAL*
-build_gdal_rsrc( const std::string &filename,
-                 vw::ImageViewBase<ImageT> const& image,
-                 GdalOptions const& gdal_options ) {
-  return new vw::DiskImageResourceGDAL(filename, image.impl().format(), opt.raster_tile_size, gdal_options);
-}
-*/
-
-
-
-
 
 int main( int argc, char *argv[] ) {
 
@@ -437,52 +264,18 @@ int main( int argc, char *argv[] ) {
 
   } // loop through input images
 
-  // Pass the input images to the working function
-  //ImageViewRef<PixelT> binary_image = ImageAndView(input_images);
-  //grassfire_nodata<PixelGray<uint8> >(opt, georef, binary_image, output);
 
-  // Convert the input images to a single binary mask and then pass to the grassfire function
-  // - This call also writes the data to disk
-  //ImageViewRef<PixelT> temp =  ImageAndView< ImageViewRef<PixelT> >(input_images);
-  //grassfire_nodata<PixelT >(opt, georef, temp, output);
-  grassfire_nodata<PixelT >(opt, georef, ImageAndView< ImageViewRef<PixelT> >(input_images), output);
-
-
-/*
-  switch (pixel_format) 
-  {
-    case VW_CHANNEL_UINT8:  grassfire_nodata<PixelGray<uint8  > >(opt, input_images, output); break;
-    case VW_CHANNEL_INT16:  grassfire_nodata<PixelGray<int16  > >(opt, input, output); break;
-    case VW_CHANNEL_UINT16: grassfire_nodata<PixelGray<uint16 > >(opt, input, output); break;
-    default:                grassfire_nodata<PixelGray<float32> >(opt, input, output); break;
-  }; // End switch
+  vw_out() << "Writing: " << output << std::endl;
+  /*
+  cartography::write_georeferenced_image(output, 
+                                         ImageAndView< ImageViewRef<PixelT> >(input_images),
+                                         georef,
+                                         TerminalProgressCallback("bigMaskMaker","Writing:"));
 */
-/*
-
-    GdalOptions gdal_options;
-
-    // Set up the output image writer
-    boost::scoped_ptr<DiskImageResourceGDAL> output_handle( build_gdal_rsrc( output_file,
-                                                                             difference, gdal_options ) );
-    //output_handle->set_nodata_write( opt.nodata_value );
-    write_georeference( *output_handle, output_georef );
-
-    // Do all the computations and write to file
-    block_write_image( *output_handle, 
-                        TODO_GIANT_IMAGE_EXPRESSION,
-                       TerminalProgressCallback("=)", "\t--> Generating Mask ") );
-
-
-
-*/
-
-
-
-
-
-
-
-
+  block_write_gdal_image(output, 
+                        ImageAndView< ImageViewRef<PixelT> >(input_images),
+                        georef,
+                        TerminalProgressCallback("bigMaskMaker","Writing:"));
 
 
 }

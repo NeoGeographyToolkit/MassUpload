@@ -17,6 +17,8 @@ import MosaicUtilities
 import hrscImageManager
 import hrscFileCacher
 
+import stackImagePyramid
+
 """
 
 Existing tools:
@@ -29,8 +31,6 @@ Existing tools:
 - transformHrscImageColor.cpp
     - Input  = HRSC, colorTransform
     - Output = Color transformed HRSC image
-    - TODO   = Add cleanup/pansharp
-
 
 
 Total Mars map width meters = 21338954.2
@@ -44,22 +44,43 @@ With 64x  increase, each tile is 2880x2880,  ~24MB,  760GB, mpp = ~29
 With 128x increase, each tile is 5760x5760,  ~95MB,    3TB, mpp = ~14.5 <-- Probably fine
 With 160x increase, each tile is 7200x7200, ~150MB,  4.6TB, mpp = ~11.6 <--- PLENTY of resolution!
 
-Each of those large sizes assumes all tiles used.  The number of tiles
-touched by each HRSC image will be much smaller, maybe 5%.
+Currently using 64x !!
+TODO: Go down to 128!
+
+
+If there are about 3600 HRSC images (more if we fetch updates from the last few months)
+  at a batch size of 20, that is 180 batches!  To finish in two months (60 days) this 
+  means 3 completed batches per day.
+
+Batch procedure:
+- Keep a count of how many images we have downloaded
+- Keep processing until we have downloaded COUNT images
+  - TODO: Run through the DB and add all images missing URL's to the bad image list.
+- For each HRSC image, update all the tiles it overlaps.
+- Before each tile is touched for the first time, make a backup of it!
+- After a batch finishes, make the kml pyramid and send out an email.
+- MANUAL INTERVENTION
+  - Look at the kml pyramid and make sure things are ok.
+  - Is there a way to highlight the modified tiles? 
+- When a batch is confirmed, clean up the data and remove the backed up tiles.
+- Start the next batch!
 
 """
 
 #----------------------------------------------------------------------------
 # Constants
 
-## TODO: Go down to 20 to 10 meters!
-#OUTPUT_RESOLUTION_METERS_PER_PIXEL = 100
-
-# 
+# TODO: If utilization is poor we can improve the parallel processing system!
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 8
 
-# --> Downloading the HRSC files seems to be the major bottleneck.
+
+IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+
+# TODO: Need to manage the processed HRSC folders, not just the download folders!
+#       - The batch management can take care of this
+
+
 
 # Set up the log path here.
 # - Log tiles are timestamped as is each line in the log file
@@ -75,7 +96,8 @@ BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 # Currently used to control the area we operate over
 #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
 
 #-----------------------------------------------------------------------------------------
 # Functions
@@ -257,6 +279,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             logger.info('\nMaking sure basemap info is present...')
             
             # Now that we have selected a tile, generate all of the tile images for it.
+            # - The first time this is called for a tile it generates the backup image for the tile.
             (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath) =  \
                         basemapInstance.generateTileImages(tileIndex, False)
         
@@ -323,6 +346,8 @@ sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
 outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_64'
 databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
+kmlPyramidFolder = '/byss/docroot/smcmich1/hrscMosaicKml'
+kmlPyramidWebAddress = 'http://byss.arc.nasa.gov/smcmich1/hrscMosaicKml/0.kml'
 
 print 'Starting basemap enhancement script...'
 
@@ -335,12 +360,8 @@ echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
 logger.addHandler(echo)
 
 
-# Initialize the multi-threading worker pools
-# - Seperate pools for downloads and processing
-#downloadPool = None
+# Initialize the multi-threading worker pool
 processPool  = None
-#if NUM_DOWNLOAD_THREADS > 1:
-#    downloadPool = multiprocessing.Pool(processes=NUM_DOWNLOAD_THREADS)
 if NUM_PROCESS_THREADS > 1:
     processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
 
@@ -356,7 +377,8 @@ tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, B
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempFileFinder = None # Delete this temporary object
 
-logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:')
+logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:\n'+
+            str(fullImageList))
 
 # DEBUG --> Test this image!
 #fullImageList = fullImageList[6:8]
@@ -370,8 +392,11 @@ for hrscSetName in fullImageList:
     else:
         hrscImageList.append(hrscSetName)
 
-#hrscImageList = ['h3276_0000']
-print 'image list = ' + str(hrscImageList)
+# Restrict the image list to the batch size
+# - It would be more accurate to only count valid images but this is good enough
+hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]   #['h3276_0000']
+batchName     = hrscImageList[0] # TODO: Assign the batches a number.
+print 'Image list for this batch: ' + str(hrscImageList)
 
 
 
@@ -453,14 +478,14 @@ for i in range(0,numHrscDataSets):
     
     logger.info('--- Finished initializing HRSC image ---\n')
 
+    #raise Exception('DEBUG')
+
     #continue # DEBUG - Just update the registration
 
     # Call the function to update all the output images for this HRSC image
     updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
     logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
-
-    # TODO: Clean up if necessary
 
     #raise Exception('DEBUG')
 
@@ -472,10 +497,31 @@ if processPool:
 
 downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()
-#if downloadPool:
-#    print 'Cleaning up the download thread pool...'
-#    downloadPool.close()
-#    downloadPool.join()
+
+
+# TODO: Batch cleanup stuff!
+
+# Generate a KML pyramid of the tiles for diagnostics
+stackImagePyramid.main(outputTileFolder, kmlPyramidFolder)
+
+# Send a message notifiying that the output needs to be reviewed!
+msgText = '''
+KML pyramid link:
+'''+kmlPyramidWebAddress+'''
+To undo the tile changes:
+cp -r '''+basemapInstance.getBackupFolder()+' '+outputTileFolder+''' 
+
+TODO: Also need to update the input log files in the output folder!
+
+To accept the tile changes:
+rm * '''+basemapInstance.getBackupFolder()+''''
+
+To start the next batch:
+source /byss/smcmich1/run_hrsc_basemap_script.sh
+'''
+MosaicUtilities.sendEmail('scott.t.mcmichael@nasa.gov', 
+                          'HRSC map batch '+batchName+' completed',
+                          msgText)
 
 logger.info('Basemap generation script completed!')
 

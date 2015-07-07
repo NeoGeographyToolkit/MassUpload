@@ -94,6 +94,12 @@ def countBlackPixels(imagePath, isGray=True):
     #otherCount = int(otherLine[:otherLine.find(':')])
     
 
+def sendEmail(address, subject, message):
+  '''Email someone!'''
+  cmd = 'echo "'+message+'" | mail -s '+subject+' '+address
+  print cmd
+  os.system(cmd)
+
 
 # TODO: Stuff up here should come from common files
 #=======================================================================================

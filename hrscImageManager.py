@@ -7,11 +7,13 @@ import json
 import numpy
 import multiprocessing
 import functools
+import math
 
 import IrgGeoFunctions
 
 import MosaicUtilities
 import mosaicTileManager
+import solveHrscColor
 
 
 # TODO: Move to a general file
@@ -32,72 +34,143 @@ def getTilePrefix(tileRow, tileCol):
     '''Return a standard string representation of a tile index'''
     return (str(tileRow)+'_'+str(tileCol))
 
-def splitImage(imagePath, outputFolder, tileSize=512, force=False):
-        '''Splits up an image into a grid of tiles and returns all the tile paths'''
-                
-        filename     = os.path.basename(imagePath)[:-4] # Strip extension
-        outputPrefix = os.path.join(outputFolder, filename + '_tile_')
 
-        # Skip tile creation if the first tile is present
-        # - May need to make the decision smarter later on
-        firstTilePath = outputPrefix + '0_0.tif'
-        if not os.path.exists(firstTilePath):
-        
-            # This tile size is in the warped image (HRSC) resolution
-            # TODO: Use gdal to do this so that the regions are preserved?
-            cmd = ('convert  -colors 256 -colorspace Gray %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
-                      % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
-            print cmd
-            os.system(cmd)
-        
-        # Build the list of output files
-        outputTileInfoList = []
-        for f in sorted(os.listdir(outputFolder)):
-            if ('_tile_' not in f) or ('json' in f) or (filename not in f): # Skip metadata files and any junk
-                continue
-            thisPath = os.path.join(outputFolder, f)
-            thisMetadataPath = thisPath + '_metadata.json' # Path to record the metadata to
-            
-            # If the metadata is saved, just reload it.
-            if os.path.exists(thisMetadataPath):
-                with open(thisMetadataPath, 'r') as f:
-                    thisTileInfo = json.load(f)
-                    
-            else: # Otherwise we have to recompute everything!
-            
-                # Figure out the position of the tile
-                numbers  =  re.findall(r"[\d']+", f) # Extract all numbers from the file name
-                tileRow  = int(numbers[-2]) # In the tile grid
-                tileCol  = int(numbers[-1])
-                pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
-                pixelCol = tileCol * tileSize
-                
-                # TODO: Cache this information!
-                # Get other tile information
-                width, height   = IrgGeoFunctions.getImageSize(thisPath)
-                totalNumPixels  = height*width
-                blackPixelCount = MosaicUtilities.countBlackPixels(thisPath)
-                validPercentage = 1.0 - (float(blackPixelCount) / float(totalNumPixels))
-                
-                thisTileInfo = {'path'        : thisPath,
-                                'tileRow'     : tileRow,
-                                'tileCol'     : tileCol,
-                                'pixelRow'    : pixelRow,
-                                'pixelCol'    : pixelCol,
-                                'heightPixels': height,
-                                'widthPixels' : width,
-                                'percentValid': validPercentage,
-                                'prefix'      : getTilePrefix(tileRow, tileCol)
-                               }
-            
-                # Cache the metadata to disk so we don't have to recompute
-                with open(thisMetadataPath, 'w') as f:
-                    json.dump(thisTileInfo, f)
-                
-            outputTileInfoList.append(thisTileInfo)
-        # End of loop through files   
+def generateTileInfoWrapper(funcParams):
+    '''Simple wrapper function to pack all the inputs into one object'''
+    (fullPath, fileName, tileSize, metadataPath, force) = funcParams
+    return generateTileInfo(fullPath, fileName, tileSize, metadataPath, force)
+
+def generateTileInfo(fullPath, fileName, tileSize, metadataPath, force=False):
+    '''Generates a metadata json file for an image tile'''
     
-        return outputTileInfoList 
+    # If the metadata is saved, just reload it.
+    if (os.path.exists(metadataPath) and not force):
+        with open(metadataPath, 'r') as f:
+            thisTileInfo = json.load(f)
+        return thisTileInfo
+    
+    # Figure out the position of the tile
+    numbers  =  re.findall(r"[\d']+", fileName) # Extract all numbers from the file name
+    tileRow  = int(numbers[-2]) # In the tile grid
+    tileCol  = int(numbers[-1])
+    pixelRow = tileRow * tileSize # In pixel coordinates relative to the original image
+    pixelCol = tileCol * tileSize
+    
+    # TODO: Counting the black pixels is a little slow, run this in parallel!
+    # Get other tile information
+    width, height   = IrgGeoFunctions.getImageSize(fullPath)
+    totalNumPixels  = height*width
+    blackPixelCount = MosaicUtilities.countBlackPixels(fullPath)
+    validPercentage = 1.0 - (float(blackPixelCount) / float(totalNumPixels))
+    
+    thisTileInfo = {'path'        : fullPath,
+                    'tileRow'     : tileRow,
+                    'tileCol'     : tileCol,
+                    'pixelRow'    : pixelRow,
+                    'pixelCol'    : pixelCol,
+                    'heightPixels': height,
+                    'widthPixels' : width,
+                    'percentValid': validPercentage,
+                    'prefix'      : getTilePrefix(tileRow, tileCol)
+                   }
+
+    # Cache the metadata to disk so we don't have to recompute
+    with open(metadataPath, 'w') as f:
+        json.dump(thisTileInfo, f)
+        
+    return thisTileInfo
+    
+
+def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None):
+    '''gdal_translate based replacement for the ImageMagick convert based image split.
+       This function assumes that all relevant folders have been created.'''
+
+    # Compute the bounding box for each tile
+    inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
+    numTilesX = math.ceil(inputImageSize[0] / tileSize)
+    numTilesY = math.ceil(inputImageSize[1] / tileSize)
+    print 'Using gdal_translate to generate ' + str(numTilesX*numTilesY) + ' tiles!'
+    
+    # Generate each of the tiles using GDAL
+    cmdList = []
+    for r in range(0,numTilesY):
+        for c in range(0,numTilesX):
+            
+            # Get the pixel ROI for this tile
+            # - TODO: Use the Tiling class!
+            minCol = c*tileSize
+            minRow = r*tileSize
+            width  = tileSize
+            height = tileSize
+            if (minCol + width ) > inputImageSize[0]: width  = inputImageSize[0] - minCol
+            if (minRow + height) > inputImageSize[1]: height = inputImageSize[1] - minRow
+            totalNumPixels  = height*width
+            
+            # Generate the tile (console output suppressed)
+            thisPixelRoi = ('%d %d %d %d' % (minCol, minRow, width, height))
+            thisTilePath = outputPrefix + str(r) +'_'+ str(c) + '.tif'
+            cmd = 'gdal_translate -q -srcwin ' + thisPixelRoi +' '+ imagePath +' '+ thisTilePath
+            if pool:
+                cmdList.append((cmd, thisTilePath, force))
+            else:
+                MosaicUtilities.cmdRunner(cmd, thisTilePath, force)
+
+    if pool:
+        # Pass all of these commands to a multiprocessing worker pool
+        print 'Launching multiple gdalwarp threads...'
+        pool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+            
+            
+            
+
+def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None):
+    '''Splits up an image into a grid of tiles and returns all the tile paths'''
+            
+    filename     = os.path.basename(imagePath)[:-4] # Strip extension
+    outputPrefix = os.path.join(outputFolder, filename + '_tile_')
+
+    # Skip tile creation if the first tile is present
+    # - May need to make the decision smarter later on
+    firstTilePath = outputPrefix + '0_0.tif'
+    if not os.path.exists(firstTilePath):
+    
+#            # This tile size is in the warped image (HRSC) resolution
+#            cmd = ('convert  -colors 256 -colorspace Gray %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
+#                  % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
+#            print cmd
+#            os.system(cmd)
+    
+        splitImageGdal(imagePath, outputPrefix, tileSize, force, pool)
+    
+    # Build the list of output files
+    outputTileInfoList = []
+    cmdList = []
+    for f in sorted(os.listdir(outputFolder)):
+        if ('_tile_' not in f) or ('json' in f) or (filename not in f): # Skip metadata files and any junk
+            continue
+        thisPath = os.path.join(outputFolder, f)
+        thisMetadataPath = thisPath + '_metadata.json' # Path to record the metadata to
+        
+        funcParams = (thisPath, f, tileSize, thisMetadataPath, force)
+        if pool:
+            cmdList.append(funcParams)
+        else: # Go ahead and run the command
+            thisTileInfo = generateTileInfoWrapper(funcParams)
+            outputTileInfoList.append(thisTileInfo)
+    # End of loop through files   
+
+    if pool:
+        # Pass all of these commands to a multiprocessing worker pool
+        print 'Launching multiple tile info generation threads...'
+        outputTileInfoList = pool.map(generateTileInfoWrapper, cmdList)
+
+
+    if len(outputTileInfoList) == 0:
+        raise Exception('splitImage: Failed to generate any image tiles!')
+
+    #raise Exception('DEBUG TILE INFO LOAD')
+
+    return outputTileInfoList 
 
 
 
@@ -113,6 +186,7 @@ HRSC_NIR   = 3
 HRSC_NADIR = 4
 CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
 
+# TODO: Raise to 2048
 HRSC_HIGH_RES_TILE_SIZE = 1024
 
 class HrscImage():
@@ -256,14 +330,13 @@ class HrscImage():
         cmd = './bigMaskMaker -o ' + self._highResBinaryMaskPath +' '+ self._highResPathString
         MosaicUtilities.cmdRunner(cmd, self._highResBinaryMaskPath, force)
 
-
         # Now call another script to generate a mask with blending information
         print 'Generating high resolution grassfire mask...'
         cmd = './bigMaskGrassfire -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)        
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath        
 
-        raise Exception('DEBUG MASK')        
+        #raise Exception('DEBUG MASK')        
 
         # Split the image up into tiles at the full output resolution       
         # - There is one list of tiles per HRSC channel
@@ -283,7 +356,8 @@ class HrscImage():
             channelOutputFolder = os.path.join(self._tileFolder, channelString)
             if not os.path.exists(channelOutputFolder):
                 os.mkdir(channelOutputFolder)
-            tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, HRSC_HIGH_RES_TILE_SIZE)
+            tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, HRSC_HIGH_RES_TILE_SIZE, force=force, pool=self._threadPool)
+            
             
         # Break up the high resolution mask into the same tile structure
         maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE)
@@ -351,32 +425,43 @@ class HrscImage():
         # Generate a "personalized" brightness file for each tile
         self._splitScaleBrightnessGains(self._brightnessGainsPath, self._tileDict, force)
 
-        # TODO: Multithread these at some point, this is pretty fast though.
         # Generate the color transform for each tile
-        # - HRSC colors are written with the brightness correction already applied
-        # - Color pairs are computed between the high resolution HRSC tile and the low resolution input basemap.
-        for tile in self._tileDict.itervalues():
-            
-            # Generate a set of color pairs
-            cmd = ('./writeHrscColorPairs ' + self._basemapColorPath +' '+ tile['allChannelsStringAndMask']
-                   +' '+ tile['spatialTransformToLowResBasePath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath'])
-            MosaicUtilities.cmdRunner(cmd, tile['colorPairPath'], force)        
-
-            # Now compute the actual transform
-            # TODO: Make this a function call!
-            cmd = ('python /byss/smcmich1/repo/MassUpload/solveHrscColor.py ' + tile['colorTransformPath']
-                                                                              +' '+ tile['colorPairPath'])
-            MosaicUtilities.cmdRunner(cmd, tile['colorTransformPath'], force)
+        print 'Generating color transforms...'
+        self._generateColorTransforms(force)
 
         # Now that we have all the color transforms, generate the new color image for each tile.
         # - This function utilizes the thread pool
         self._generateNewHrscColorTiles(self._tileDict, force)
         
-        #raise Exception('STOP TEST')
-        
         print 'Finished generating high resolution content for HRSC image.'
         
         
+    def _generateColorTransforms(self, force=False):
+        '''Generate the color transform for each tile'''
+        # - HRSC colors are written with the brightness correction already applied
+        # - Color pairs are computed between the high resolution HRSC tile and the low resolution input basemap.
+        # - This is done in two loops to enable use of the thread pool
+        
+        # Generate a set of color pairs
+        cmdList = []
+        for tile in self._tileDict.itervalues():
+            
+            cmd = ('./writeHrscColorPairs ' + self._basemapColorPath +' '+ tile['allChannelsStringAndMask']
+                   +' '+ tile['spatialTransformToLowResBasePath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath'])
+            if self._threadPool:
+                cmdList.append( (cmd, tile['colorPairPath'], force) )
+            else: # Just run the command
+                MosaicUtilities.cmdRunner(cmd, tile['colorPairPath'], force)        
+        if self._threadPool:
+            self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+
+        # Now compute the actual transforms
+        # - This is pretty fast so the thread pool is not as important
+        for tile in self._tileDict.itervalues():
+            
+            if (not os.path.exists(tile['colorTransformPath'])) or force:
+                solveHrscColor.solveTransform([tile['colorPairPath']], tile['colorTransformPath'])
+       
         
     def _getWarpToProjectionCmd(self, sourcePath, outputFolder, postfix, metersPerPixel):
         '''Get the command needed by _warpToProjection'''
@@ -385,6 +470,7 @@ class HrscImage():
         fileName   = sourcePath[sourcePath.rfind('/')+1:]
         warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
         cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
+                 + '-multi '#-co "BLOCKXSIZE=1024" -co "BLOCKYSIZE=1024"'
                  +' -t_srs "'+self._basemapInstance.getProj4String()+'" -tr '
                  + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
         return (cmd, warpedPath)

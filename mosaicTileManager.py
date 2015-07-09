@@ -4,6 +4,7 @@
 
 import os
 import sys
+import shutil
 import logging
 
 import copyGeoTiffInfo
@@ -191,8 +192,8 @@ class MarsBasemap:
         largeTilePath  = os.path.join(tileFolder, 'basemap_output_res.tif')
         
         outputTileName = 'output_tile_'+tileIndex.getPostfix()+'.tif'
-        outputTilePath = os.path.join(self._outputTileFolder, outputTilePath)
-        tileBackupPath = os.path.join(self._outputTileFolder, outputTilePath)
+        outputTilePath = os.path.join(self._outputTileFolder, outputTileName)
+        tileBackupPath = os.path.join(self._backupFolder,     outputTileName)
         tileLogPath    = os.path.join(self._outputTileFolder, 'output_tile_'+tileIndex.getPostfix()+'_log.txt')
 
         # If this output tile has not already been backed up, make a backup copy now.
@@ -201,7 +202,7 @@ class MarsBasemap:
         self._logger.info('Backing up tile ' + outputTilePath)
         backupPath = os.path.join(self._backupFolder, outputTileName)
         if not os.path.exists(backupPath) and os.path.exists(outputTilePath):
-          shutil.cpy(outputTilePath, backupPath)
+          shutil.copy(outputTilePath, backupPath)
 
         degreeRoi = self.getTileRectDegree(tileIndex)
         self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(degreeRoi))

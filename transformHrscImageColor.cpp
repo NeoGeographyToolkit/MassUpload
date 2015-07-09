@@ -55,13 +55,13 @@ bool loadInputData(int argc, char** argv,
     return false;
   
   // Load the main spatial transform
-  std::cout << "Reading transform from: " << mainTransformPath << std::endl;
+  //std::cout << "Reading transform from: " << mainTransformPath << std::endl;
   if (!readTransform(mainTransformPath, mainTransform))
     return false;
 
   // Compute the number of neighboring tiles
   const int numOtherTiles = (argc - 11) / 4;
-  printf("Loading information for %d neighboring tiles.\n", numOtherTiles);
+  //printf("Loading information for %d neighboring tiles.\n", numOtherTiles);
     
   // Load all the information for neighboring tiles
   otherTransforms.resize(numOtherTiles);
@@ -70,7 +70,7 @@ bool loadInputData(int argc, char** argv,
   for (int i=0; i<numOtherTiles; ++i)
   {
     int baseIndex = 11+4*i;
-    std::cout << "Reading transform from: " << argv[baseIndex] << std::endl;
+    //std::cout << "Reading transform from: " << argv[baseIndex] << std::endl;
     if (!readTransform(argv[baseIndex], otherTransforms[i]))
       return false;
     otherWeights[i]    = atof(argv[baseIndex+1]);

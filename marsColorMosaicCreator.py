@@ -276,7 +276,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
             logger.info('--> Tile bounds = ' + str(tileBounds))
 
-            logger.info('\nMaking sure basemap info is present...')
+            #logger.info('\nMaking sure basemap info is present...')
             
             # Now that we have selected a tile, generate all of the tile images for it.
             # - The first time this is called for a tile it generates the backup image for the tile.
@@ -384,21 +384,21 @@ logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the reque
 #fullImageList = fullImageList[6:8]
 #print fullImageList
 
-# Prune out all the HRSC images that we have already added to the mosaic.
-hrscImageList = []
-for hrscSetName in fullImageList:
-    if False:#basemapInstance.checkLog(mainLogPath, hrscSetName):
-        logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
-    else:
-        hrscImageList.append(hrscSetName)
+## Prune out all the HRSC images that we have already added to the mosaic.
+#hrscImageList = []
+#for hrscSetName in fullImageList:
+#    if False:#basemapInstance.checkLog(mainLogPath, hrscSetName):
+#        logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
+#    else:
+#        hrscImageList.append(hrscSetName)
+
+hrscImageList = fullImageList
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
 hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]   #['h3276_0000']
 batchName     = hrscImageList[0] # TODO: Assign the batches a number.
 print 'Image list for this batch: ' + str(hrscImageList)
-
-
 
 ## Set up the HRSC file manager object
 logger.info('Starting communication queues')
@@ -489,11 +489,11 @@ for i in range(0,numHrscDataSets):
 
     #raise Exception('DEBUG')
 
-
+PROCESS_POOL_KILL_TIMEOUT = 180 # The pool should not be doing any work at this point!
 if processPool:
     logger.info('Cleaning up the processing thread pool...')
     processPool.close()
-    processPool.join()
+    processPool.join(PROCESS_POOL_KILL_TIMEOUT)
 
 downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()

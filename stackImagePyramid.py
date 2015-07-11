@@ -30,16 +30,22 @@ import MosaicUtilities
     
 # Convention: Level 0 is the base level where the tiles start.
     
-def makeTileName(tileIndex, isImage=True):
+def makeTileName(tileIndex, isImage=True, isTif=False):
     '''Method of generating the tile name'''
     if isImage:
-        return ("tile_%04d_%04d.tif" % (tileIndex.row, tileIndex.col))
+        if isTif:
+            return ("tile_%04d_%04d.tif" % (tileIndex.row, tileIndex.col))
+        else:
+            return ("tile_%04d_%04d.png" % (tileIndex.row, tileIndex.col))
     else:
         return ("tile_%04d_%04d.kml" % (tileIndex.row, tileIndex.col))
     
-def getLevelFolder(outputFolder, level):
+def getLevelFolder(outputFolder, level, isRelative=False):
     '''Get the folder where a level is stored'''
-    return os.path.join(outputFolder, str(level))
+    if isRelative:
+        return '../' + str(level)
+    else:
+        return os.path.join(outputFolder, str(level))
 
 
 class KmlTreeMaker:
@@ -62,7 +68,7 @@ class KmlTreeMaker:
         
         # The ImageMagick mosaic function we use requires a black image on
         #  disk to fill in for missing tiles so we make one here.
-        self._fillerTilePath = os.path.join(outputFolder, 'filler.tif')
+        self._fillerTilePath = os.path.join(outputFolder, 'filler.png')
         cmd = 'convert -size 512x512 xc:black ' + self._fillerTilePath
         MosaicUtilities.cmdRunner(cmd, self._fillerTilePath)
         
@@ -83,7 +89,7 @@ class KmlTreeMaker:
         print ' - Found ' + str(numTiles) + ' tiles.'
 
         # TODO: Run this in parallel!
-        force = False
+        force = True
         numTilesCreated = 0
         for tileIndex in tileBounds.indexGenerator():
             try:
@@ -125,9 +131,9 @@ class KmlTreeMaker:
         print self._layerTilings[level]
     
     
-    def getTilePath(self, level, tileIndex, isImage=True):
+    def getTilePath(self, level, tileIndex, isImage=True, isRelative=False):
         '''Returns the full path to a tile'''
-        folder   = getLevelFolder(self.outputFolder, level)
+        folder   = getLevelFolder(self.outputFolder, level, isRelative)
         filename = makeTileName(tileIndex, isImage)
         return os.path.join(folder, filename)
     
@@ -168,18 +174,20 @@ class KmlTreeMaker:
 
         #print 'Making tile L:' + str(level) +' '+ str(tileIndex)
 
-        outputTilePath = self.getTilePath(level, tileIndex, True)
+        outputTilePath = self.getTilePath(level, tileIndex, isImage=True, isRelative=False)
 
-        # On level zero we don't have to make the image
+        # On level zero we don't have to assemble the image
+        # - TODO: Do we need to expand the tile downwards so we don't lose all the high resolution content?
         if level == 0:
             # Resize the existing tile
             
-            sourceFile = 'output_' + makeTileName(tileIndex)
+            sourceFile = 'output_' + makeTileName(tileIndex, isImage=True, isTif=True)
             sourcePath = os.path.join(self.sourceFolder, sourceFile)
             if not os.path.exists(sourcePath): 
                 return False # Quit here if the input file does not exist
-            cmd = ('gdal_translate '+ sourcePath +' '+ outputTilePath +
+            cmd = ('gdal_translate -of png '+ sourcePath +' '+ outputTilePath +
                          ' -outsize '+ str(self._tileSize) +' '+ str(self._tileSize))
+            print cmd
         else:
             # Need to assemble the tile from sources
             # TODO: Verify that all the source images exist!
@@ -189,13 +197,13 @@ class KmlTreeMaker:
             print inputTileTiffString
             if not inputTileTiffString:
                 return False # None of the four input files exist
-            cmd = ('montage -resize 50% -background black -mode Concatenate -tile 2x2 ' +
+            cmd = ('montage -quiet -resize 50% -background black -mode Concatenate -tile 2x2 ' +
                    inputTileTiffString +' '+ outputTilePath)
             
         MosaicUtilities.cmdRunner(cmd, outputTilePath, force)
 
         # Create the KML file
-        return self.makeKmlFile(level, tileIndex)
+        return self.makeKmlFile(level, tileIndex, force)
         
     def _getLatLonAltBox(self, level, tileIndex):
         '''Gets the ROI for one tile'''
@@ -211,19 +219,20 @@ class KmlTreeMaker:
         return simplekml.Region(latlonaltbox=self._getLatLonAltBox(level, tileIndex),
                                 lod=simplekml.Lod(minlodpixels=128, maxlodpixels=maxLod)) # TODO: Set this?
         
-    def makeKmlFile(self, level, tileIndex):
+    def makeKmlFile(self, level, tileIndex, force=False):
         '''Creates the KML file for a given image tile.
            Returns True if the file exists upon exit.'''
         
         KML = False # Helper names for getTilePath
-        TIF = True
+        PNG = True
 
         # Paths for the kml and associated tif file
         tileKmlPath   = self.getTilePath(level, tileIndex, KML)
-        tileImagePath = self.getTilePath(level, tileIndex, TIF)
+        tileImagePath = self.getTilePath(level, tileIndex, PNG)
+        imageFileName = os.path.basename(tileImagePath)
            
         # There should be no need to recreate the KML files!
-        if os.path.exists(tileKmlPath):
+        if os.path.exists(tileKmlPath) and not force:
             return True
         
         kml = simplekml.Kml()
@@ -235,16 +244,17 @@ class KmlTreeMaker:
             levelDown = level - 1
             indexList = self._getInputTiles(tileIndex)
             for index in indexList:
-                sourceTilePath = self.getTilePath(levelDown, index, KML)
+                sourceTilePath    = self.getTilePath(levelDown, index, KML, isRelative=False)
+                sourceTilePathRel = self.getTilePath(levelDown, index, KML, isRelative=True)
                 if not os.path.exists(sourceTilePath):
                     continue # Don't link to non-existant tiles
                 netLink = kml.document.newnetworklink(name=index.getPostfix(),
                                              region=self._makeKmlRegion(levelDown, index))
-                netLink.link.href = sourceTilePath
+                netLink.link.href = sourceTilePathRel
                 netLink.link.viewrefreshmode = simplekml.ViewRefreshMode.onrequest
         
         # Ground overlay
-        kml.document.groundoverlay = kml.newgroundoverlay(icon=simplekml.Icon(href=tileImagePath),
+        kml.document.groundoverlay = kml.newgroundoverlay(icon=simplekml.Icon(href=imageFileName),
                                                           latlonbox=self._getLatLonAltBox(level, tileIndex))
 
         # Save the completed file
@@ -296,6 +306,8 @@ def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
         numTilesCreated = treeMaker.makeLevel(level)
         if numTilesCreated <= 1:
             break
+            
+    # TODO: Make a top level kml file!
 
     return 0
 

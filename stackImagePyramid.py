@@ -91,20 +91,21 @@ class KmlTreeMaker:
         # TODO: Run this in parallel!
         force = True
         numTilesCreated = 0
+        tileList = []
         for tileIndex in tileBounds.indexGenerator():
             try:
-                gotTile = self.makeTile(level, tileIndex, force)
+                tilePath = self.makeTile(level, tileIndex, force)
             except Exception, e:
                 gotTile = False
                 print 'Caught exception processing tile ' + str(tileIndex)
                 print str(e)
                 traceback.print_exc(file=sys.stdout)
                 
-            if gotTile:
-                numTilesCreated += 1
+            tileList.append(tilePath)
             #    raise Exception('DEBUG')
+        numTilesCreated = len(tileList)
         print 'Created ' + str(numTilesCreated) + ' tiles'
-        return numTilesCreated
+        return tileList
 
     def _hasTileLayer(self, level):
         return len(self._layerTilings) > level
@@ -128,7 +129,7 @@ class KmlTreeMaker:
         tileWidth   = self._bounds.width()  / numTileCols
         tileHeight  = self._bounds.height() / numTileRows
         self._layerTilings.append(MosaicUtilities.Tiling(self._bounds, tileWidth, tileHeight, True))
-        print self._layerTilings[level]
+        #print self._layerTilings[level]
     
     
     def getTilePath(self, level, tileIndex, isImage=True, isRelative=False):
@@ -194,7 +195,7 @@ class KmlTreeMaker:
         
             # Create the image file
             inputTileTiffString = self._getInputTileString(level, tileIndex)
-            print inputTileTiffString
+            #print inputTileTiffString
             if not inputTileTiffString:
                 return False # None of the four input files exist
             cmd = ('montage -quiet -resize 50% -background black -mode Concatenate -tile 2x2 ' +
@@ -259,7 +260,9 @@ class KmlTreeMaker:
 
         # Save the completed file
         kml.save(tileKmlPath)
-        return os.path.exists(tileKmlPath)
+        if not os.path.exists(tileKmlPath):
+            raise Exception('Failed to create file ' + tileKmlPath)
+        return tileKmlPath
 
 
 def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
@@ -303,13 +306,13 @@ def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
     treeMaker = KmlTreeMaker(sourceFolder, outputFolder)
 
     for level in range(0, maxNumLevels):
-        numTilesCreated = treeMaker.makeLevel(level)
-        if numTilesCreated <= 1:
+        tileList = treeMaker.makeLevel(level)
+        if len(tileList) <= 1:
             break
             
     # TODO: Make a top level kml file!
 
-    return 0
+    return tileList[0]
 
 
 

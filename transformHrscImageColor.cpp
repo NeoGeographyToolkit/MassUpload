@@ -226,7 +226,8 @@ double distWeightingFunction(const double distance)
   const double MIN_WEIGHT = 0.0;
   
   // Using the max tile size makes this reach just to the center of diagonal tiles
-  const double MAX_TILE_SIZE = 1440;
+  // TODO: This needs to correspond with the HRSC tile size!
+  const double MAX_TILE_SIZE = 5916; // Tile size 4096 //  1440;
   const double MAX_DIST = (MAX_TILE_SIZE);//*sqrt(2.0);
     
   // Simple linear drop

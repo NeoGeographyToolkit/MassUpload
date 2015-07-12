@@ -186,8 +186,7 @@ HRSC_NIR   = 3
 HRSC_NADIR = 4
 CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
 
-# TODO: Raise to 2048
-HRSC_HIGH_RES_TILE_SIZE = 1024
+HRSC_HIGH_RES_TILE_SIZE = 4096
 
 class HrscImage():
     '''
@@ -247,6 +246,7 @@ class HrscImage():
 
         print 'Generating low res image copies...'
         
+        # TODO: Multi-thread this!
         # Generate a copy of each input HRSC channel at the low basemap resolution
         self._lowResWarpedPaths = [self._warpToProjection(path, outputFolder, '_basemap_res',
                                                           basemapInstance.getLowResMpp(), force)

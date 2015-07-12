@@ -69,9 +69,9 @@ def countBlackPixels(imagePath, isGray=True):
     
     # Call imageMagick to print out the results
     if isGray:
-        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'gray(0)', '-format', '%c', 'histogram:info:']
+        cmd = ['convert', '-quiet', imagePath, '-fill', 'white', '+opaque', 'gray(0)', '-format', '%c', 'histogram:info:']
     else: # RGB
-        cmd = ['convert', imagePath, '-fill', 'white', '+opaque', 'rgb(0,0,0)', '-format', '%c', 'histogram:info:']
+        cmd = ['convert', '-quiet', imagePath, '-fill', 'white', '+opaque', 'rgb(0,0,0)', '-format', '%c', 'histogram:info:']
     #print cmd
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     text, err = p.communicate()

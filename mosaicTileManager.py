@@ -69,8 +69,12 @@ class MarsBasemap:
             os.mkdir(outputTileFolder)
             
         # Create the main log file
-        cmd = 'touch ' + self.getMainLogPath()
+        mainLogPath = self.getMainLogPath()
+        cmd = 'touch ' + mainLogPath
         os.system(cmd)
+        
+        # Create output backups if they do not already exist
+        self._backupTiles()
 
     def getMainLogPath(self):
         return os.path.join(self._outputTileFolder, 'main_log.txt')
@@ -177,6 +181,30 @@ class MarsBasemap:
         '''Returns a bounding box containing all the tiles which intersect the input rectangle'''
         return self._highResImage.getIntersectingTiles(rectDegrees)
     
+    
+    def _backupTiles(self):
+        '''Back up all tiles to the backup folder if they are not already backup up.
+           In this way, each file only gets backed up when the previous backup is manually cleared.'''
+
+        self._logger.info('Backing up tiles to folder ' + self._backupFolder)
+        
+        # Get list of files in the output folder
+        fileList = os.listdir(self._outputTileFolder)
+        
+        numFilesBackedUp = 0
+        for f in fileList:
+            if ('.tif' not in f) and ('.txt' not in f):
+                continue # Skip all other file types
+        
+            # If the file does not exist in the backup folder, copy it there now.
+            inputPath  = os.path.join(self._outputTileFolder, f)
+            backupPath = os.path.join(self._backupFolder,     f)
+            if not os.path.exists(backupPath):
+                shutil.copy(inputPath, backupPath)
+                numFilesBackedUp += 1
+                
+        self._logger.info('Copied ' + str(numFilesBackedUp) + ' files to the backup folder')
+
     
     def generateTileImages(self, tileIndex, force=False):
         '''Generate all the basemap sourced images for a tile and return paths.

@@ -10,6 +10,8 @@ import threading
 import logging
 import datetime
 
+import traceback
+
 import IrgGeoFunctions
 #import copyGeoTiffInfo
 import mosaicTileManager # TODO: Normalize caps!
@@ -115,6 +117,14 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
 
     logger = logging.getLogger('DownloadThread')
 
+    # Echo logging to stdout
+    echo = logging.StreamHandler(sys.stdout)
+    echo.setLevel(logging.DEBUG)
+    echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+    logger.addHandler(echo)
+
+
+
     # Initialize a process pool to be managed by this thread
     downloadPool = None
     if NUM_DOWNLOAD_THREADS > 1:
@@ -157,6 +167,8 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
                 # When we fail to fetch a data set, send out a failure message and keep going.
                 logger.error('Caught exception fetching data set ' + dataSet + '\n' + 
                              str(e) + '\n' + str(sys.exc_info()[0]) + '\n')
+                logger.error(sys.exc_info()[0])
+                print(traceback.format_exc())
                 hrscInfoDict = {'setName': dataSet, 'error': True}
                 outputQueue.put(hrscInfoDict)
                 continue    
@@ -394,6 +406,8 @@ for hrscSetName in fullImageList:
         hrscImageList.append(hrscSetName)
 #hrscImageList = fullImageList # DEBUG
 
+# TODO: Filter out images which don't have all the data sets available
+
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
 hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]   #['h3276_0000']
@@ -422,6 +436,7 @@ downloadCommandQueue.put('FETCH ' + hrscImageList[0])
 
 # Loop through input HRSC images
 numHrscDataSets = len(hrscImageList) 
+numHrscDataSetsProcessed = 0
 for i in range(0,numHrscDataSets): 
     
     # Get the name of this and the next data set
@@ -486,6 +501,7 @@ for i in range(0,numHrscDataSets):
     updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
     logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
+    numHrscDataSetsProcessed += 1
 
     #raise Exception('DEBUG')
 
@@ -499,26 +515,29 @@ downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()
 
 
-# TODO: Batch cleanup stuff!
+if numHrscDataSetsProcessed > 0:
+    # Generate a KML pyramid of the tiles for diagnostics
+    kmlPyramidWebAddress = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder)
 
-# Generate a KML pyramid of the tiles for diagnostics
-kmlPyramidWebAddress = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder)
+    # Send a message notifiying that the output needs to be reviewed!
+    msgText = '''
+    KML pyramid link:
+    '''+kmlPyramidWebAddress+'''
+    To undo the tile changes:
+    cp -r '''+basemapInstance.getBackupFolder()+' '+outputTileFolder+''' 
 
-# Send a message notifiying that the output needs to be reviewed!
-msgText = '''
-KML pyramid link:
-'''+kmlPyramidWebAddress+'''
-To undo the tile changes:
-cp -r '''+basemapInstance.getBackupFolder()+' '+outputTileFolder+''' 
+    TODO: Also need to update the input log files in the output folder!
 
-TODO: Also need to update the input log files in the output folder!
+    To accept the tile changes:
+    rm  '''+basemapInstance.getBackupFolder()+'''/*
 
-To accept the tile changes:
-rm * '''+basemapInstance.getBackupFolder()+''''
-
-To start the next batch:
-source /byss/smcmich1/run_hrsc_basemap_script.sh
-'''
+    To start the next batch:
+    source /byss/smcmich1/run_hrsc_basemap_script.sh
+    '''
+else:
+    msgText = '''ERROR: No HRSC images in the batch could be processed!'''
+    
+    
 MosaicUtilities.sendEmail('scott.t.mcmichael@nasa.gov', 
                           'HRSC map batch '+batchName+' completed',
                           msgText)

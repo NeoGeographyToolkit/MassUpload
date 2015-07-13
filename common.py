@@ -94,6 +94,8 @@ class TableRecord:
         return self.data[12]
     def maxLat(self):
         return self.data[13]
+    def resolution(self):
+        return self.data[14]
 
     def bbString(self):
         s = (str(self.minLon()) + ', ' + str(self.maxLon()) + ', ' + 

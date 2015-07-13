@@ -143,6 +143,7 @@ class HrscFileCacher():
             query += (' AND minLat<%d AND maxLat>%d AND minLon<%d AND maxLon>%d' %
                       (lonlatRect.maxY, lonlatRect.minY, lonlatRect.maxX, lonlatRect.minX))
         query += ' AND (maxLon - minLon) < 100.0' # FOR NOW: Skip wraparound images.  Later we need to fix!
+        query += ' ORDER BY resolution DESC' # List them from lowest resolution to highest resolution
         #query += ' LIMIT 5'  # DEBUG!!!
         cursor.execute(query)
         rows = cursor.fetchall()
@@ -200,6 +201,7 @@ class HrscFileCacher():
     
     def _getStorageFolder(self, setName):
         '''Get the location where this data set will be stored'''
+        print setName
         return os.path.join(self._outputFolder, setName)
 
     def _deleteDataSet(self, folder):
@@ -212,6 +214,8 @@ class HrscFileCacher():
         
         if len(self._cachedDataSets) < MAX_STORED_DATA_SETS:
             return # We still have room, don't delete anything.
+        
+        print self._cachedDataSets
         
         # Clear out any incomplete data sets
         for setFolder in self._incompleteDataSets:
@@ -230,7 +234,10 @@ class HrscFileCacher():
                 oldestIndex = i
         # Remove the data set from the internal record
         oldestPair = self._cachedDataSets.pop(i)
-        oldestSet  = oldestPair[1]
+        oldestSet  = oldestPair[0]
+        
+        print 'oldest...'
+        print oldestPair
         
         # Delete it
         setFolder = self._getStorageFolder(oldestSet)
@@ -261,6 +268,9 @@ class HrscFileCacher():
         '''Retrieves the HRSC files needed to build the HRSC basemap'''
     
         setName = hrscDataDict['setName']
+        
+        print hrscDataDict
+        print setName
     
         if setName not in self._cachedDataSets: # If we don't currently have the data available
 

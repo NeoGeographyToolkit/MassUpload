@@ -28,6 +28,9 @@ import mapsEngineUpload, IrgStringFunctions, IrgGeoFunctions
 
 import common
 
+import sqlite3
+#from pysqlite2 import dbapi2 as sqlite3
+
 
 #--------------------------------------------------------------------------------
 
@@ -177,5 +180,90 @@ def generatePdsPath(filePrefix):
 
     #print filePrefix + fileType + ' -> ' + fullUrl
     return fullUrl
+
+
+def fetchNadirResolution(setName):
+    '''Fetches additional data set information from the web'''
+
+    webUrl = 'http://hrscview.fu-berlin.de/cgi-bin/ion-p?page=product.ion&image=' + str(setName)
+    #print webUrl
+    parsedPage = BeautifulSoup(urllib2.urlopen((webUrl)).read())    
+
+    #print parsedPage
+    #print '================================='
+    
+    for td in parsedPage.findAll('td'):
+        if 'Nadir' in td.text:
+            text = td.nextSibling.text
+            resText = text[0 : text.find('&') ]
+            return float(resText)
+
+    raise Exception('Unable to find resolution at URL ' + webUrl)
+            
+    
+
+
+def updateDataSetInfo():
+    '''Updates selected information in the current database'''
+
+    dbPath = '/byss/smcmich1/data/google/googlePlanetary.db'
+    db = sqlite3.connect(dbPath, isolation_level=None)
+    print 'Connected to database'
+
+    hrscSetList = []
+    cursor = db.cursor()
+
+    # Only need to retrieve the nadir files here
+    query = ('SELECT * FROM Files WHERE sensor=%d AND subtype="nd3" AND status=%d AND resolution IS NULL' %
+                  (common.SENSOR_TYPE_HRSC, common.STATUS_CONFIRMED))
+    query += ' AND (maxLon - minLon) < 100.0' # FOR NOW: Skip wraparound images.  Later we need to fix!
+    #query += ' LIMIT 100'  # DEBUG!!!
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    
+    if rows == []: # Make sure we found the next lines
+        raise Exception('Could not find any HRSC files!')
+
+    #
+    numUpdated = 0
+    for line in rows:
+        fileInfo = common.TableRecord(line) # Wrap the data line
+        
+        # Get the current resolution and move along if it is already set
+        resolution = fileInfo.resolution()
+        if resolution:
+            continue
+
+        setName = fileInfo.setName()[1:-4] # Strip off the 'h' and the '_nd3' from set name
+        print setName#line
+
+        try:
+        
+            # Update the DB value for this data set
+            resolution = fetchNadirResolution(setName)
+
+            query = ('UPDATE Files SET resolution=%f WHERE idx=%d' %
+                          (resolution, fileInfo.tableId()))
+            print query
+            cursor.execute(query)
+        except:
+            print 'ERROR: Exception on data set ' + setName
+        
+        numUpdated += 1
+        
+    print 'Updated ' + str(numUpdated) + ' entries!'
+    db.close()
+
+
+if __name__ == "__main__":
+    sys.exit(updateDataSetInfo())
+
+
+
+
+
+
+
+
 
 

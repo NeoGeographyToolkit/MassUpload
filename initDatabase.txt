@@ -14,7 +14,8 @@ CREATE TABLE Files(
   minLon     FLOAT,
   maxLon     FLOAT,
   minLat     FLOAT,
-  maxLat     FLOAT
+  maxLat     FLOAT,
+  resolution FLOAT
 );
 
 

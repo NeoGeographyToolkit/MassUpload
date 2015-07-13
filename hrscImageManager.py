@@ -81,7 +81,7 @@ def generateTileInfo(fullPath, fileName, tileSize, metadataPath, force=False):
     return thisTileInfo
     
 
-def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None):
+def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, maskList=[]):
     '''gdal_translate based replacement for the ImageMagick convert based image split.
        This function assumes that all relevant folders have been created.'''
 
@@ -95,6 +95,13 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None):
     cmdList = []
     for r in range(0,numTilesY):
         for c in range(0,numTilesX):
+            
+            if maskList: # Make sure this tile is not completely masked out
+                # Find the info for the corresponding mask tile
+                tilePrefix   = getTilePrefix(r, c)
+                maskTileInfo = [x for x in maskList if x['prefix'] == tilePrefix][0]
+                if maskTileInfo['percentValid'] < MIN_TILE_PERCENT_PIXELS_VALID:
+                    continue
             
             # Get the pixel ROI for this tile
             # - TODO: Use the Tiling class!
@@ -123,7 +130,7 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None):
             
             
 
-def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None):
+def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, maskList=[]):
     '''Splits up an image into a grid of tiles and returns all the tile paths'''
             
     filename     = os.path.basename(imagePath)[:-4] # Strip extension
@@ -140,7 +147,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None):
 #            print cmd
 #            os.system(cmd)
     
-        splitImageGdal(imagePath, outputPrefix, tileSize, force, pool)
+        splitImageGdal(imagePath, outputPrefix, tileSize, force, pool, maskList)
     
     # Build the list of output files
     outputTileInfoList = []
@@ -187,6 +194,8 @@ HRSC_NADIR = 4
 CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
 
 HRSC_HIGH_RES_TILE_SIZE = 4096
+
+MIN_TILE_PERCENT_PIXELS_VALID = 0.0001 # Useful to have the tiles even with extremely few pixels!
 
 class HrscImage():
     '''
@@ -343,9 +352,13 @@ class HrscImage():
         # - Each channel gets its own subfolder
         # - Due to ImageMagick's implementation this step is already multithreaded!
         print 'Splitting warped images into tiles...'
-        self._tileFolder = os.path.join(os.path.dirname(self._hrscBasePathOut), 'tiles') # TODO: Do we need no divide up the folders more?
+        self._tileFolder = os.path.join(os.path.dirname(self._hrscBasePathOut), 'tiles') 
         if not os.path.exists(self._tileFolder):
                 os.mkdir(self._tileFolder)
+                
+        # Break up the mask image into tiles first
+        maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE)
+                
         tileInfoLists = [[], [], [], [], []] # One list per channel
         for c in range(NUM_HRSC_CHANNELS):
             # Get the info for this channel
@@ -356,11 +369,8 @@ class HrscImage():
             channelOutputFolder = os.path.join(self._tileFolder, channelString)
             if not os.path.exists(channelOutputFolder):
                 os.mkdir(channelOutputFolder)
-            tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, HRSC_HIGH_RES_TILE_SIZE, force=force, pool=self._threadPool)
-            
-            
-        # Break up the high resolution mask into the same tile structure
-        maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE)
+            tileInfoLists[c] = splitImage(warpedPath, channelOutputFolder, HRSC_HIGH_RES_TILE_SIZE, force=force, pool=self._threadPool, maskList=maskTileList)
+
 
         # Verify that each channel generated the same number of tiles
         numTiles = len(tileInfoLists[0])
@@ -372,7 +382,6 @@ class HrscImage():
 
         # Loop through each of the tiles we created and consolidate information across channels
         print 'Consolidating tile information...'
-        MIN_TILE_PERCENT_PIXELS_VALID = 0.0001 # Useful to have the tiles even with extremely few pixels!
         self._tileDict = {}
         for i in range(numTiles):
     

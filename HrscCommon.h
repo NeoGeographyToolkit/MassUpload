@@ -16,8 +16,6 @@
 const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
-
-
 /*
 /// Extension of OpenCV's Rect class to add additional functions
 template <typename T>
@@ -444,6 +442,43 @@ bool replaceValue(const cv::Mat &baseImageRgb, const cv::Mat &spatialTransform, 
 }
 
 
+/// Converts a single RGB pixel to YCbCr
+cv::Vec3b rgb2ycbcr(cv::Vec3b rgb)
+{
+  // Convert
+  double temp[3];
+  temp[0] =         0.299   *rgb[0] + 0.587   *rgb[1] + 0.114   *rgb[2];
+  temp[1] = 128.0 - 0.168736*rgb[0] - 0.331264*rgb[1] + 0.5     *rgb[2];
+  temp[2] = 128.0 + 0.5     *rgb[0] - 0.418688*rgb[1] - 0.081312*rgb[2];
+  // Copy and constrain
+  cv::Vec3b ycbcr;
+  for (int i=0; i<3; ++i)
+  {
+    ycbcr[i] = temp[i];
+    if (temp[i] < 0.0  ) ycbcr[i] = 0;
+    if (temp[i] > 255.0) ycbcr[i] = 255;
+  }
+  return ycbcr;
+}
+    
+/// Converts a single YCbCr pixel to RGB
+cv::Vec3b ycbcr2rgb(cv::Vec3b ycbcr)
+{
+  double temp[3];
+  temp[0] = ycbcr[0]                                + 1.402   * (ycbcr[2] - 128.0);
+  temp[1] = ycbcr[0] - 0.34414 * (ycbcr[1] - 128.0) - 0.71414 * (ycbcr[2] - 128.0);
+  temp[2] = ycbcr[0] + 1.772   * (ycbcr[1] - 128.0);
+  
+  // Copy and constrain
+  cv::Vec3b rgb;
+  for (int i=0; i<3; ++i)
+  {
+    rgb[i] = temp[i];
+    if (temp[i] < 0.0  ) rgb[i] = 0;
+    if (temp[i] > 255.0) rgb[i] = 255;
+  }
+  return rgb;
+}
 
 
 //=========================================================================================

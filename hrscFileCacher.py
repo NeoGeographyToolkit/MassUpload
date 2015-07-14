@@ -235,9 +235,8 @@ class HrscFileCacher():
         # Remove the data set from the internal record
         oldestPair = self._cachedDataSets.pop(i)
         oldestSet  = oldestPair[0]
-        
-        print 'oldest...'
-        print oldestPair
+        #print 'oldest...'
+        #print oldestPair
         
         # Delete it
         setFolder = self._getStorageFolder(oldestSet)

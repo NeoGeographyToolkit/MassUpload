@@ -74,7 +74,7 @@ Batch procedure:
 
 # TODO: If utilization is poor we can improve the parallel processing system!
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 16
+NUM_PROCESS_THREADS  = 14
 
 
 IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
@@ -404,7 +404,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = fullImageList # DEBUG
+hrscImageList = ['h9694_0000'] # DEBUG
 
 # TODO: Filter out images which don't have all the data sets available
 

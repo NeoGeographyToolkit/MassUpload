@@ -87,8 +87,8 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
 
     # Compute the bounding box for each tile
     inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
-    numTilesX = math.ceil(inputImageSize[0] / tileSize)
-    numTilesY = math.ceil(inputImageSize[1] / tileSize)
+    numTilesX = math.ceil(float(inputImageSize[0]) / float(tileSize))
+    numTilesY = math.ceil(float(inputImageSize[1]) / float(tileSize))
     print 'Using gdal_translate to generate ' + str(numTilesX*numTilesY) + ' tiles!'
     
     # Generate each of the tiles using GDAL
@@ -438,6 +438,9 @@ class HrscImage():
         print 'Generating color transforms...'
         self._generateColorTransforms(force)
 
+        #raise Exception('DEBUG')
+        #force = True
+
         # Now that we have all the color transforms, generate the new color image for each tile.
         # - This function utilizes the thread pool
         self._generateNewHrscColorTiles(self._tileDict, force)
@@ -464,13 +467,15 @@ class HrscImage():
         if self._threadPool:
             self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
 
+        #force = True
+
         # Now compute the actual transforms
         # - This is pretty fast so the thread pool is not as important
         for tile in self._tileDict.itervalues():
             
             if (not os.path.exists(tile['colorTransformPath'])) or force:
                 solveHrscColor.solveTransform([tile['colorPairPath']], tile['colorTransformPath'])
-       
+        
         
     def _getWarpToProjectionCmd(self, sourcePath, outputFolder, postfix, metersPerPixel):
         '''Get the command needed by _warpToProjection'''
@@ -764,7 +769,7 @@ class HrscImage():
                 return False
 
             #try:
-            # Get a list af adjacent tiles to pass in to the color transformer
+            # Get a list of adjacent tiles to pass in to the color transformer
             adjacentTiles = self._getAdjacentTiles(tile, tileDict)
             
             # Compute a weighting for each tile based on the pixel count

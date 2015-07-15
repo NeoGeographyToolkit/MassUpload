@@ -268,38 +268,11 @@ class KmlTreeMaker:
 def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
          outputFolder='/home/smcmich1/data/hrscMapTest/kmlTree/'):
 
-    # TODO: Input handling!
-    
-    #try:
-    #    usage = "usage: geoTiffTool.py [--help][--manual] geotiffPath\n"# [lat] [lon] [lat2] [lon2]\n  "
-    #    parser = optparse.OptionParser(usage=usage)
-    #    parser.add_option("--manual", action="callback", callback=man,
-    #                      help="Read the manual.")
-    #
-    #    ## Many GeoTiff images are stored in projected coordinates which makes this tricky
-    #    #parser.add_option("--crop", action="store_true", dest="doCrop", default=False,
-    #    #                            help="Crops the image between the four lat/lon arguments.")
-    #
-    #    parser.add_option("--normalize-eqc-lon", action="store_true", dest="normEqcLon", default=False,
-    #                                help="Normalizes an EQC image to lie between +/- 180 degrees.")
-    #
-    #    # Add other features as the need arises
-    #
-    #    #parser.add_option("-o", "--output-path", dest="outputPath",
-    #    #                        help="Output path (default replace extension with .kml")
-    #    
-    #    (options, args) = parser.parse_args()
-    #
-    #    # Parse positional arguments
-    #    if not args: parser.error("need input cube file")           
-    #    tiffPath = args[0]
-    #
-    #except optparse.OptionError, msg:
-    #    raise Usage(msg)
-
-
     # First make a copy of each input tile in the output folder to form the base layer,
     #  but resize each of the tiles to 512 pixels to make the pyramid creation easier.
+    
+    # Depending on the input resolution, this can be a lot of downsampling!
+    # For quick overviews this should be ok though.  It greatly speeds up the pyramid generation.
 
     maxNumLevels = 20 # Make sure the tree does not get enormous
     

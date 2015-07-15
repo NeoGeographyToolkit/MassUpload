@@ -491,6 +491,7 @@ build_gdal_rsrc( const std::string &filename,
                vw::ImageViewBase<ImageT> const& image) 
 {
   vw::DiskImageResourceGDAL::Options gdal_options;
+  // The tile size is hardcoded to a good number!
   vw::Vector2i raster_tile_size(1024, 1024);
   return new vw::DiskImageResourceGDAL(filename, image.impl().format(), raster_tile_size, gdal_options);
 }

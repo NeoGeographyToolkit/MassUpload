@@ -89,7 +89,7 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
     inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
     numTilesX = math.ceil(float(inputImageSize[0]) / float(tileSize))
     numTilesY = math.ceil(float(inputImageSize[1]) / float(tileSize))
-    print 'Using gdal_translate to generate ' + str(numTilesX*numTilesY) + ' tiles!'
+    print 'Using gdal_translate to generate ' + str(int(numTilesX*numTilesY)) + ' tiles!'
     
     # Generate each of the tiles using GDAL
     cmdList = []
@@ -139,15 +139,10 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
     # Skip tile creation if the first tile is present
     # - May need to make the decision smarter later on
     firstTilePath = outputPrefix + '0_0.tif'
-    if not os.path.exists(firstTilePath):
-    
-#            # This tile size is in the warped image (HRSC) resolution
-#            cmd = ('convert  -colors 256 -colorspace Gray %s -crop %dx%d -set filename:tile "%%[fx:page.y/%d]_%%[fx:page.x/%d]" +repage +adjoin "%s%%[filename:tile].tif"'
-#                  % (imagePath, tileSize, tileSize, tileSize, tileSize, outputPrefix))
-#            print cmd
-#            os.system(cmd)
-    
+    if not os.path.exists(firstTilePath):   
         splitImageGdal(imagePath, outputPrefix, tileSize, force, pool, maskList)
+    
+    print 'Finished splitting image, collecting tile information...'
     
     # Build the list of output files
     outputTileInfoList = []
@@ -174,8 +169,6 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
 
     if len(outputTileInfoList) == 0:
         raise Exception('splitImage: Failed to generate any image tiles!')
-
-    #raise Exception('DEBUG TILE INFO LOAD')
 
     return outputTileInfoList 
 
@@ -438,9 +431,6 @@ class HrscImage():
         print 'Generating color transforms...'
         self._generateColorTransforms(force)
 
-        #raise Exception('DEBUG')
-        #force = True
-
         # Now that we have all the color transforms, generate the new color image for each tile.
         # - This function utilizes the thread pool
         self._generateNewHrscColorTiles(self._tileDict, force)
@@ -467,8 +457,6 @@ class HrscImage():
         if self._threadPool:
             self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
 
-        #force = True
-
         # Now compute the actual transforms
         # - This is pretty fast so the thread pool is not as important
         for tile in self._tileDict.itervalues():
@@ -483,8 +471,8 @@ class HrscImage():
             os.mkdir(outputFolder)
         fileName   = sourcePath[sourcePath.rfind('/')+1:]
         warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
-        cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline '
-                 + '-multi '#-co "BLOCKXSIZE=1024" -co "BLOCKYSIZE=1024"'
+        cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline'
+                 +' -multi -co "BLOCKXSIZE=1024" -co "BLOCKYSIZE=1024" -co TILED=yes'
                  +' -t_srs "'+self._basemapInstance.getProj4String()+'" -tr '
                  + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')
         return (cmd, warpedPath)

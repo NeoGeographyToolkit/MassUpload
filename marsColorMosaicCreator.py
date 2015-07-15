@@ -77,7 +77,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 14
 
 
-IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 10 # This should be set equal to the HRSC cache size
 
 # TODO: Need to manage the processed HRSC folders, not just the download folders!
 #       - The batch management can take care of this
@@ -387,6 +387,12 @@ logger.info('--- Finished initializing the base map object ---\n')
 # Get a list of the HRSC images we are testing with
 #fullImageList = getHrscImageList()
 tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, BAD_HRSC_FILE_PATH)
+
+fullImageList = tempFileFinder.getHrscSetList()
+tempFileFinder.findIncompleteSets(fullImageList)
+raise Exception('DONE FINDING BAD SETS')
+
+
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempFileFinder = None # Delete this temporary object
 
@@ -404,7 +410,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h9694_0000'] # DEBUG
+#hrscImageList = ['h9694_0000'] # DEBUG
 
 # TODO: Filter out images which don't have all the data sets available
 

@@ -10,7 +10,7 @@ import sqlite3
 import MosaicUtilities
 
 # Set the size limit of our data set cache
-MAX_STORED_DATA_SETS = 20
+MAX_STORED_DATA_SETS = 25
     
 
 
@@ -44,6 +44,9 @@ class BadHrscFileChecker():
         self._badList = []
         with open(csvPath, 'r') as handle:
             for line in handle:
+                if line[0] == '#': # Skip comment lines
+                    continue
+            
                 name = line.strip()
                 if '_' not in line: # Lines may not include the 'default' second part
                     name += '_0000' 
@@ -60,10 +63,17 @@ class BadHrscFileChecker():
 
 
 class HrscFileCacher():
-    '''Class to manage which HRSC images are stored locally on disk'''
+    '''Class to manage which HRSC images are stored locally on disk.
+       This class creates a download folder and an process folder. 
+       It does the data set tracking using the download folder and
+       writes nothing to the process folder (that is done by hrscImageManager.py).
+       The class DOES delete the process folder when it deletes the download folder,
+       so other classes do not need to worry about cleaning up the process folder.
+       There is no real need for the download folder but it is kept seperate for
+       possible future convenience.'''
     
     
-    def __init__(self, dbPath, outputFolder, badHrscFilePath, pool=None):
+    def __init__(self, dbPath, downloadFolder, processFolder, badHrscFilePath, pool=None):
         '''Load the DB from disk'''
 
         # The input dictionary contains some channels we don't need for the basemap
@@ -81,15 +91,15 @@ class HrscFileCacher():
         self._badChecker = BadHrscFileChecker(badHrscFilePath, self._logger)
 
         # Create the output folder
-        self._outputFolder = outputFolder
-        if not os.path.exists(outputFolder):
-            os.mkdir(outputFolder)
-        
-        # Create a working directory
-        self._workDir = os.path.join(outputFolder, 'working_directory')
-        if not os.path.exists(self._workDir):
-            os.mkdir(self._workDir)
-        
+        self._downloadFolder = downloadFolder
+        if not os.path.exists(downloadFolder):
+            os.mkdir(downloadFolder)
+
+        # Create the process folder
+        self._processFolder = processFolder
+        if not os.path.exists(processFolder):
+            os.mkdir(processFolder)
+                
         self._cachedDataSets     = [] # Fully downloaded data sets
         self._incompleteDataSets = [] # List of partially downloaded data sets
         
@@ -107,27 +117,26 @@ class HrscFileCacher():
     
         # Just search the output directory for folders and each one is a data set.
         # - This will fail if any other junk gets in the output folder
-        itemsInOutputDir = os.listdir(self._outputFolder)
+        itemsInOutputDir = os.listdir(self._downloadFolder)
         currentTime = time.time()
         for f in itemsInOutputDir:
-            if (len(f) > 3) and (f != 'working_directory'): # Skip junk and work directory
-                setFolder = os.path.join(self._outputFolder, f)
-                if self._checkIfSetIsComplete(f):
-                    self._cachedDataSets.append( (f, currentTime) )
-                    self._logger.info('hrscFileCacher: Found existing cached file ' + f)
+            if (len(f) > 3: # Skip junk and work directory
+                setName = f
+                setFolder = os.path.join(self._downloadFolder, setName)
+                if self._checkIfSetIsComplete(setName):
+                    self._cachedDataSets.append( (setName, currentTime) )
+                    self._logger.info('hrscFileCacher: Found existing cached file ' + setName)
                 else:
-                    self._incompleteDataSets.append(setFolder)
+                    self._incompleteDataSets.append(setName)
                     self._logger.warning('Incomplete data set found: ' + setFolder)
     
     def _checkIfSetIsComplete(self, setName):
-        setFolder = self._getStorageFolder(setName)
+        setFolder = self._getDownloadStorageFolder(setName)
         for c in self._NEEDED_CHANNELS:
             fileName = self._makeFileName(setName, c)
             filePath = os.path.join(setFolder, fileName)
             if not os.path.exists(filePath):
                 return False # A file is missing!
-            #else:
-            #    print 'Confirmed file ' + filePath
         return True # All files found
 
     def getHrscSetList(self, lonlatRect=None):
@@ -199,15 +208,28 @@ class HrscFileCacher():
         
         return dataDict
     
-    def _getStorageFolder(self, setName):
-        '''Get the location where this data set will be stored'''
-        print setName
-        return os.path.join(self._outputFolder, setName)
+    def _getDownloadStorageFolder(self, setName):
+        '''Get the location where the downloaded files for this data set will be stored'''
+        return os.path.join(self._downloadFolder, setName)
 
-    def _deleteDataSet(self, folder):
-        self._logger.info('Deleting data folder: ' + folder)
+    def _getProcessStorageFolder(self, setName):
+        '''Get the location where the processed files for this data set will be stored'''
+        return os.path.join(self._processFolder, setName)
+
+    def _deleteDataSet(self, setName):
+        '''Delete the download and processed files for a data set'''
+        self._logger.info('Deleting cached download for set: ' + setName)
+        
+        # Delete the download files
+        folder = self._getDownloadStorageFolder(setName)
         cmd = 'rm -rf ' + folder
         os.system(cmd)
+        
+        # Delete the processed files
+        folder = self._getProcessStorageFolder(setName)
+        cmd = 'rm -rf ' + folder
+        os.system(cmd)
+
 
     def _makeRoomForNewDataSet(self):
         '''Delete a cached data set to make room for a new one'''
@@ -215,11 +237,11 @@ class HrscFileCacher():
         if len(self._cachedDataSets) < MAX_STORED_DATA_SETS:
             return # We still have room, don't delete anything.
         
-        print self._cachedDataSets
+        #print self._cachedDataSets
         
         # Clear out any incomplete data sets
-        for setFolder in self._incompleteDataSets:
-            self._deleteDataSet(setFolder)
+        for setName in self._incompleteDataSets:
+            self._deleteDataSet(setName)
         self._incompleteDataSets = []
 
         # Find the last accessed data set
@@ -239,15 +261,14 @@ class HrscFileCacher():
         #print oldestPair
         
         # Delete it
-        setFolder = self._getStorageFolder(oldestSet)
-        self._deleteDataSet(setFolder)
+        self._deleteDataSet(oldestSet)
         
     
     def _downloadHrscFile(self, remoteURL, localFilePath):
         '''Download a single HRSC file and convert to TIFF format'''
         
         # Download the file
-        downloadPath = os.path.join(self._workDir, 'download.IMG')
+        downloadPath = localFilePath + '_download.IMG')
         cmd = 'wget ' + remoteURL + ' -O ' + downloadPath
         MosaicUtilities.cmdRunner(cmd, downloadPath)
     
@@ -268,8 +289,8 @@ class HrscFileCacher():
     
         setName = hrscDataDict['setName']
         
-        print hrscDataDict
-        print setName
+        #print hrscDataDict
+        #print setName
     
         if setName not in self._cachedDataSets: # If we don't currently have the data available
 
@@ -282,7 +303,7 @@ class HrscFileCacher():
             self._makeRoomForNewDataSet()
                 
             # Create the output folder
-            setOutputFolder = self._getStorageFolder(setName)
+            setOutputFolder = self._getDownloadStorageFolder(setName)
             if not os.path.exists(setOutputFolder):
                 os.mkdir(setOutputFolder)
             
@@ -323,8 +344,30 @@ class HrscFileCacher():
         return outputDict
 
     
-    
-    #def queryHrscFilesInLocation():
+    def findIncompleteSets(setList):
+        '''Function to go through all the HRSC data and identify all incomplete data sets.
+           This is used offline to generate a list of sets to add to the bad data list.'''
+
+        print 'Finding bad data sets...'
+
+        badSets = []
+        for dataSet in setList:
         
-    #    select setname from Files where sensor=1 and minLon<102.64 and maxLon>98.2023 and minLat<-18.6077 and maxLat>-50.1955 and subtype="nd3";    
+            setName = dataSet['setName']
+
+            # Make sure all the required channels exist in the database
+            missingSet = False
+            for c in self._NEEDED_CHANNELS:
+                if not c in dataSet:
+                    missingSet = True
+            
+            if missingSet:
+                #badSets.append(setName)
+                print setName
+
+        #print 'Bad data sets:'
+        #print badSets
+
+
+
 

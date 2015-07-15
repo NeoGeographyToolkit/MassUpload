@@ -173,13 +173,11 @@ struct Options {
 
 // Handling input
 void handle_arguments( int argc, char *argv[], Options& opt ) {
-  size_t cache_size;
 
   po::options_description general_options("");
   general_options.add_options()
     ("nodata-value",      po::value(&opt.nodata), "Value that is nodata in the input image. Not used if input has alpha.")
     ("output-filename,o", po::value(&opt.output_filename), "Output file name.")
-    ("cache",             po::value(&cache_size)->default_value(1024), "Source data cache size, in megabytes.")
     ("help,h",            "Display this help message");
 
   po::options_description positional("");
@@ -209,9 +207,6 @@ void handle_arguments( int argc, char *argv[], Options& opt ) {
     vw_throw( ArgumentErr() << usage.str() << general_options );
   if ( opt.input_files.empty() )
     vw_throw( ArgumentErr() << "Missing input files!\n" << usage.str() << general_options );
-
-  // Set the system cache size
-  vw_settings().set_system_cache_size( cache_size*1024*1024 );
 
 }
 
@@ -266,12 +261,6 @@ int main( int argc, char *argv[] ) {
 
 
   vw_out() << "Writing: " << output << std::endl;
-  /*
-  cartography::write_georeferenced_image(output, 
-                                         ImageAndView< ImageViewRef<PixelT> >(input_images),
-                                         georef,
-                                         TerminalProgressCallback("bigMaskMaker","Writing:"));
-*/
   block_write_gdal_image(output, 
                         ImageAndView< ImageViewRef<PixelT> >(input_images),
                         georef,

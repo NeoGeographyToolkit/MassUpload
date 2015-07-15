@@ -107,7 +107,55 @@ class KmlTreeMaker:
         print 'Created ' + str(numTilesCreated) + ' tiles'
         return tileList
 
+    def finish(self, infoRects=[]):
+        '''Generates a top level kml file and optionally adds some informational rectangles.'''
+        
+        # The output path is fixed
+        kmlPath = os.path.join(self._outputFolder, 'tree.kml')
+        
+        kml = simplekml.Kml()
+        ## Region for this file
+        #kml.document.region = self._makeKmlRegion(level, tileIndex)
+        
+        # Create network links for lower level files
+
+        # Iterate through all the files in the top level folder        
+        levelDown   = len(self._layerTilings) - 1
+        levelFolder = getLevelFolder(self.outputFolder, levelDown, False)
+        fileList    = os.path.listdir(levelFolder)
+        for f in fileList
+            if '.kml' not in f:
+                continue # Skip the .png files
+            
+            # Add a network link to each of the files
+            relativePath = os.path.join(str(levelDown), f)
+            netLink = kml.document.newnetworklink(name=f)
+            netLink.link.href = relativePath
+            netLink.link.viewrefreshmode = simplekml.ViewRefreshMode.onrequest
+
+        # Add a colored rectangle where each input box is specified            
+        for rect in infoRects:
+            bbox = rect[1]
+            polygon = kml.document.newpolygon(name=rect[0])
+            polygon.outerboundaryis = [ (bbox.minX, bbox.minY),  
+                                        (bbox.maxX, bbox.minY),
+                                        (bbox.maxX, bbox.maxY),
+                                        (bbox.minX, bbox.maxY)
+                                      ]
+            polygon.style.linestyle.width = 5
+            polygon.style.linestyle.color = simplekml.Color.green
+            polygon.style.polystyle.color = simplekml.Color.changealphaint(10, simplekml.Color.green)
+            
+        # Save the completed file
+        kml.save(kmlPath)
+        if not os.path.exists(kmlPath):
+            raise Exception('Failed to create file ' + kmlPath)
+        return kmlPath
+        
+        
+
     def _hasTileLayer(self, level):
+        '''Return True if a given layer of tiles has been created'''
         return len(self._layerTilings) > level
         
     def _addTileLayer(self, level):
@@ -266,7 +314,8 @@ class KmlTreeMaker:
 
 
 def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
-         outputFolder='/home/smcmich1/data/hrscMapTest/kmlTree/'):
+         outputFolder='/home/smcmich1/data/hrscMapTest/kmlTree/',
+         infoRects=[]):
 
     # First make a copy of each input tile in the output folder to form the base layer,
     #  but resize each of the tiles to 512 pixels to make the pyramid creation easier.
@@ -283,9 +332,10 @@ def main(sourceFolder='/home/smcmich1/data/hrscMapTest/outputTiles/',
         if len(tileList) <= 1:
             break
             
-    # TODO: Make a top level kml file!
+    # Make a top level kml file!
+    topLevelKmlPath = treeMaker.finish(infoRects)
 
-    return tileList[0]
+    return topLevelKmlPath
 
 
 

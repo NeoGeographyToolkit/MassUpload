@@ -399,9 +399,6 @@ tempFileFinder = None # Delete this temporary object
 logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:\n'+
             str(fullImageList))
 
-# DEBUG --> Test this image!
-#fullImageList = fullImageList[6:8]
-#print fullImageList
 
 # Prune out all the HRSC images that we have already added to the mosaic.
 hrscImageList = []
@@ -442,7 +439,7 @@ downloadCommandQueue.put('FETCH ' + hrscImageList[0])
 
 # Loop through input HRSC images
 numHrscDataSets = len(hrscImageList) 
-numHrscDataSetsProcessed = 0
+processedDataSets = []
 for i in range(0,numHrscDataSets): 
     
     # Get the name of this and the next data set
@@ -507,9 +504,14 @@ for i in range(0,numHrscDataSets):
     updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
     logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
-    numHrscDataSetsProcessed += 1
+    
+    # Record that we finished processing this HRSC image
+    processedDataSets.append( (hrscInstance.getSetName(), 
+                               hrscInstance.getBoundingBoxDegrees()) )
 
     #raise Exception('DEBUG')
+
+numHrscImagesProcessed = len(processedDataSets)
 
 PROCESS_POOL_KILL_TIMEOUT = 180 # The pool should not be doing any work at this point!
 if processPool:
@@ -523,10 +525,12 @@ downloadThread.join()
 
 if numHrscDataSetsProcessed > 0:
     # Generate a KML pyramid of the tiles for diagnostics
-    kmlPyramidWebAddress = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder)
+    kmlPyramidWebAddress = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder, processedDataSets)
 
     # Send a message notifiying that the output needs to be reviewed!
     msgText = '''
+    Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
+    
     KML pyramid link:
     '''+kmlPyramidWebAddress+'''
     To undo the tile changes:

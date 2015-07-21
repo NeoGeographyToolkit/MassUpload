@@ -382,7 +382,7 @@ tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder,
 
 
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
-tempFileFinder = None # Delete this temporary object
+tempgFileFinder = None # Delete this temporary object
 
 logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:\n'+
             str(fullImageList))

@@ -214,7 +214,6 @@ class MarsBasemap:
         if not os.path.exists(tileFolder):
             os.mkdir(tileFolder)
 
-        
         smallTilePath  = os.path.join(tileFolder, 'basemap_orig_res.tif')
         grayTilePath   = os.path.join(tileFolder, 'basemap_orig_res_gray.tif')
         largeTilePath  = os.path.join(tileFolder, 'basemap_output_res.tif')
@@ -237,16 +236,16 @@ class MarsBasemap:
 
         # Crop out the section of the original base map for this tile
         self.makeCroppedRegionDegrees(degreeRoi, smallTilePath)
-        
-        # Generate a copy of this tile at the full output resolution
-        cmd = ('gdal_translate ' + smallTilePath +' '+ largeTilePath
-               +' -outsize '+str(self.resolutionIncrease*100)+'% '+str(self.resolutionIncrease*100)+'% ')
-        MosaicUtilities.cmdRunner(cmd, largeTilePath, force)
-        
+
         # Generate a grayscale version of the small copy of this tile
         cmd = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)
         MosaicUtilities.cmdRunner(cmd, grayTilePath, force)
-        
+
+        # Generate a copy of this tile at the full output resolution
+        cmd = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+               + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ largeTilePath)
+        MosaicUtilities.cmdRunner(cmd, largeTilePath, force)
+
         # Generate the output tile (HRSC images will be pasted on to it)
         if (force or not os.path.exists(outputTilePath)):
             copyGeoTiffInfo.copyGeoTiffInfo(smallTilePath, largeTilePath, outputTilePath)

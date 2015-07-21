@@ -87,8 +87,8 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
 
     # Compute the bounding box for each tile
     inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
-    numTilesX = math.ceil(float(inputImageSize[0]) / float(tileSize))
-    numTilesY = math.ceil(float(inputImageSize[1]) / float(tileSize))
+    numTilesX = int(math.ceil(float(inputImageSize[0]) / float(tileSize)))
+    numTilesY = int(math.ceil(float(inputImageSize[1]) / float(tileSize)))
     print 'Using gdal_translate to generate ' + str(int(numTilesX*numTilesY)) + ' tiles!'
     
     # Generate each of the tiles using GDAL

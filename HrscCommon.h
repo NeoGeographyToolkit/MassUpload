@@ -16,28 +16,12 @@
 const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
-/*
-/// Extension of OpenCV's Rect class to add additional functions
-template <typename T>
-class Rectangle_ : public cv:Rect_<T>
-{
-public:
-    /// Constructors work the same as the base class
-    Rectangle_(T x, T y, T width, T height) : cv::Rect_<T>(x, y, width, height) {}
- 
-    // Corner access   
-    cv::Point_<T> tr() const {return cv::Point_<T>(this->x+this->width, this->y);}
-    cv::Point_<T> bl() const {return cv::Point_<T>(this->x,             this->y+this->height);}
-    
-    /// Returns true if there is any overlap with another rectangle
-    bool overlaps(const Rectangle_<T> &otherRect) const
-    {
-      cv::Rect_<T> intersect = (*this) & otherRect;
-      return (intersect.area() > 0);
-    }
-}
-typedef Rectangle_<int> Rectangle; //< Convience typedef
-*/
+typedef unsigned short MASK_DATA_TYPE;
+
+//const unsigned char MASK_MAX = 255; // UINT8
+const unsigned short MASK_MAX = 2048; // UINT16 - This is equal to the grassfire distance!
+
+
 
 /// Constrain an OpenCV ROI to lie within an image
 /// - Returns false if there is no overlap
@@ -110,10 +94,10 @@ T interpPixel(const cv::Mat& img, const cv::Mat& mask, float xF, float yF, bool 
   
   // - Don't interpolate if any mask inputs are zero, this might indicate 
   //    that we are at a projection border.
-  unsigned char i00 = mask.at<unsigned char>(y0, x0);
-  unsigned char i01 = mask.at<unsigned char>(y0, x1);
-  unsigned char i10 = mask.at<unsigned char>(y1, x0);
-  unsigned char i11 = mask.at<unsigned char>(y1, x1);
+  unsigned char i00 = mask.at<MASK_DATA_TYPE>(y0, x0);
+  unsigned char i01 = mask.at<MASK_DATA_TYPE>(y0, x1);
+  unsigned char i10 = mask.at<MASK_DATA_TYPE>(y1, x0);
+  unsigned char i11 = mask.at<MASK_DATA_TYPE>(y1, x1);
   if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
     return 0;
 
@@ -207,10 +191,10 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
   // Check the mask
   // - Don't interpolate if any mask inputs are zero, this might indicate 
   //    that we are at a projection border.
-  unsigned char i00 = mask.at<unsigned char>(y0, x0);
-  unsigned char i01 = mask.at<unsigned char>(y0, x1);
-  unsigned char i10 = mask.at<unsigned char>(y1, x0);
-  unsigned char i11 = mask.at<unsigned char>(y1, x1);
+  unsigned char i00 = mask.at<MASK_DATA_TYPE>(y0, x0);
+  unsigned char i01 = mask.at<MASK_DATA_TYPE>(y0, x1);
+  unsigned char i10 = mask.at<MASK_DATA_TYPE>(y1, x0);
+  unsigned char i11 = mask.at<MASK_DATA_TYPE>(y1, x1);
   if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
     return 0;
   
@@ -322,7 +306,7 @@ bool readTransform(const std::string &inputPath, cv::Mat &transform)
 bool readOpenCvImage(const std::string &imagePath, cv::Mat &image, const int imageType)
 {
   //printf("Reading image file: %s\n", imagePath.c_str());
-  image = cv::imread(imagePath, imageType);
+  image = cv::imread(imagePath, imageType | CV_LOAD_IMAGE_ANYDEPTH);
   if (!image.data)
   {
     printf("Failed to load image %s!\n", imagePath.c_str());

@@ -111,7 +111,7 @@ class KmlTreeMaker:
         '''Generates a top level kml file and optionally adds some informational rectangles.'''
         
         # The output path is fixed
-        kmlPath = os.path.join(self._outputFolder, 'tree.kml')
+        kmlPath = os.path.join(self.outputFolder, 'tree.kml')
         
         kml = simplekml.Kml()
         ## Region for this file
@@ -122,8 +122,8 @@ class KmlTreeMaker:
         # Iterate through all the files in the top level folder        
         levelDown   = len(self._layerTilings) - 1
         levelFolder = getLevelFolder(self.outputFolder, levelDown, False)
-        fileList    = os.path.listdir(levelFolder)
-        for f in fileList
+        fileList    = os.listdir(levelFolder)
+        for f in fileList:
             if '.kml' not in f:
                 continue # Skip the .png files
             
@@ -140,7 +140,8 @@ class KmlTreeMaker:
             polygon.outerboundaryis = [ (bbox.minX, bbox.minY),  
                                         (bbox.maxX, bbox.minY),
                                         (bbox.maxX, bbox.maxY),
-                                        (bbox.minX, bbox.maxY)
+                                        (bbox.minX, bbox.maxY),
+                                        (bbox.minX, bbox.minY)
                                       ]
             polygon.style.linestyle.width = 5
             polygon.style.linestyle.color = simplekml.Color.green

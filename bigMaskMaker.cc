@@ -126,7 +126,7 @@ public:
         // Check all of the pixels at this location and perform the AND operation
         result_type thisPixel;
         result_type outputPixel;
-        outputPixel[0] = 255;
+        outputPixel[0] = 255; // UINT8 max
         for (size_t i=0; i<num_images; ++i) 
         {
           thisPixel = input_tiles[i](c,r);
@@ -217,7 +217,7 @@ int main( int argc, char *argv[] ) {
 
   // Use a default output path if none provided
   const std::string firstPath = opt.input_files[0];
-  vw_out() << "Loading: " << firstPath << "\n";
+  //vw_out() << "Loading: " << firstPath << "\n";
   size_t pt_idx = firstPath.rfind(".");
   std::string output;
   if (opt.output_filename.size() != 0)

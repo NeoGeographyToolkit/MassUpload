@@ -139,8 +139,8 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
     # Skip tile creation if the first tile is present
     # - May need to make the decision smarter later on
     firstTilePath = outputPrefix + '0_0.tif'
-    if not os.path.exists(firstTilePath):   
-        splitImageGdal(imagePath, outputPrefix, tileSize, force, pool, maskList)
+    #if not os.path.exists(firstTilePath):   
+    splitImageGdal(imagePath, outputPrefix, tileSize, force, pool, maskList)
     
     print 'Finished splitting image, collecting tile information...'
     
@@ -148,7 +148,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
     outputTileInfoList = []
     cmdList = []
     for f in sorted(os.listdir(outputFolder)):
-        if ('_tile_' not in f) or ('json' in f) or (filename not in f): # Skip metadata files and any junk
+        if ('_tile_' not in f) or ('json' in f) or ('xml' in f) or (filename not in f): # Skip metadata files and any junk
             continue
         thisPath = os.path.join(outputFolder, f)
         thisMetadataPath = thisPath + '_metadata.json' # Path to record the metadata to
@@ -336,7 +336,7 @@ class HrscImage():
         print 'Generating high resolution grassfire mask...'
         cmd = './bigMaskGrassfire -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)        
-        self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath        
+        self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath
 
         #raise Exception('DEBUG MASK')        
 

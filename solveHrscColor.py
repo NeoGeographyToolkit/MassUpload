@@ -93,8 +93,11 @@ def solveTransform(inputPathList, outputPath):
     inputsY  = numpy.matrix(hrscPixelListY)
 
     if (inputs.shape[1] == 0) or (inputs.shape[0] != targets.shape[0]):
+        print 'ERROR--->'
         print targets.shape
         print inputs.shape
+        print inputPathList
+        print outputPath
         raise Exception('Error: Invalid input pixel pair files!')
 
 

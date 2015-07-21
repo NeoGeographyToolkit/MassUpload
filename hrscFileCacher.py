@@ -120,7 +120,7 @@ class HrscFileCacher():
         itemsInOutputDir = os.listdir(self._downloadFolder)
         currentTime = time.time()
         for f in itemsInOutputDir:
-            if (len(f) > 3: # Skip junk and work directory
+            if (len(f) > 3): # Skip junk and work directory
                 setName = f
                 setFolder = os.path.join(self._downloadFolder, setName)
                 if self._checkIfSetIsComplete(setName):
@@ -268,7 +268,7 @@ class HrscFileCacher():
         '''Download a single HRSC file and convert to TIFF format'''
         
         # Download the file
-        downloadPath = localFilePath + '_download.IMG')
+        downloadPath = localFilePath + '_download.IMG'
         cmd = 'wget ' + remoteURL + ' -O ' + downloadPath
         MosaicUtilities.cmdRunner(cmd, downloadPath)
     
@@ -344,21 +344,21 @@ class HrscFileCacher():
         return outputDict
 
     
-    def findIncompleteSets(setList):
+    def findIncompleteSets(self, setList):
         '''Function to go through all the HRSC data and identify all incomplete data sets.
            This is used offline to generate a list of sets to add to the bad data list.'''
 
         print 'Finding bad data sets...'
 
         badSets = []
-        for dataSet in setList:
+        for setName in setList:
         
-            setName = dataSet['setName']
+            setDict = self._getUrlDictForSet(setName)
 
             # Make sure all the required channels exist in the database
             missingSet = False
             for c in self._NEEDED_CHANNELS:
-                if not c in dataSet:
+                if not c in setDict:
                     missingSet = True
             
             if missingSet:

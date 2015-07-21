@@ -38,8 +38,7 @@ namespace po = boost::program_options;
 using namespace vw;
 
 /**
-  This program takes in a set of images and returns a uint8 image
-  which is 255 in pixels where all of the input images have data.
+  This program performs a grassfire operation on an input binary image.
 
 */
 
@@ -73,6 +72,7 @@ public:
   
 
   typedef PixelGray<unsigned char> Uint8;
+  typedef PixelGray<unsigned char> Uint16;
 
 private:
   DiskImageView<Uint8> const& m_input_image;
@@ -103,7 +103,7 @@ public:
   typedef CropView<ImageView<result_type> > prerasterize_type;
   inline prerasterize_type prerasterize( BBox2i const& bbox ) const 
   { 
-    const int GRASSFIRE_DISTANCE = 256;
+    const int GRASSFIRE_DISTANCE = 2048;
   
     // Load up a section of the input image that is large enough to fully compute the
     // grassfile results for this tile.  That ensures only a single disk load per tile.
@@ -121,13 +121,13 @@ public:
 
     // Crop the expanded bbox to the image bounds and fetch that image data from disk    
     expanded_bbox.crop(bounding_box(m_input_image));
-    ImageView<Uint8> expanded_tile = crop(m_input_image, expanded_bbox);
+    ImageView<MASK_DATA_TYPE> expanded_tile = pixel_cast<MASK_DATA_TYPE>(crop(m_input_image, expanded_bbox));
     /*
     vw_out() << "Input tile    : " << bbox << std::endl;
     vw_out() << "Expanded tile : " << expanded_bbox << std::endl;
     vw_out() << "output section: " << output_section << std::endl;
     */
-    const typename ImageView<Uint8>::pixel_type zero = typename ImageView<Uint8>::pixel_type();
+    const typename ImageView<Uint16>::pixel_type zero = typename ImageView<Uint16>::pixel_type();
     if (max_pixel_value(crop(expanded_tile, output_section)) == zero)
     {
         //vw_out() << "Skipping zero tile!\n";
@@ -139,7 +139,7 @@ public:
     //vw_out() << "Normal tile!\n";
    
     // Grassfire computation
-    ImageView<Uint8> grassfire_output(pixel_cast<Uint8>(clamp(grassfire(expanded_tile), 0, 255)));
+    ImageView<MASK_DATA_TYPE> grassfire_output(pixel_cast<MASK_DATA_TYPE>(clamp(grassfire(expanded_tile), 0, GRASSFIRE_DISTANCE-1)));
     
     // Return the tile we created with fake borders to make it look the size of the entire output image
     // - Only return the image data from the input bbox, not the entire expanded bbox
@@ -229,9 +229,8 @@ int main( int argc, char *argv[] ) {
   cartography::GeoReference georef;
   cartography::read_georeference(georef, opt.input_file);
 
-  // For now this is always the same
+  // The input binary mask is always 8 bit
   typedef PixelGray<uint8> PixelT;
-
 
   // Determining the format of the input
   SrcImageResource *rsrc = DiskImageResource::open(opt.input_file);
@@ -249,13 +248,8 @@ int main( int argc, char *argv[] ) {
 
 
   vw_out() << "Writing: " << output << std::endl;
-/*  cartography::write_georeferenced_image(output, 
-                                         GrassfireView<DiskImageView<PixelT> >(disk_image),
-                                         georef,
-                                         TerminalProgressCallback("bigMaskGrassfire","Writing:"));
-*/
   block_write_gdal_image(output, 
-                        GrassfireView<DiskImageView<PixelT> >(disk_image),
+                        GrassfireView<ImageView<PixelGray<MASK_DATA_TYPE> > >(disk_image),
                         georef,
                         TerminalProgressCallback("bigMaskGrassfire","Writing:"));
                               

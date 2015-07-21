@@ -197,6 +197,7 @@ class Rectangle:
         self.maxX += right
         self.maxY += up
 
+    # TODO: This does not handle integers properly!
     def expandToContain(self, x, y):
         '''Expands the rect to contain the given point'''
         if x < self.minX: self.minX = x

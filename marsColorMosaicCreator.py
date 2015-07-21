@@ -77,7 +77,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 14
 
 
-IMAGE_BATCH_SIZE = 10 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 
 # TODO: Need to manage the processed HRSC folders, not just the download folders!
 #       - The batch management can take care of this
@@ -99,14 +99,16 @@ BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
+
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
 
 #-----------------------------------------------------------------------------------------
 # Functions
 
 
 
-def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQueue):
+def cacheManagerThreadFunction(databasePath, hrscDownloadFolder, hrscProcessedFolder, inputQueue, outputQueue):
     '''Thread to allow downloading of HRSC data in parallel with image processing.
        The input queue recieves three types of commands:
            "STOP" --> Finish current tasks, then exit.
@@ -132,7 +134,8 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
 
     # Set up the HRSC file manager object
     logger.info('Initializing HRSC file caching object')
-    hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, outputFolder, BAD_HRSC_FILE_PATH, downloadPool)
+    hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, hrscDownloadFolder, hrscProcessedFolder,
+                                                    BAD_HRSC_FILE_PATH, downloadPool)
 
     while True:
 
@@ -187,37 +190,20 @@ def cacheManagerThreadFunction(databasePath, outputFolder, inputQueue, outputQue
     logger.info('Download manager thread stopped.')
 
 
-# For debugging only, the hrscFileCacher class does the actual call from the database.
-def getHrscImageList():
-    '''For just returns a fixed list of HRSC images for testing'''   
-    return ['h0022_0000',
-            'h0506_0000',
-            'h2411_0000']#,
-            #'h6419_0000']
-
-
-
-#def getBasemapTileSet():
-#    '''Returns a limited basemap ROI for debugging'''
-#    return MosaicUtilities.Rectangle(100, 102, 64, 66)
-
-
-
 
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
     
     hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
+    #print 'HRSC BB = ' + str(hrscBoundingBoxDegrees)
     
     # DEBUG!  Restrict to a selected area.
     hrscBoundingBoxDegrees = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxDegrees)
+    #print 'overlap BB = ' + str(hrscBoundingBoxDegrees)
     
     intersectRect = basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
     return intersectRect
     
-    #return intersectRect.getIntersection(debugRect)
-    #return MosaicUtilities.Rectangle(196, 197, 92, 93) # DEBUG
-
 
 def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
     '''Gets the dictionary of HRSC tiles that need to update the given basemap tile index'''
@@ -357,7 +343,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 fullBasemapPath  = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
 sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
-outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_64'
+outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
 databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
 kmlPyramidFolder = '/byss/docroot/smcmich1/hrscMosaicKml'
 
@@ -386,11 +372,13 @@ logger.info('--- Finished initializing the base map object ---\n')
 
 # Get a list of the HRSC images we are testing with
 #fullImageList = getHrscImageList()
-tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, BAD_HRSC_FILE_PATH)
+tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, 
+                                               hrscOutputFolder, BAD_HRSC_FILE_PATH)
 
-fullImageList = tempFileFinder.getHrscSetList()
-tempFileFinder.findIncompleteSets(fullImageList)
-raise Exception('DONE FINDING BAD SETS')
+# Run-once code to find all the incomplete data sets in one pass
+#fullImageList = tempFileFinder.getHrscSetList()
+#tempFileFinder.findIncompleteSets(fullImageList)
+#raise Exception('DONE FINDING BAD SETS')
 
 
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
@@ -407,7 +395,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = ['h9694_0000'] # DEBUG
+hrscImageList = ['h0449_0009'] # DEBUG
 
 # TODO: Filter out images which don't have all the data sets available
 
@@ -424,7 +412,7 @@ downloadCommandQueue  = multiprocessing.Queue()
 downloadResponseQueue = multiprocessing.Queue()
 logger.info('Initializing HRSC file caching thread')
 downloadThread = threading.Thread(target=cacheManagerThreadFunction,
-                                  args  =(databasePath, sourceHrscFolder,            
+                                  args  =(databasePath, sourceHrscFolder, hrscOutputFolder,       
                                           downloadCommandQueue, downloadResponseQueue)
                                  )
 downloadThread.daemon = True # Needed for ctrl-c to work
@@ -523,9 +511,11 @@ downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()
 
 
-if numHrscDataSetsProcessed > 0:
+if numHrscImagesProcessed > 0:
     # Generate a KML pyramid of the tiles for diagnostics
-    kmlPyramidWebAddress = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder, processedDataSets)
+    kmlPyramidLocalPath  = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder, processedDataSets)
+    pos                  = kmlPyramidLocalPath.find('/smcmich1')
+    kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
 
     # Send a message notifiying that the output needs to be reviewed!
     msgText = '''
@@ -543,7 +533,11 @@ if numHrscDataSetsProcessed > 0:
 
     To start the next batch:
     source /byss/smcmich1/run_hrsc_basemap_script.sh
+    
+    Processed image list:
     '''
+    for i in processedDataSets:
+        msgText += i[0] + '\n'
 else:
     msgText = '''ERROR: No HRSC images in the batch could be processed!'''
     

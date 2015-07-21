@@ -114,7 +114,7 @@ bool determineBlendedPixel(int height, int width, int row, int col,
                            const std::vector<double   > &weightsIn,  //
                            cv::Vec3b &outputPixel)
 {
-    
+  // DEBUG stuff
   int TEST_COL = 1010;
   int LOW_ROW  = 10;
   int HIGH_ROW = 1014;
@@ -285,7 +285,7 @@ bool transformHrscColor(const std::vector<cv::Mat>   &hrscChannels, const cv::Ma
     for (int c=0; c<numCols; c+=1)
     {
       // Handle masked pixels
-      if (hrscMask.at<unsigned char>(r, c) == 0)
+      if (hrscMask.at<MASK_DATA_TYPE>(r, c) == 0)
       {
         outputImage.at<cv::Vec3b>(r, c) = cv::Vec3b(0,0,0);
         continue;

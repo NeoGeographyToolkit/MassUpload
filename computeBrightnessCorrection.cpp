@@ -76,7 +76,7 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
       int hrscCol = c - colOffset;
       
       // Skip masked out HRSC pixels
-      if (hrscMask.at<unsigned char>(hrscRow, hrscCol) == 0)
+      if (hrscMask.at<MASK_DATA_TYPE>(hrscRow, hrscCol) == 0)
         continue;
     
       cv::Vec3b inputPixel = inputImage.at<cv::Vec3b>(r,c);
@@ -85,7 +85,7 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
     
     } // End col loop
     if (numUsedCols == 0) // Avoid divide by zero
-      thisRowMean = 128.0;
+      thisRowMean = 128.0; // If no data, pick a neutral intensity level
     else
       thisRowMean /= static_cast<float>(numUsedCols);
     
@@ -117,7 +117,7 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &hrs
     {     
       
       // Skip masked out HRSC pixels
-      if (hrscMask.at<unsigned char>(r,c) == 0)
+      if (hrscMask.at<MASK_DATA_TYPE>(r,c) == 0)
         continue;
 
       // For each pixel the brightness is the mean value across all channels
@@ -131,7 +131,7 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &hrs
     
     } // End col loop
     if (numColsUsed == 0) // Avoid divide by zero
-      thisRowMean = 128.0;
+      thisRowMean = 128.0; // If no data, pick a neutral intensity level
     else
       thisRowMean /= static_cast<float>(numColsUsed);
     

@@ -20,10 +20,10 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage, std::vector<c
   hrscPaths[2] = argv[4]; // B
   hrscPaths[3] = argv[5]; // NIR
   hrscPaths[4] = argv[6]; // NADIR
-  std::string hrscMaskPath = argv[7];
+  std::string hrscMaskPath         = argv[7];
   std::string spatialTransformPath = argv[8];
-  std::string brightnessPath = argv[9];
-  outputPath  = argv[10];
+  std::string brightnessPath       = argv[9];
+  outputPath = argv[10];
   
 
   const int LOAD_GRAY = 0;
@@ -68,7 +68,7 @@ int writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform
   const int numRows = hrscMask.rows;
   const int numCols = hrscMask.cols;
 
-  std::ofstream outputFile(outputPath.c_str());
+  std::ofstream outputFile;
 
   // Iterate over the pixels of the HRSC image
   bool gotValue;
@@ -77,9 +77,9 @@ int writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform
   for (int r=0; r<numRows; r+=sampleDist)
   {
     for (int c=0; c<numCols; c+=sampleDist)
-    {     
+    {         
       // Skip masked out HRSC pixels
-      if (hrscMask.at<unsigned char>(r,c) == 0)
+      if (hrscMask.at<MASK_DATA_TYPE>(r,c) == 0)
         continue;
     
       // Compute the equivalent location in the basemap image
@@ -88,25 +88,30 @@ int writeColorPairs(const cv::Mat &basemapImage, const cv::Mat &spatialTransform
       
       // Extract all of the basemap values at that location
       baseValues = interpPixelRgb(basemapImage, baseX, baseY, gotValue);
-           
-      if (gotValue) // Write all the values to a line in the file
+      if (!gotValue) 
+        continue; // Failed to interpolate a value here
+      
+      // Write all the values to a line in the file
+      if (numPairs == 0)
+        outputFile.open(outputPath.c_str(), std::ofstream::out);
+      
+      for (size_t i=0; i<NUM_BASE_CHANNELS; ++i)
       {
-        for (size_t i=0; i<NUM_BASE_CHANNELS; ++i)
-        {
-          outputFile << static_cast<int>(baseValues[i]) <<", "; // Cast to int so we don't print ASCII
-        }
-        // The HRSC values have a brightness correction applied
-        for (size_t i=0; i<NUM_HRSC_CHANNELS-1; ++i)
-        {
-          outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r))  <<", ";
-        }
-        outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c), r)) << std::endl;
-        numPairs++;
+        outputFile << static_cast<int>(baseValues[i]) <<", "; // Cast to int so we don't print ASCII
       }
+      // The HRSC values have a brightness correction applied
+      for (size_t i=0; i<NUM_HRSC_CHANNELS-1; ++i)
+      {
+        outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[i].at<unsigned char>(r,c), r))  <<", ";
+      }
+      outputFile << static_cast<int>(corrector.correctPixel(hrscChannels[NUM_HRSC_CHANNELS-1].at<unsigned char>(r,c), r)) << std::endl;
+      numPairs++;
+  
     } // End col loop
   } // End row loop
   
-  outputFile.close();
+  if (numPairs > 0)
+    outputFile.close();
 
   //std::cout << "numPairs = " << numPairs << std::endl;
   return numPairs;
@@ -137,7 +142,7 @@ int main(int argc, char** argv)
   // Generate the list of color pairs
   printf("Writing pixel pairs...\n");
   const int MIN_PIXEL_PAIRS = 80;
-  int sampleDist = 25;
+  int sampleDist = 64;
   int numSamples = 0;
   while (sampleDist > 0)
   {

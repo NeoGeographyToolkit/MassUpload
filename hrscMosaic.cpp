@@ -524,7 +524,7 @@ bool pasteImagesFeather(const             cv::Mat  &baseImage,
 
 
 // Functions above here are no longer used!
-//========================================================
+//==================================================================================================
 
 
 
@@ -676,9 +676,6 @@ bool pasteMaskWeightedImage(cv::Mat &outputImage,
 {
   const int tileHeight = imageToAdd.rows;
   const int tileWidth  = imageToAdd.cols;
-
-  const unsigned char MASK_MAX = 255;
-
   
   int minCol = -colOffset;
   int minRow = -rowOffset;
@@ -710,7 +707,7 @@ bool pasteMaskWeightedImage(cv::Mat &outputImage,
 
   // Get an inverse of the weight for the base image.
   cv::Mat inverseWeight3;
-  cv::subtract(MASK_MAX, imageWeight3, inverseWeight3, cv::noArray(), CV_8UC3);
+  cv::subtract(MASK_MAX, imageWeight3, inverseWeight3, cv::noArray(), CV_16UC3);
 
   cv::Mat  pasteRegion = imageToAdd (pasteRoi);
 
@@ -718,7 +715,7 @@ bool pasteMaskWeightedImage(cv::Mat &outputImage,
   //std::cout << "weight size = " << inverseWeight3.size() << std::endl;
   
   // outputImage = (outputImage * (1-weight)) + (imageToAdd * weight)
-  const double scale = 1.0 / (double)MASK_MAX; // Lets us multiply by a uint8 image
+  const double scale = 1.0 / (double)MASK_MAX; // Lets us multiply by a uint16 image
   cv::Mat weightedPaste, weightedBase;
   cv::multiply(outputRegion, inverseWeight3, weightedBase,  scale, CV_8UC3);
   cv::multiply(pasteRegion,  imageWeight3,   weightedPaste, scale, CV_8UC3);

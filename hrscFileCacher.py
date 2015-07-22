@@ -4,6 +4,7 @@ import sys
 import time
 import common
 import logging
+import datetime
 import sqlite3
 #from pysqlite2 import dbapi2 as sqlite3
     
@@ -112,23 +113,32 @@ class HrscFileCacher():
         self._logger.info('Cleaning up hrscFileCacher')
         self._db.close()
     
+    def _getDataSetLastAccessTime(self, setName):
+        '''Returns the time the data set was last accessed'''
+        setFolder = self._getDownloadStorageFolder(setName)
+        fileName  = self._makeFileName(setName, self._NEEDED_CHANNELS[0])
+        filePath  = os.path.join(setFolder, fileName)
+        fileTime = datetime.datetime.fromtimestamp(os.stat(filePath).st_ctime)
+        return fileTime
+        
     def _findCachedFiles(self):
         '''Identify all the cached files currently on disk'''
     
         # Just search the output directory for folders and each one is a data set.
         # - This will fail if any other junk gets in the output folder
         itemsInOutputDir = os.listdir(self._downloadFolder)
-        currentTime = time.time()
         for f in itemsInOutputDir:
             if (len(f) > 3): # Skip junk and work directory
                 setName = f
                 setFolder = os.path.join(self._downloadFolder, setName)
                 if self._checkIfSetIsComplete(setName):
-                    self._cachedDataSets.append( (setName, currentTime) )
+                    self._cachedDataSets.append( (setName, self._getDataSetLastAccessTime(setName)) )
                     self._logger.info('hrscFileCacher: Found existing cached file ' + setName)
                 else:
-                    self._incompleteDataSets.append(setName)
+                    # Incomplete sets are immediately deleted to avoid future problems
                     self._logger.warning('Incomplete data set found: ' + setFolder)
+                    self._deleteDataSet(setName)
+                    
     
     def _checkIfSetIsComplete(self, setName):
         setFolder = self._getDownloadStorageFolder(setName)
@@ -238,27 +248,32 @@ class HrscFileCacher():
             return # We still have room, don't delete anything.
         
         #print self._cachedDataSets
+        self._logger.info('Searching for oldest data set to delete...')
         
-        # Clear out any incomplete data sets
-        for setName in self._incompleteDataSets:
-            self._deleteDataSet(setName)
-        self._incompleteDataSets = []
+        ## Clear out any incomplete data sets
+        #for setName in self._incompleteDataSets:
+        #    self._deleteDataSet(setName)
+        #self._incompleteDataSets = []
 
         # Find the last accessed data set
         oldestIndex = -1
-        oldestTime  = 0
-        currentTime = time.time()
+        oldestTime  = datetime.datetime.now() # Init to newest time
         for i in range(0,len(self._cachedDataSets)):
             pair = self._cachedDataSets[i]
-            timeDiff = currentTime - pair[1]
-            if timeDiff > oldestTime:
-                oldestTime  = timeDiff
+            #timeDiff = currentTime - pair[1]
+            #print str(pair[0]) + ' = time ' + str(pair[1])
+            #print oldestTime
+            if pair[1] < oldestTime:
+                #print 'Updating oldest!'
+                oldestTime  = pair[1]
                 oldestIndex = i
         # Remove the data set from the internal record
-        oldestPair = self._cachedDataSets.pop(i)
+        oldestPair = self._cachedDataSets.pop(oldestIndex)
         oldestSet  = oldestPair[0]
         #print 'oldest...'
         #print oldestPair
+        
+        #raise Exception('DEBUFGGGGGG')
         
         # Delete it
         self._deleteDataSet(oldestSet)
@@ -308,7 +323,7 @@ class HrscFileCacher():
                 os.mkdir(setOutputFolder)
             
             # Internally record that we have the data set
-            self._cachedDataSets.append( (setName, time.time()) )
+            self._cachedDataSets.append( (setName, datetime.datetime.now()) )
             
             # Download each of the files
             poolResults = []

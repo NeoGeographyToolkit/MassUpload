@@ -72,13 +72,10 @@ Batch procedure:
 # Constants
 
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 18
+NUM_PROCESS_THREADS  = 16
 
 
-IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
-
-# TODO: Need to manage the processed HRSC folders, not just the download folders!
-#       - The batch management can take care of this
+IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
 
 
 
@@ -104,6 +101,12 @@ HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor C
 #-----------------------------------------------------------------------------------------
 # Functions
 
+def getDiskUsage():
+    '''Return simpe disk space usage information'''
+    cmd = ['df', '-h']
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    textOutput, err = p.communicate()
+    return textOutput
 
 
 def cacheManagerThreadFunction(databasePath, hrscDownloadFolder, hrscProcessedFolder, inputQueue, outputQueue):
@@ -543,6 +546,8 @@ if numHrscImagesProcessed > 0:
     To start the next batch, run:
     /byss/smcmich1/run_hrsc_basemap_script.sh
     
+    Disk usage info:
+    ''' + getDiskUsage()+'''
     Processed image list:
     '''
     for i in processedDataSets:

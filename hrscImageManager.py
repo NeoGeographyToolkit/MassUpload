@@ -248,7 +248,6 @@ class HrscImage():
 
         print 'Generating low res image copies...'
         
-        # TODO: Multi-thread this!
         # Generate a copy of each input HRSC channel at the low basemap resolution
         self._lowResWarpedPaths = [self._warpToProjection(path, outputFolder, '_basemap_res',
                                                           basemapInstance.getLowResMpp(), force)

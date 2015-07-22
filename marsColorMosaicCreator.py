@@ -9,11 +9,10 @@ import multiprocessing
 import threading
 import logging
 import datetime
-
+import time
 import traceback
 
 import IrgGeoFunctions
-#import copyGeoTiffInfo
 import mosaicTileManager # TODO: Normalize caps!
 import MosaicUtilities
 import hrscImageManager
@@ -72,9 +71,8 @@ Batch procedure:
 #----------------------------------------------------------------------------
 # Constants
 
-# TODO: If utilization is poor we can improve the parallel processing system!
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 14
+NUM_PROCESS_THREADS  = 18
 
 
 IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
@@ -197,6 +195,12 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
     hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
     #print 'HRSC BB = ' + str(hrscBoundingBoxDegrees)
     
+    # Expand the computed bounding box a little bit to insure that
+    #  we don't miss any tiles around the edges.
+    BUFFER_SIZE = 0.1 # BB buffer size in degrees
+    hrscBoundingBoxDegrees.expand(BUFFER_SIZE, BUFFER_SIZE)
+    
+    
     # DEBUG!  Restrict to a selected area.
     hrscBoundingBoxDegrees = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxDegrees)
     #print 'overlap BB = ' + str(hrscBoundingBoxDegrees)
@@ -256,10 +260,14 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     if basemapInstance.checkLog(mainLogPath, hrscSetName):
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
         return
-    
-    logger.info('Started updating tiles for HRSC image ' + hrscSetName)
 
+    logger.info('Started updating tiles for HRSC image ' + hrscSetName)
     logger.info('Found overlapping output tiles:  ' + str(outputTilesRect))
+    
+    # Do all the basemap calls first using the pool before doing the HRSC work
+    logger.info('Making sure we have required basemap tiles for HRSC image ' + hrscSetName)
+    basemapInstance.generateMultipleTileImages(outputTilesRect, pool, force=False)
+    
     if pool:
         logger.info('Initializing tile output tasks...')
     
@@ -277,10 +285,9 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
             #logger.info('\nMaking sure basemap info is present...')
             
-            # Now that we have selected a tile, generate all of the tile images for it.
-            # - The first time this is called for a tile it generates the backup image for the tile.
-            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath) =  \
-                        basemapInstance.generateTileImages(tileIndex, False)
+            # Retrieve the needed paths for this tile
+            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
+                basemapInstance.getPathsForTile(tileIndex) 
         
             #print '\nPasting on HRSC tiles...'
 
@@ -350,6 +357,8 @@ kmlPyramidFolder = '/byss/docroot/smcmich1/hrscMosaicKml'
 
 print 'Starting basemap enhancement script...'
 
+startTime = time.time()
+
 logger = logging.getLogger('MainProgram')
 
 # Echo logging to stdout
@@ -395,9 +404,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h0449_0009'] # DEBUG
-
-# TODO: Filter out images which don't have all the data sets available
+#hrscImageList = ['h0449_0009'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -405,9 +412,8 @@ hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]   #['h3276_0000']
 batchName     = hrscImageList[0] # TODO: Assign the batches a number.
 print 'Image list for this batch: ' + str(hrscImageList)
 
-## Set up the HRSC file manager object
+# Set up the HRSC file manager thread
 logger.info('Starting communication queues')
-#hrscFileFetcher = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, downloadPool)
 downloadCommandQueue  = multiprocessing.Queue()
 downloadResponseQueue = multiprocessing.Queue()
 logger.info('Initializing HRSC file caching thread')
@@ -454,7 +460,6 @@ for i in range(0,numHrscDataSets):
     logger.info('=== Fetching HRSC image ' + hrscSetName + ' ===')
 
     # Fetch the HRSC data from the web
-    #hrscFileInfoDict = hrscFileFetcher.fetchHrscDataSet(hrscSetName)
     hrscFileInfoDict = downloadResponseQueue.get() # Wait for the parallel thread to provide the data
     if not 'setName' in hrscFileInfoDict:
         raise Exception('Ran out of HRSC files, processing stopped!!!')
@@ -474,8 +479,6 @@ for i in range(0,numHrscDataSets):
 
     # Preprocess the HRSC image
     hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
-
-    # TODO: Need to make the HRSC manager clean up the processed folder too!
 
     logger.info('--- Now initializing high res HRSC content ---')
 
@@ -510,6 +513,10 @@ if processPool:
 downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()
 
+# Compute the run time for the output message
+SECONDS_TO_HOURS = 1.0 / (60.0*60.0)
+stopTime = time.time()
+runTime  = (stopTime - startTime) * SECONDS_TO_HOURS
 
 if numHrscImagesProcessed > 0:
     # Generate a KML pyramid of the tiles for diagnostics
@@ -521,6 +528,8 @@ if numHrscImagesProcessed > 0:
     msgText = '''
     Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
     
+    elapsed time = ''' + str(runTime) + ''' hours.
+    
     KML pyramid link:
     '''+kmlPyramidWebAddress+'''
     To undo the tile changes:
@@ -531,8 +540,8 @@ if numHrscImagesProcessed > 0:
     To accept the tile changes:
     rm  '''+basemapInstance.getBackupFolder()+'''/*
 
-    To start the next batch:
-    source /byss/smcmich1/run_hrsc_basemap_script.sh
+    To start the next batch, run:
+    /byss/smcmich1/run_hrsc_basemap_script.sh
     
     Processed image list:
     '''

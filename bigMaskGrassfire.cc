@@ -103,7 +103,7 @@ public:
   typedef CropView<ImageView<result_type> > prerasterize_type;
   inline prerasterize_type prerasterize( BBox2i const& bbox ) const 
   { 
-    const int GRASSFIRE_DISTANCE = 2048;
+    const int GRASSFIRE_DISTANCE = static_cast<int>(MASK_MAX);
   
     // Load up a section of the input image that is large enough to fully compute the
     // grassfile results for this tile.  That ensures only a single disk load per tile.

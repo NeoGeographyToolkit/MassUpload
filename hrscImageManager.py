@@ -139,7 +139,6 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
     # Skip tile creation if the first tile is present
     # - May need to make the decision smarter later on
     firstTilePath = outputPrefix + '0_0.tif'
-    #if not os.path.exists(firstTilePath):   
     splitImageGdal(imagePath, outputPrefix, tileSize, force, pool, maskList)
     
     print 'Finished splitting image, collecting tile information...'
@@ -147,9 +146,10 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
     # Build the list of output files
     outputTileInfoList = []
     cmdList = []
-    for f in sorted(os.listdir(outputFolder)):
-        if ('_tile_' not in f) or ('json' in f) or ('xml' in f) or (filename not in f): # Skip metadata files and any junk
-            continue
+    fileList = sorted(os.listdir(outputFolder))
+    for f in fileList:
+        if ('_tile_' not in f) or ('json' in f) or ('xml' in f) or (filename not in f): 
+            continue  # Skip metadata files and any junk
         thisPath = os.path.join(outputFolder, f)
         thisMetadataPath = thisPath + '_metadata.json' # Path to record the metadata to
         
@@ -304,7 +304,8 @@ class HrscImage():
         return self._setName
     
     def getBoundingBoxDegrees(self):
-        '''Returns the bounding box of the entire HRSC image'''
+        '''Returns the bounding box of the entire HRSC image.
+           This BB is based on the image registration so it should be fairly accurate.'''
         return self._hrscBoundingBoxDegrees
         
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
@@ -334,7 +335,7 @@ class HrscImage():
 
         # Now call another script to generate a mask with blending information
         print 'Generating high resolution grassfire mask...'
-        cmd = './bigMaskGrassfire -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
+        cmd = './bigMaskGrassfire --cache 4096 -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)        
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath
 

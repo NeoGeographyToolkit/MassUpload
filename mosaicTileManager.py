@@ -205,31 +205,73 @@ class MarsBasemap:
                 
         self._logger.info('Copied ' + str(numFilesBackedUp) + ' files to the backup folder')
 
-    
-    def generateTileImages(self, tileIndex, force=False):
-        '''Generate all the basemap sourced images for a tile and return paths.
-           Also generate a backup copy of the output tile if it does not already exist.'''
+    def generateMultipleTileImages(self, tileRect, pool=None, force=False):
+        '''Generate all the tile images in a range'''
         
+        # Loop through all the tiles
+        cmdList = []
+        for row in range(tileRect.minY, tileRect.maxY):
+            for col in range(tileRect.minX, tileRect.maxX):
+        
+                # Set up the tile information
+                tileIndex  = MosaicUtilities.TileIndex(row, col)
+                tileBounds = self.getTileRectDegree(tileIndex)
+                
+                
+                # Now that we have selected a tile, generate all of the tile images for it.
+                # - The first time this is called for a tile it generates the backup image for the tile.
+                (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1 , cmd2) =  \
+                            self._generateImagesForTile(tileIndex, force=False)
+                
+                if not pool: # Go ahead and run the last two commands
+                    MosaicUtilities.cmdRunner(cmd1, grayTilePath, force)
+                    MosaicUtilities.cmdRunner(cmd2, outputTilePath, force)
+                else: # Add the commands to a list
+                    cmdList.append( (cmd1, grayTilePath,   force) )
+                    cmdList.append( (cmd2, outputTilePath, force) )
+    
+        if not pool: # No pool, we are finished.
+            return True
+        
+        # Otherwise send all the commands to the processor.
+        for cmd in cmdList:
+            pool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+        return True
+        
+    def getPathsForTile(self, tileIndex):
+        '''For a given tile index, returns some relevant file paths.'''
+    
         tileFolder = self.getTileFolder(tileIndex)
         if not os.path.exists(tileFolder):
             os.mkdir(tileFolder)
 
         smallTilePath  = os.path.join(tileFolder, 'basemap_orig_res.tif')
         grayTilePath   = os.path.join(tileFolder, 'basemap_orig_res_gray.tif')
-        largeTilePath  = os.path.join(tileFolder, 'basemap_output_res.tif')
+        largeTilePath  = os.path.join(tileFolder, 'basemap_output_res.tif') #DEFUNCT
         
         outputTileName = 'output_tile_'+tileIndex.getPostfix()+'.tif'
         outputTilePath = os.path.join(self._outputTileFolder, outputTileName)
         tileBackupPath = os.path.join(self._backupFolder,     outputTileName)
         tileLogPath    = os.path.join(self._outputTileFolder, 'output_tile_'+tileIndex.getPostfix()+'_log.txt')
+    
+        return (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath)
+    
+    def _generateImagesForTile(self, tileIndex, force=False):
+        '''Generate all the basemap sourced images for a tile and return paths.
+           Also generate a backup copy of the output tile if it does not already exist.
+           In order to facilitate processing pool usage, this returns the last two
+           commands that need to be executed.'''
+
+        # Retrieve the needed paths
+        (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
+            self.getPathsForTile(tileIndex)        
 
         # If this output tile has not already been backed up, make a backup copy now.
         # - This means that the tile gets backup up to its state right after
         #    the backup was last cleared.
         self._logger.info('Backing up tile ' + outputTilePath)
-        backupPath = os.path.join(self._backupFolder, outputTileName)
-        if not os.path.exists(backupPath) and os.path.exists(outputTilePath):
-          shutil.copy(outputTilePath, backupPath)
+        if not os.path.exists(tileBackupPath) and os.path.exists(outputTilePath):
+          shutil.copy(outputTilePath, tileBackupPath)
 
         degreeRoi = self.getTileRectDegree(tileIndex)
         self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(degreeRoi))
@@ -238,23 +280,23 @@ class MarsBasemap:
         self.makeCroppedRegionDegrees(degreeRoi, smallTilePath)
 
         # Generate a grayscale version of the small copy of this tile
-        cmd = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)
-        MosaicUtilities.cmdRunner(cmd, grayTilePath, force)
+        cmd1 = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)
+        #MosaicUtilities.cmdRunner(cmd, grayTilePath, force)
 
         # Generate a copy of this tile at the full output resolution
-        cmd = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
-               + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ largeTilePath)
-        MosaicUtilities.cmdRunner(cmd, largeTilePath, force)
+        cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+               + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ outputTilePath)#largeTilePath)
+        #MosaicUtilities.cmdRunner(cmd, largeTilePath, force)
 
-        # Generate the output tile (HRSC images will be pasted on to it)
-        if (force or not os.path.exists(outputTilePath)):
-            copyGeoTiffInfo.copyGeoTiffInfo(smallTilePath, largeTilePath, outputTilePath)
+#        # Generate the output tile (HRSC images will be pasted on to it)
+#        if (force or not os.path.exists(outputTilePath)):
+#            copyGeoTiffInfo.copyGeoTiffInfo(smallTilePath, largeTilePath, outputTilePath)
         
         # Create the empty tile log file
         cmd = 'touch ' + tileLogPath
         os.system(cmd)
         
-        return (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath)
+        return (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1, cmd2)
     
     def checkLog(self, logPath, name):
         '''Return True if the name exists in the log file'''

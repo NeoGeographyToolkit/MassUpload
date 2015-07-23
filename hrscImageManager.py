@@ -467,6 +467,7 @@ class HrscImage():
         
     def _getWarpToProjectionCmd(self, sourcePath, outputFolder, postfix, metersPerPixel):
         '''Get the command needed by _warpToProjection'''
+        
         if not os.path.exists(outputFolder):
             os.mkdir(outputFolder)
         fileName   = sourcePath[sourcePath.rfind('/')+1:]

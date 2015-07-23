@@ -21,7 +21,7 @@ class MarsBasemap:
        The top left tile in index 0,0.
     '''
     
-    def __init__(self, fullBasemapPath, outputTileFolder):
+    def __init__(self, fullBasemapPath, outputTileFolder, backupFolder):
         
         # Info about Noel's base map
         DEGREES_TO_PROJECTION_METERS = 59274.9
@@ -60,7 +60,7 @@ class MarsBasemap:
         if not os.path.exists(self._baseTileFolder):
             os.mkdir(self._baseTileFolder)
 
-        self._backupFolder = os.path.join(os.path.dirname(fullBasemapPath), 'output_tile_backups')
+        self._backupFolder = backupFolder
         if not os.path.exists(self._backupFolder):
             os.mkdir(self._backupFolder)
             
@@ -73,11 +73,16 @@ class MarsBasemap:
         cmd = 'touch ' + mainLogPath
         os.system(cmd)
         
-        # Create output backups if they do not already exist
-        self._backupTiles()
+        ## Create output backups if they do not already exist
+        #self._backupTiles()
 
     def getMainLogPath(self):
         return os.path.join(self._outputTileFolder, 'main_log.txt')
+
+    def copySupportFilesFromBackupDir(self):
+        '''Moves any needed files from the backup folder to the output folder'''
+        backupMainLogPath = os.path.join(self._backupFolder, 'main_log.txt')
+        shutil.copy(self.getMainLogPath(), backupMainLogPath)
 
     def _getGrayBasemap(self):
         '''Creates a grayscale version of the basemap if it does not already exist'''
@@ -185,7 +190,7 @@ class MarsBasemap:
     def _backupTiles(self):
         '''Back up all tiles to the backup folder if they are not already backup up.
            In this way, each file only gets backed up when the previous backup is manually cleared.'''
-
+        raise Exception('DEPRECATED')
         self._logger.info('Backing up tiles to folder ' + self._backupFolder)
         
         # Get list of files in the output folder
@@ -266,13 +271,6 @@ class MarsBasemap:
         (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
             self.getPathsForTile(tileIndex)        
 
-        # If this output tile has not already been backed up, make a backup copy now.
-        # - This means that the tile gets backup up to its state right after
-        #    the backup was last cleared.
-        self._logger.info('Backing up tile ' + outputTilePath)
-        if not os.path.exists(tileBackupPath) and os.path.exists(outputTilePath):
-          shutil.copy(outputTilePath, tileBackupPath)
-
         degreeRoi = self.getTileRectDegree(tileIndex)
         self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(degreeRoi))
 
@@ -281,17 +279,22 @@ class MarsBasemap:
 
         # Generate a grayscale version of the small copy of this tile
         cmd1 = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)
-        #MosaicUtilities.cmdRunner(cmd, grayTilePath, force)
 
         # Generate a copy of this tile at the full output resolution
-        cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
-               + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ outputTilePath)#largeTilePath)
-        #MosaicUtilities.cmdRunner(cmd, largeTilePath, force)
+        # - The image is blurred as it is upsampled so it does not look pixelated
+        # - This operation is expensive and only needs to happen once per tile.
+        # - All future tile updates will be pasted on top of this tile.
+        if not os.path.exists(tileBackupPath):
+            cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+                   + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
+            if os.path.exists(tileOutputPath):
+                raise Exception('Output tile should never exist without backup file!')
+        else: # Just make this a dummy command
+            cmd2 = ':'
+        # If this tile does not yet exist in the output folder, copy the latest backup there
+        if not os.path.exists(outputTilePath):
+            cmd2 += ' && cp ' + tileBackupPath +' '+ outputTilePath
 
-#        # Generate the output tile (HRSC images will be pasted on to it)
-#        if (force or not os.path.exists(outputTilePath)):
-#            copyGeoTiffInfo.copyGeoTiffInfo(smallTilePath, largeTilePath, outputTilePath)
-        
         # Create the empty tile log file
         cmd = 'touch ' + tileLogPath
         os.system(cmd)

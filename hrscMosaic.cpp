@@ -528,28 +528,62 @@ bool pasteImagesFeather(const             cv::Mat  &baseImage,
 
 
 
-/// Load all the input files
-bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
-                     std::vector<cv::Mat> &hrscImages,
-                     std::vector<cv::Mat> &hrscMasks,
-                     std::vector<cv::Mat> &spatialTransforms, std::string &outputPath)
+/// Load one of the HRSC images
+bool loadInputImage(int argc, char** argv,
+                     cv::Mat &hrscImage,
+                     cv::Mat &hrscMask,
+                     cv::Mat &spatialTransform,
+                     const int imageToLoad)
 {
   // Parse the input arguments
   const size_t numHrscImages = (argc - 3)/3;
   std::vector<std::string> hrscPaths(numHrscImages),
                            hrscMaskPaths(numHrscImages),
                            spatialTransformPaths(numHrscImages);
-  std::string baseImagePath = argv[1];
-  outputPath = argv[2];
-  
+
   // Pick out the three arguments for each input image
   for (size_t i=0; i<numHrscImages; ++i)
   {
-    hrscPaths[i]             = argv[3 + 2*i];
-    hrscMaskPaths[i]         = argv[4 + 2*i];
-    spatialTransformPaths[i] = argv[5 + 2*i];
+    hrscPaths[i]             = argv[3 + 3*i];
+    hrscMaskPaths[i]         = argv[4 + 3*i];
+    spatialTransformPaths[i] = argv[5 + 3*i];
   }
 
+  const int LOAD_GRAY = 0;
+  const int LOAD_RGB  = 1;
+  
+  
+  // Load all of the HRSC images and their spatial transforms
+  cv::Mat tempTransform;
+  int i = imageToLoad;
+    
+  if (!readOpenCvImage(hrscPaths[i], hrscImage, LOAD_RGB))
+    return false;
+  if (!readOpenCvImage(hrscMaskPaths[i], hrscMask, LOAD_GRAY))
+  {
+    printf("Mask read error!\n");
+    return false;
+  }
+
+  if (!readTransform(spatialTransformPaths[i], tempTransform))
+  {
+    printf("Failed to load HRSC spatial transform: %s\n", spatialTransformPaths[i].c_str());
+    return false;
+  }
+  // Each transform is read in HRSC_to_basemap but we want basemap_to_HRSC so invert.
+  double check = cv::invert(tempTransform, spatialTransform);
+
+  return true;
+}
+
+/// Load non-hrsc data
+bool loadOtherData(int argc, char** argv, cv::Mat &basemapImage, int &numHrscImages, std::string &outputPath)
+{
+  // Parse the input arguments
+  numHrscImages = (argc - 3)/3;
+  std::string baseImagePath = argv[1];
+  outputPath = argv[2];
+  
   const int LOAD_GRAY = 0;
   const int LOAD_RGB  = 1;
   
@@ -557,33 +591,9 @@ bool loadInputImages(int argc, char** argv, cv::Mat &basemapImage,
   if (!readOpenCvImage(baseImagePath, basemapImage, LOAD_RGB))
       return false;
   
-  // Load all of the HRSC images and their spatial transforms
-  cv::Mat tempTransform;
-  hrscImages.resize(numHrscImages);
-  hrscMasks.resize(numHrscImages);
-  spatialTransforms.resize(numHrscImages);
-  for (size_t i=0; i<numHrscImages; ++i)
-  {
-    if (!readOpenCvImage(hrscPaths[i], hrscImages[i], LOAD_RGB))
-      return false;
-    if (!readOpenCvImage(hrscMaskPaths[i], hrscMasks[i], LOAD_GRAY))
-    {
-      printf("Mask read error!\n");
-      return false;
-    }
-    
-    if (!readTransform(spatialTransformPaths[i], tempTransform))
-    {
-      printf("Failed to load HRSC spatial transform: %s\n", spatialTransformPaths[i].c_str());
-      return false;
-    }
-    // Each transform is read in HRSC_to_basemap but we want basemap_to_HRSC so invert.
-    double check = cv::invert(tempTransform, spatialTransforms[i]);
-  }
-  printf("Loaded %d images.\n", numHrscImages);
-
   return true;
 }
+
 
 // Without supporting classes this function is a mess
 void getPasteBoundingBox(const cv::Mat &outputImage, const cv::Mat imageToAdd, const cv::Mat &spatialTransform,
@@ -740,19 +750,18 @@ int main(int argc, char** argv)
 
   printf("Loading input data...\n");
   
-  
-  //TODO: Load the input images one at a time!
-  
   // Load the input images  
   cv::Mat basemapImage;
   std::string outputPath;
-  std::vector<cv::Mat> hrscImages, hrscMasks, spatialTransforms;
-  if (!loadInputImages(argc, argv, basemapImage, hrscImages, hrscMasks, spatialTransforms, outputPath))
+  cv::Mat hrscImage, hrscMask, spatialTransform;
+  
+  int numHrscImages=0;
+  if (!loadOtherData(argc, argv, basemapImage, numHrscImages, outputPath))
   {
     printf("Error reading input arguments!\n");
     return -1;
   }
-  const size_t numHrscImages = hrscImages.size();
+  
 
   // The spatial transform is from the base map to HRSC
 
@@ -760,7 +769,7 @@ int main(int argc, char** argv)
   // Initialize the output image to be identical to the input basemap image
   
 
-  printf("Painting on HRSC images...\n");
+  //printf("Painting on HRSC images...\n");
   cv::Mat outputImage;
 
   // Hack to use the simple paste method for the tiny debug images
@@ -770,13 +779,20 @@ int main(int argc, char** argv)
     //pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
 
     // Blending based on the weighted input masks
-    const size_t numImages = hrscImages.size();
     outputImage = basemapImage;
-    for (size_t i=0; i<numImages; ++i)
+    for (int i=0; i<numHrscImages; ++i)
     {
-      int colOffset = static_cast<int>(spatialTransforms[i].at<float>(0, 2));
-      int rowOffset = static_cast<int>(spatialTransforms[i].at<float>(1, 2));
-      pasteMaskWeightedImage(outputImage, hrscImages[i], hrscMasks[i], colOffset, rowOffset);
+      // Load the inputs for this single image
+      if (!loadInputImage(argc, argv, hrscImage, hrscMask, spatialTransform, i))
+      {
+        printf("Error reading input arguments!\n");
+        return -1;
+      }
+    
+      // Add this image to the output tile
+      int colOffset = static_cast<int>(spatialTransform.at<float>(0, 2));
+      int rowOffset = static_cast<int>(spatialTransform.at<float>(1, 2));
+      pasteMaskWeightedImage(outputImage, hrscImage, hrscMask, colOffset, rowOffset);
     }
   }
   else // Use the simple paste
@@ -785,13 +801,19 @@ int main(int argc, char** argv)
 
     // For now, just dump all of the HRSC images in one at a time.
     outputImage = basemapImage.clone();
-    for (size_t i=0; i<numHrscImages; ++i)
+    for (int i=0; i<numHrscImages; ++i)
     {
-      pasteImage(outputImage, hrscImages[i], hrscMasks[i], spatialTransforms[i]);
+      // Load the inputs for this single image
+      if (!loadInputImage(argc, argv, hrscImage, hrscMask, spatialTransform, i))
+      {
+        printf("Error reading input arguments!\n");
+        return -1;
+      }    
+      pasteImage(outputImage, hrscImage, hrscMask, spatialTransform);
     }
     
   }
-  printf("Writing output file...\n");
+  printf("Writing output file %s...\n", outputPath.c_str());
   
   // Write the output image
   cv::imwrite(outputPath, outputImage);

@@ -72,10 +72,10 @@ Batch procedure:
 # Constants
 
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 16
+NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 4 # This should be set equal to the HRSC cache size
 
 
 
@@ -230,17 +230,19 @@ def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
 def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
     '''Update a single output tile with the given HRSC image'''
 
-    # TODO: This C++ program can do multiple tiles in one call.
-
-    # For each tile...
+    # Append all the tiles into one big command line call
     hrscTiles = ''
+    cmd = './hrscMosaic ' + outputTilePath +' '+ outputTilePath
     for hrscTile in hrscTileInfoDict.itervalues():    
         #try:
-        cmd = ('./hrscMosaic ' + outputTilePath +' '+ outputTilePath +' '+ hrscTile['newColorPath'] +' '+
-                                  hrscTile['tileMaskPath'] +' '+ hrscTile['tileToTileTransformPath'])
-        MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
-        #raise Exception('DEBUG')
+        # This pastes the HRSC tile on top of the current output tile.  Another function
+        #  will have made sure the correct output tile is in place.
+        cmd += (' '+ hrscTile['newColorPath'] +' '+
+                  hrscTile['tileMaskPath'] +' '+ hrscTile['tileToTileTransformPath'])
         hrscTiles += hrscTile['prefix'] + ', '
+
+    # Execute the command line call
+    MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
 
     # Return the path to log the success to
     return (tileLogPath, hrscTiles)
@@ -268,6 +270,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     logger.info('Found overlapping output tiles:  ' + str(outputTilesRect))
     
     # Do all the basemap calls first using the pool before doing the HRSC work
+    # - This will make sure that the proper file exists in the output directory to 
+    #   paste incoming HRSC tiles on top of.
     logger.info('Making sure we have required basemap tiles for HRSC image ' + hrscSetName)
     basemapInstance.generateMultipleTileImages(outputTilesRect, pool, force=False)
     
@@ -280,7 +284,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         for col in range(outputTilesRect.minX, outputTilesRect.maxX):
     
             # Set up the til information
-            tileIndex  = MosaicUtilities.TileIndex(row, col) #basemapInstance.getTileIndex(98.5, -27.5)
+            tileIndex  = MosaicUtilities.TileIndex(row, col)
             tileBounds = basemapInstance.getTileRectDegree(tileIndex)
             
             logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
@@ -339,7 +343,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
-#-----------------------------------------------------------------------------------------
+#================================================================================
 
 # Laptop
 #testDirectory    = '/home/smcmich1/data/hrscMapTest/'
@@ -354,8 +358,18 @@ fullBasemapPath  = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif
 sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
 outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
+backupFolder     = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
 databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
 kmlPyramidFolder = '/byss/docroot/smcmich1/hrscMosaicKml'
+
+
+# --- Folder notes ---
+# - sourceHrscFolder holds the downloaded and preprocessed HRSC data
+# - hrscOutputFolder holds the fully processed HRSC files
+# - The current crop of tiles is written to outputTileFolder
+# - The persistent set of final output tiles is kept in backupFolder
+
+#================================================================================
 
 
 print 'Starting basemap enhancement script...'
@@ -377,7 +391,8 @@ if NUM_PROCESS_THREADS > 1:
     processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
 
 logger.info('==== Initializing the base map object ====')
-basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder)
+basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, backupFolder)
+basemapInstance.copySupportFilesFromBackupDir() # Copies the main log from the backup dir to output dir
 basemapInputsUsedLog = basemapInstance.getMainLogPath()
 logger.info('--- Finished initializing the base map object ---\n')
 
@@ -407,7 +422,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = ['h0449_0009'] # DEBUG
+#hrscImageList = ['h0471_0001'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -536,12 +551,16 @@ if numHrscImagesProcessed > 0:
     KML pyramid link:
     '''+kmlPyramidWebAddress+'''
     To undo the tile changes:
-    cp -r '''+basemapInstance.getBackupFolder()+' '+outputTileFolder+''' 
+    rm  '''+outputTileFolder+'''/*
+    #cp -r '''+backupFolder+' '+outputTileFolder+''' 
 
     TODO: Also need to update the input log files in the output folder!
 
     To accept the tile changes:
-    rm  '''+basemapInstance.getBackupFolder()+'''/*
+    rsync  -uv '''+outputTileFolder +' '+ backupFolder+'''
+    rm  '''+outputTileFolder+'''/*
+    
+    #rm  '''+backupFolder+'''/*
 
     To start the next batch, run:
     /byss/smcmich1/run_hrsc_basemap_script.sh

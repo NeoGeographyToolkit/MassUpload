@@ -40,7 +40,17 @@ def cmdRunnerWrapper(params):
     cmd        = params[0]
     outputPath = params[1]
     force      = params[2]
-    cmdRunner(cmd, outputPath, force)
+    numRetries = 1
+    if len(params) > 3:
+        numRetries = params[3]
+    # Try to call the command one or more times
+    while numRetries > 0:
+        try:
+            cmdRunner(cmd, outputPath, force)
+            return True
+        except CmdRunException:
+            numRetries -= 1
+        raise CmdRunException('Failed to create output file: ' + outputPath)
 
 
 def countBlackPixels(imagePath, isGray=True):

@@ -75,7 +75,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 4 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 10 # This should be set equal to the HRSC cache size
 
 
 
@@ -95,8 +95,8 @@ BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
-
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
 
 #-----------------------------------------------------------------------------------------
 # Functions
@@ -450,8 +450,9 @@ downloadCommandQueue.put('FETCH ' + hrscImageList[0])
 
 
 # Loop through input HRSC images
-numHrscDataSets = len(hrscImageList) 
+numHrscDataSets   = len(hrscImageList) 
 processedDataSets = []
+failedDataSets    = []
 for i in range(0,numHrscDataSets): 
     
     # Get the name of this and the next data set
@@ -473,52 +474,51 @@ for i in range(0,numHrscDataSets):
     ## Pick a location to store the data for this HRSC image
     thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
 
-    #try:
+    try:
 
-    logger.info('=== Fetching HRSC image ' + hrscSetName + ' ===')
+        logger.info('=== Fetching HRSC image ' + hrscSetName + ' ===')
 
-    # Fetch the HRSC data from the web
-    hrscFileInfoDict = downloadResponseQueue.get() # Wait for the parallel thread to provide the data
-    if not 'setName' in hrscFileInfoDict:
-        raise Exception('Ran out of HRSC files, processing stopped!!!')
-    if hrscFileInfoDict['setName'] != hrscSetName:
-        raise Exception('Set fetch mismatch!  Expected %s, got %s instead!' % 
-                         (hrscSetName, hrscFileInfoDict['setName']))
-    logger.info('Received fetch information for ' + hrscSetName)
+        # Fetch the HRSC data from the web
+        hrscFileInfoDict = downloadResponseQueue.get() # Wait for the parallel thread to provide the data
+        if not 'setName' in hrscFileInfoDict:
+            raise Exception('Ran out of HRSC files, processing stopped!!!')
+        if hrscFileInfoDict['setName'] != hrscSetName:
+            raise Exception('Set fetch mismatch!  Expected %s, got %s instead!' % 
+                             (hrscSetName, hrscFileInfoDict['setName']))
+        logger.info('Received fetch information for ' + hrscSetName)
 
-    if 'error' in hrscFileInfoDict:
-        logger.info('Skipping data set ' + hrscSetName + ' which could not be fetched.')
-        continue
+        if 'error' in hrscFileInfoDict:
+            logger.info('Skipping data set ' + hrscSetName + ' which could not be fetched.')
+            continue
 
-    #print 'SKIPPING IMAGE PROCESSING!!!'
-    #continue
+        logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
 
-    logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
+        # Preprocess the HRSC image
+        hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
 
-    # Preprocess the HRSC image
-    hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
+        logger.info('--- Now initializing high res HRSC content ---')
 
-    logger.info('--- Now initializing high res HRSC content ---')
+        # Complete the high resolution components
+        hrscInstance.prepHighResolutionProducts()
+        
+        logger.info('--- Finished initializing HRSC image ---\n')
 
-    # Complete the high resolution components
-    hrscInstance.prepHighResolutionProducts()
-    
-    logger.info('--- Finished initializing HRSC image ---\n')
 
-    #raise Exception('DEBUG')
+        # Call the function to update all the output images for this HRSC image
+        updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
 
-    #continue # DEBUG - Just update the registration
+        logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
+        
+        # Record that we finished processing this HRSC image
+        processedDataSets.append( (hrscSetName, hrscInstance.getBoundingBoxDegrees()) )
 
-    # Call the function to update all the output images for this HRSC image
-    updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
-
-    logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
-    
-    # Record that we finished processing this HRSC image
-    processedDataSets.append( (hrscInstance.getSetName(), 
-                               hrscInstance.getBoundingBoxDegrees()) )
-
-    #raise Exception('DEBUG')
+    except Exception, e:
+        # When we fail to fetch a data set, log a failure message and keep going.
+        failedDataSets.append(hrscSetName)
+        logger.error('Caught exception processing data set ' + hrscSetName + '\n' + 
+                     str(e) + '\n' + str(sys.exc_info()[0]) + '\n')
+        logger.error(traceback.format_exc())
+            
 
 numHrscImagesProcessed = len(processedDataSets)
 
@@ -544,35 +544,33 @@ if numHrscImagesProcessed > 0:
 
     # Send a message notifiying that the output needs to be reviewed!
     msgText = '''
-    Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
-    
-    elapsed time = ''' + str(runTime) + ''' hours.
-    
-    KML pyramid link:
-    '''+kmlPyramidWebAddress+'''
-    To undo the tile changes:
-    rm  '''+outputTileFolder+'''/*
-    #cp -r '''+backupFolder+' '+outputTileFolder+''' 
+Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
 
-    TODO: Also need to update the input log files in the output folder!
+elapsed time = ''' + str(runTime) + ''' hours.
 
-    To accept the tile changes:
-    rsync  -uv '''+outputTileFolder +' '+ backupFolder+'''
-    rm  '''+outputTileFolder+'''/*
-    
-    #rm  '''+backupFolder+'''/*
+KML pyramid link:
+'''+kmlPyramidWebAddress+'''
+To undo the tile changes:
+rm  '''+outputTileFolder+'''/*
 
-    To start the next batch, run:
-    /byss/smcmich1/run_hrsc_basemap_script.sh
-    
-    Disk usage info:
-    ''' + getDiskUsage()+'''
-    Processed image list:
-    '''
+To accept the tile changes:
+rsync  -urv '''+outputTileFolder +' '+ backupFolder+'''
+rm  '''+outputTileFolder+'''/*
+
+To start the next batch, run:
+/byss/smcmich1/run_hrsc_basemap_script.sh
+
+Disk usage info:
+''' + getDiskUsage()+'''
+Processed image list:
+'''
     for i in processedDataSets:
         msgText += i[0] + '\n'
+    msgText += '\n Failed image list:\n'
+    for i in failedDataSets:
+        msgText += i[0] + '\n'
 else:
-    msgText = '''ERROR: No HRSC images in the batch could be processed!'''
+    msgText = '''ERROR: No HRSC images in the batch could be processed!\n''' + str(failedDataSets)
     
     
 MosaicUtilities.sendEmail('scott.t.mcmichael@nasa.gov', 

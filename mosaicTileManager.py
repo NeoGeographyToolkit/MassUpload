@@ -232,8 +232,10 @@ class MarsBasemap:
                     MosaicUtilities.cmdRunner(cmd1, grayTilePath, force)
                     MosaicUtilities.cmdRunner(cmd2, outputTilePath, force)
                 else: # Add the commands to a list
+                    # The seconds command seems prone to failure, so try it more than once.
+                    NUM_CONVERT_RETRIES = 3
                     cmdList.append( (cmd1, grayTilePath,   force) )
-                    cmdList.append( (cmd2, outputTilePath, force) )
+                    cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) )
     
         if not pool: # No pool, we are finished.
             return True
@@ -287,7 +289,7 @@ class MarsBasemap:
         if not os.path.exists(tileBackupPath):
             cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
                    + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
-            if os.path.exists(tileOutputPath):
+            if os.path.exists(outputTilePath):
                 raise Exception('Output tile should never exist without backup file!')
         else: # Just make this a dummy command
             cmd2 = ':'

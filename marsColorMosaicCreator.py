@@ -75,7 +75,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 10 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 
 
 
@@ -422,7 +422,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = ['h0471_0001'] # DEBUG
+hrscImageList = ['h2410_0000'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -568,7 +568,7 @@ Processed image list:
         msgText += i[0] + '\n'
     msgText += '\n Failed image list:\n'
     for i in failedDataSets:
-        msgText += i[0] + '\n'
+        msgText += i + '\n'
 else:
     msgText = '''ERROR: No HRSC images in the batch could be processed!\n''' + str(failedDataSets)
     

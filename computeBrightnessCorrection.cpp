@@ -76,7 +76,7 @@ bool rgbVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &spat
       int hrscCol = c - colOffset;
       
       // Skip masked out HRSC pixels
-      if (hrscMask.at<MASK_DATA_TYPE>(hrscRow, hrscCol) == 0)
+      if (hrscMask.at<BINARY_MASK_DATA_TYPE>(hrscRow, hrscCol) == 0)
         continue;
     
       cv::Vec3b inputPixel = inputImage.at<cv::Vec3b>(r,c);
@@ -117,7 +117,7 @@ bool hrscVertProfile(const std::vector<cv::Mat> hrscChannels, const cv::Mat &hrs
     {     
       
       // Skip masked out HRSC pixels
-      if (hrscMask.at<MASK_DATA_TYPE>(r,c) == 0)
+      if (hrscMask.at<BINARY_MASK_DATA_TYPE>(r,c) == 0)
         continue;
 
       // For each pixel the brightness is the mean value across all channels

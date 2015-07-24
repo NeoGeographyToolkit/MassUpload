@@ -293,7 +293,7 @@ class HrscImage():
         # - The low resolution output is smoothed out later to avoid jagged edges.
         cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathStringAndMask +' '
                 + self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath)
-        MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)        
+        MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)
         
         print 'Finished with low resolution processing for HRSC set ' + setName
         
@@ -622,6 +622,7 @@ class HrscImage():
         MosaicUtilities.cmdRunner(cmd, self._lowResSpatialCroppedRegistrationPath, force)
 
 
+        # TODO: Fix bug here, probably caused by 8 bit mask depth.
         # DEBUG - Paste the low resolution aligned images so we can evaluate the registration
         registrationDebugImagePath = self._hrscBasePathOut + '_registration_debug_mosaic.tif'
         cmd = ('./hrscMosaic ' + self._basemapGrayCropPath +' '+ registrationDebugImagePath +' '+ hrscPath +' '+

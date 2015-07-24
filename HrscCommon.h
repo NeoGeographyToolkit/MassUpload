@@ -17,6 +17,7 @@ const size_t NUM_HRSC_CHANNELS = 5;
 const size_t NUM_BASE_CHANNELS = 3;
 
 typedef unsigned short MASK_DATA_TYPE;
+typedef unsigned char  BINARY_MASK_DATA_TYPE;
 
 //const unsigned char MASK_MAX = 255; // UINT8
 const unsigned short MASK_MAX = 1023; // UINT16 - This is equal to the grassfire distance!

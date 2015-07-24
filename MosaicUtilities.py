@@ -49,6 +49,7 @@ def cmdRunnerWrapper(params):
             cmdRunner(cmd, outputPath, force)
             return True
         except CmdRunException:
+            print 'Encountered command run error, rerunning:\n   ' + cmd
             numRetries -= 1
         raise CmdRunException('Failed to create output file: ' + outputPath)
 

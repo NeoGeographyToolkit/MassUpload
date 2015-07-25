@@ -208,6 +208,15 @@ class Rectangle:
         overlapArea = self.getIntersection(otherRect)
         return overlapArea.hasArea()
     
+def degreeRectOverlap(rect180, rect):
+    '''Version of the Rectangle::overlaps() function that takes a first input
+       known to be in the -180/180 range and a second input that may be in the 0/360 range'''
+    if rect180.overlaps(rect):
+         return True
+    # If the rectangles don't overlap, try shifting the second down a 360 degree increment.
+    rectCopy = copy.copy(rect)
+    rectCopy.shift(-360.0, 0.0)
+    return rect180.overlaps(rectCopy)
 
 class Tiling:
     '''Sets up a tiling scheme'''
@@ -350,9 +359,12 @@ class GeoReference:
     '''Handles GDC / projected space transforms.
        Currently only works for a simple, global Mercator transform.'''
     
-    def __init__(self, degreesToMeters):
+    def __init__(self, degreesToMeters, center180=False):
         self._degreesToMeters = degreesToMeters
-        self._lonLatBounds    = Rectangle(-180, 180, -90, 90)
+        if center180:
+            self._lonLatBounds = Rectangle(0, 360, -90, 90)
+        else: # Center on zero, the default
+            self._lonLatBounds = Rectangle(-180, 180, -90, 90)
         self._projectionBounds = copy.copy(self._lonLatBounds)
         self._projectionBounds.scaleByConstant(degreesToMeters)
         #print 'GeoReference init: ' + str(self)
@@ -445,11 +457,11 @@ class ImageCoverage:
 class ImageWithGeoRef(GeoReference, ImageCoverage):
     '''Adds an image to a GeoReference'''
 
-    def __init__(self, degreesToMeters, numCols, numRows):
+    def __init__(self, degreesToMeters, numCols, numRows, center180=False):
         
         # Iniatialize with the GeoReference and the image size
         # - GeoReference happens first so we can call getProjectionBounds()
-        GeoReference.__init__(self, degreesToMeters)
+        GeoReference.__init__(self, degreesToMeters, center180)
         ImageCoverage.__init__(self, numCols, numRows, self.getProjectionBounds())
 
     # Condensed conversion functions
@@ -471,13 +483,14 @@ class ImageWithGeoRef(GeoReference, ImageCoverage):
         return self.projectedRectToPixelRect(projRect)
 
 
+# TODO: This needs to handle degree wraparound!
 class TiledGeoRefImage(ImageWithGeoRef):
     '''ImageWithGeoRef with tiles added'''
     
-    def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows):
+    def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows, center180=False):
         '''These are the total image height/width, not per tile.'''
         # This class requires that the pixel dimensions work out exactly!
-        ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows) # Init this first!
+        ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows, center180) # Init this first!
         pixelBounds  = Rectangle(0, numCols, 0, numRows)
         tileWidth    = numCols / numTileCols
         tileHeight   = numRows / numTileRows
@@ -503,9 +516,29 @@ class TiledGeoRefImage(ImageWithGeoRef):
         
     def getIntersectingTiles(self, rectDegrees):
         '''Returns a Rectangle containing all the tiles intersecting the input ROI'''
-        # Convert to pixels, then just use the tiling function.
-        rectPixels = self.degreeRectToPixelRect(rectDegrees)
-        return self._tiling.getIntersectingTiles(rectPixels)
+        
+        # Make a copy of the input rect at +/- 360 degrees
+        rectCopyL = copy.copy(rectDegrees)
+        rectCopyR = copy.copy(rectDegrees)
+        rectCopyL.shift(-360.0, 0) 
+        rectCopyL.shift( 360.0, 0)
+        # Convert to pixels
+        rectPixels  = self.degreeRectToPixelRect(rectDegrees)
+        rectPixelsL = self.degreeRectToPixelRect(rectCopyL  )
+        rectPixelsR = self.degreeRectToPixelRect(rectCopyR  )
+        
+        # Find the tile intersection with each of the three rectangles
+        rectTiles   = self._tiling.getIntersectingTiles(rectPixels )
+        rectTilesL  = self._tiling.getIntersectingTiles(rectPixelsL)
+        rectTilesR  = self._tiling.getIntersectingTiles(rectPixelsR)
+        
+        # Concatenate all intersecting tiles into a single list
+        outputTileList = []
+        outputTileList += list(rectTiles.indexGenerator())
+        outputTileList += list(rectTilesL.indexGenerator())
+        outputTileList += list(rectTilesR.indexGenerator())
+        
+        return outputTileList
     
 
 

@@ -197,6 +197,7 @@ def cacheManagerThreadFunction(databasePath, hrscDownloadFolder, hrscProcessedFo
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
     
+    # This bounding box can be in either the +/-180 range or the 0-360 range
     hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
     #print 'HRSC BB = ' + str(hrscBoundingBoxDegrees)
     
@@ -204,29 +205,12 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
     #  we don't miss any tiles around the edges.
     BUFFER_SIZE = 0.1 # BB buffer size in degrees
     hrscBoundingBoxDegrees.expand(BUFFER_SIZE, BUFFER_SIZE)
-    
-    
+        
     # DEBUG!  Restrict to a selected area.
     hrscBoundingBoxDegrees = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxDegrees)
-    #print 'overlap BB = ' + str(hrscBoundingBoxDegrees)
-    
-    intersectRect = basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
-    return intersectRect
-    
 
-def getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance):
-    '''Gets the dictionary of HRSC tiles that need to update the given basemap tile index'''
-
-    thisTileBounds = basemapInstance.getTileRectDegree(tileIndex)
-
-    # Get the tile information from the HRSC image
-    tileDict = hrscInstance.getTileInfo(thisTileBounds, tileIndex.getPostfix())
-    #print 'Found these tile intersections:'
-    #for hrscTile in tileDict.itervalues():
-    #    print hrscTile['prefix']
-
-    return tileDict
-    
+    intersectTileList = basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
+    return intersectTileList
     
 
 def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
@@ -258,7 +242,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     logger = logging.getLogger('MainProgram')
 
     # Find all the output tiles that intersect with this
-    outputTilesRect = getCoveredOutputTiles(basemapInstance, hrscInstance)
+    outputTilesList = getCoveredOutputTiles(basemapInstance, hrscInstance)
 
     hrscSetName = hrscInstance.getSetName()
     mainLogPath = basemapInstance.getMainLogPath()
@@ -269,60 +253,54 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         return
 
     logger.info('Started updating tiles for HRSC image ' + hrscSetName)
-    logger.info('Found overlapping output tiles:  ' + str(outputTilesRect))
+    logger.info('Found overlapping output tiles:  ' + str(outputTilesList))
     
     # Do all the basemap calls first using the pool before doing the HRSC work
     # - This will make sure that the proper file exists in the output directory to 
     #   paste incoming HRSC tiles on top of.
     logger.info('Making sure we have required basemap tiles for HRSC image ' + hrscSetName)
-    basemapInstance.generateMultipleTileImages(outputTilesRect, pool, force=False)
+    basemapInstance.generateMultipleTileImages(outputTilesList, pool, force=False)
     
     if pool:
         logger.info('Initializing tile output tasks...')
     
     # Loop through all the tiles
     tileResults = []
-    for row in range(outputTilesRect.minY, outputTilesRect.maxY):
-        for col in range(outputTilesRect.minX, outputTilesRect.maxX):
+    for tileIndex in outputTilesList:
+
+        tileBounds = basemapInstance.getTileRectDegree(tileIndex)
+        
+        logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
+        logger.info('--> Tile bounds = ' + str(tileBounds))
+
+        #logger.info('\nMaking sure basemap info is present...')
+        
+        # Retrieve the needed paths for this tile
+        (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
+            basemapInstance.getPathsForTile(tileIndex) 
     
-            # Set up the til information
-            tileIndex  = MosaicUtilities.TileIndex(row, col)
-            tileBounds = basemapInstance.getTileRectDegree(tileIndex)
-            
-            logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
-            logger.info('--> Tile bounds = ' + str(tileBounds))
+        #print '\nPasting on HRSC tiles...'
 
-            #logger.info('\nMaking sure basemap info is present...')
-            
-            # Retrieve the needed paths for this tile
-            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
-                basemapInstance.getPathsForTile(tileIndex) 
+        # Have we already written this HRSC image to this tile?
+        comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
+        if comboAlreadyWritten:
+            logger.info('-- Skipping already written tile!') #Don't want to double-write the same image.
+            continue
+    
+        # Get information about which HRSC tiles to paste on to the basemap
+        hrscTileInfoDict = hrscInstance.getTileInfo(basemapInstance, tileBounds, tileIndex.getPostfix())
+        if not hrscTileInfoDict: # If there are no HRSC tiles to use, move on to the next output tile!
+            continue
+    
+        # Update the selected tile with the HRSC image
+        if pool:
+            # Send the function and arguments to the thread pool
+            dictCopy = copy.copy(hrscTileInfoDict)
+            tileResults.append(pool.apply_async(updateTileWithHrscImage,
+                                                args=(dictCopy, outputTilePath, tileLogPath)))
+        else: # Just run the function
+            updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath)
         
-            #print '\nPasting on HRSC tiles...'
-
-            # Have we already written this HRSC image to this tile?
-            comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
-            if comboAlreadyWritten:
-                logger.info('-- Skipping already written tile!') #Don't want to double-write the same image.
-                continue
-        
-            # Get information about which HRSC tiles to paste on to the basemap
-            hrscTileInfoDict = getHrscTileUpdateDict(basemapInstance, tileIndex, hrscInstance)
-            if not hrscTileInfoDict: # If there are no tiles to use, move on to the next output tile!
-                continue
-        
-            # Update the selected tile with the HRSC image
-            if pool:
-                # Send the function and arguments to the thread pool
-                dictCopy = copy.copy(hrscTileInfoDict)
-                tileResults.append(pool.apply_async(updateTileWithHrscImage,
-                                                    args=(dictCopy, outputTilePath, tileLogPath)))
-            else: # Just run the function
-                updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath)
-            
-            # DEBUG breaks
-            #break
-        #break
 
 
     if pool: # Wait for all the tasks to complete
@@ -357,6 +335,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
 # Lunokhod 2
 fullBasemapPath     = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
+fullBasemapPath180  = '/byss/smcmich1/data/hrscBasemap180/projection_space_basemap180.tif'
 sourceHrscFolder    = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder    = '/home/smcmich1/data/hrscProcessedFiles'
 outputTileFolder    = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
@@ -397,6 +376,12 @@ logger.info('==== Initializing the base map object ====')
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, backupFolder)
 basemapInstance.copySupportFilesFromBackupDir() # Copies the main log from the backup dir to output dir
 basemapInputsUsedLog = basemapInstance.getMainLogPath()
+
+# Create another basemap instance centered on 180 lon.
+# - This instance should not be creating any tiles in its output folders!
+# - This instance is only for registration and preprocessing of wraparound HRSC images.
+dummyFolder = '/dev/null'
+basemapInstance180 = mosaicTileManager.MarsBasemap(fullBasemapPath180, dummyFolder, dummyFolder, center180=True)
 logger.info('--- Finished initializing the base map object ---\n')
 
 
@@ -497,7 +482,9 @@ for i in range(0,numHrscDataSets):
         logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
 
         # Preprocess the HRSC image
-        hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder, basemapInstance, False, processPool)
+        hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder,
+                                                  basemapInstance, basemapInstance180,
+                                                  False, processPool)
 
         logger.info('--- Now initializing high res HRSC content ---')
 
@@ -505,7 +492,6 @@ for i in range(0,numHrscDataSets):
         hrscInstance.prepHighResolutionProducts()
         
         logger.info('--- Finished initializing HRSC image ---\n')
-
 
         # Call the function to update all the output images for this HRSC image
         updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
@@ -613,4 +599,13 @@ MosaicUtilities.sendEmail('scott.t.mcmichael@nasa.gov',
                           msgText)
 
 logger.info('Basemap generation script completed!')
+
+
+# Commands for generating the 180 centered image
+# gdal_translate projection_space_basemap.tif left.tif -srcwin 0 0 5760 5760
+# gdal_translate projection_space_basemap.tif right.tif -srcwin 5760 0 5760 5760
+# montage -mode Concatenate -tile 2x1 -background black  -depth 8  right.tif left.tif center180.tif
+# gdal_translate center180.tif projection_space_basemap180.tif -a_srs "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr 0 5334738.600 21338954.2 -5334738.600
+
+
 

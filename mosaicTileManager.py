@@ -18,10 +18,10 @@ class MarsBasemap:
        Since the output image is extremely large it is broken up into a large number
        of reasonably sized tiles.
        
-       The top left tile in index 0,0.
+       The top left tile is index 0,0.
     '''
     
-    def __init__(self, fullBasemapPath, outputTileFolder, backupFolder):
+    def __init__(self, fullBasemapPath, outputTileFolder, backupFolder, center180=False):
         
         # Info about Noel's base map
         DEGREES_TO_PROJECTION_METERS = 59274.9
@@ -38,8 +38,8 @@ class MarsBasemap:
         self.resolutionIncrease = 128
         outputHeight = FULL_BASEMAP_HEIGHT*self.resolutionIncrease
         outputWidth  = FULL_BASEMAP_WIDTH *self.resolutionIncrease
-        numTileRows = FULL_BASEMAP_HEIGHT / BASEMAP_TILE_HEIGHT
-        numTileCols = FULL_BASEMAP_WIDTH  / BASEMAP_TILE_WIDTH
+        numTileRows  = FULL_BASEMAP_HEIGHT / BASEMAP_TILE_HEIGHT
+        numTileCols  = FULL_BASEMAP_WIDTH  / BASEMAP_TILE_WIDTH
 
         self._logger = logging.getLogger('mosaicTileManager')
 
@@ -48,13 +48,14 @@ class MarsBasemap:
 
         # Initialize two class instance to manage the coordinate systems
         # - The pixel operations are different but GDC/projection calls will return the same results.
-        self._lowResImage  = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, FULL_BASEMAP_WIDTH, FULL_BASEMAP_HEIGHT, numTileCols, numTileRows)
-        self._highResImage = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, outputWidth,        outputHeight,        numTileCols, numTileRows)
+        self._isCenter180 = center180
+        self._lowResImage  = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, FULL_BASEMAP_WIDTH, FULL_BASEMAP_HEIGHT, numTileCols, numTileRows, center180)
+        self._highResImage = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, outputWidth,        outputHeight,        numTileCols, numTileRows, center180)
 
         # Set up image products
         self.fullBasemapPath     = fullBasemapPath
         self.fullBasemapGrayPath = fullBasemapPath[:-4] + '_gray.tif'
-        self._getGrayBasemap()
+        self._makeGrayBasemap()
         
         self._baseTileFolder = os.path.join(os.path.dirname(fullBasemapPath), 'basemap_tiles')
         if not os.path.exists(self._baseTileFolder):
@@ -73,9 +74,6 @@ class MarsBasemap:
         cmd = 'touch ' + mainLogPath
         os.system(cmd)
         
-        ## Create output backups if they do not already exist
-        #self._backupTiles()
-
     def getMainLogPath(self):
         return os.path.join(self._outputTileFolder, 'main_log.txt')
 
@@ -84,7 +82,7 @@ class MarsBasemap:
         backupMainLogPath = os.path.join(self._backupFolder, 'main_log.txt')
         shutil.copy(self.getMainLogPath(), backupMainLogPath)
 
-    def _getGrayBasemap(self):
+    def _makeGrayBasemap(self):
         '''Creates a grayscale version of the basemap if it does not already exist'''
         if not os.path.exists(self.fullBasemapGrayPath):
             cmd = 'gdal_translate -b 1 ' + self.fullBasemapPath +' '+ self.fullBasemapGrayPath
@@ -115,7 +113,10 @@ class MarsBasemap:
     
     def getProj4String(self):
         '''This is the projection system used for the global Mars map'''
-        return "+proj=eqc +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
+        if self._isCenter180:
+            return "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
+        else: # Center 0
+            return "+proj=eqc +lon_0=0   +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
 
     def getTileRectDegree(self, tileIndex):
         '''Get the bounding box of a tile in degrees'''
@@ -183,59 +184,55 @@ class MarsBasemap:
             return self._highResImage.degreeRectToPixelRect(degreeRect)
     
     def getIntersectingTiles(self, rectDegrees):
-        '''Returns a bounding box containing all the tiles which intersect the input rectangle'''
+        '''Returns an iterator containing all the tiles which intersect the input rectangle'''
         return self._highResImage.getIntersectingTiles(rectDegrees)
     
     
-    def _backupTiles(self):
-        '''Back up all tiles to the backup folder if they are not already backup up.
-           In this way, each file only gets backed up when the previous backup is manually cleared.'''
-        raise Exception('DEPRECATED')
-        self._logger.info('Backing up tiles to folder ' + self._backupFolder)
-        
-        # Get list of files in the output folder
-        fileList = os.listdir(self._outputTileFolder)
-        
-        numFilesBackedUp = 0
-        for f in fileList:
-            if ('.tif' not in f) and ('.txt' not in f):
-                continue # Skip all other file types
-        
-            # If the file does not exist in the backup folder, copy it there now.
-            inputPath  = os.path.join(self._outputTileFolder, f)
-            backupPath = os.path.join(self._backupFolder,     f)
-            if not os.path.exists(backupPath):
-                shutil.copy(inputPath, backupPath)
-                numFilesBackedUp += 1
-                
+    #def _backupTiles(self):
+    #    '''Back up all tiles to the backup folder if they are not already backup up.
+    #       In this way, each file only gets backed up when the previous backup is manually cleared.'''
+    #    raise Exception('DEPRECATED FUNCTION!!!!!')
+    #    self._logger.info('Backing up tiles to folder ' + self._backupFolder)
+    #    
+    #    # Get list of files in the output folder
+    #    fileList = os.listdir(self._outputTileFolder)
+    #    
+    #    numFilesBackedUp = 0
+    #    for f in fileList:
+    #        if ('.tif' not in f) and ('.txt' not in f):
+    #            continue # Skip all other file types
+    #    
+    #        # If the file does not exist in the backup folder, copy it there now.
+    #        inputPath  = os.path.join(self._outputTileFolder, f)
+    #        backupPath = os.path.join(self._backupFolder,     f)
+    #        if not os.path.exists(backupPath):
+    #            shutil.copy(inputPath, backupPath)
+    #            numFilesBackedUp += 1
+    #            
         self._logger.info('Copied ' + str(numFilesBackedUp) + ' files to the backup folder')
 
-    def generateMultipleTileImages(self, tileRect, pool=None, force=False):
+    def generateMultipleTileImages(self, tileList, pool=None, force=False):
         '''Generate all the tile images in a range'''
         
         # Loop through all the tiles
         cmdList = []
-        for row in range(tileRect.minY, tileRect.maxY):
-            for col in range(tileRect.minX, tileRect.maxX):
-        
-                # Set up the tile information
-                tileIndex  = MosaicUtilities.TileIndex(row, col)
-                tileBounds = self.getTileRectDegree(tileIndex)
-                
-                
-                # Now that we have selected a tile, generate all of the tile images for it.
-                # - The first time this is called for a tile it generates the backup image for the tile.
-                (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1 , cmd2) =  \
-                            self._generateImagesForTile(tileIndex, force=False)
-                
-                if not pool: # Go ahead and run the last two commands
-                    MosaicUtilities.cmdRunner(cmd1, grayTilePath, force)
-                    MosaicUtilities.cmdRunner(cmd2, outputTilePath, force)
-                else: # Add the commands to a list
-                    # The seconds command seems prone to failure, so try it more than once.
-                    NUM_CONVERT_RETRIES = 5
-                    cmdList.append( (cmd1, grayTilePath,   force) )
-                    cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) )
+        for tileIndex in tileList:
+            
+            tileBounds = self.getTileRectDegree(tileIndex)
+            
+            # Now that we have selected a tile, generate all of the tile images for it.
+            # - The first time this is called for a tile it generates the backup image for the tile.
+            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1 , cmd2) =  \
+                        self._generateImagesForTile(tileIndex, force=False)
+            
+            if not pool: # Go ahead and run the last two commands
+                MosaicUtilities.cmdRunner(cmd1, grayTilePath, force)
+                MosaicUtilities.cmdRunner(cmd2, outputTilePath, force)
+            else: # Add the commands to a list
+                # The seconds command seems prone to failure, so try it more than once.
+                NUM_CONVERT_RETRIES = 5
+                cmdList.append( (cmd1, grayTilePath,   force) )
+                cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) )
     
         if not pool: # No pool, we are finished.
             return True

@@ -163,6 +163,7 @@ cv::Vec3b interpPixelRgb(const cv::Mat& img, float xF, float yF, bool &gotValue)
 }
 
 /// As interpPixelRgb but with pixels near the edges handled by mirroring
+template <typename MASK_T>
 cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
                                float xF, float yF, bool &gotValue)
 {
@@ -192,10 +193,10 @@ cv::Vec3b interpPixelMirrorRgb(const cv::Mat& img,  const cv::Mat& mask,
   // Check the mask
   // - Don't interpolate if any mask inputs are zero, this might indicate 
   //    that we are at a projection border.
-  unsigned char i00 = mask.at<MASK_DATA_TYPE>(y0, x0);
-  unsigned char i01 = mask.at<MASK_DATA_TYPE>(y0, x1);
-  unsigned char i10 = mask.at<MASK_DATA_TYPE>(y1, x0);
-  unsigned char i11 = mask.at<MASK_DATA_TYPE>(y1, x1);
+  unsigned char i00 = mask.at<MASK_T>(y0, x0);
+  unsigned char i01 = mask.at<MASK_T>(y0, x1);
+  unsigned char i10 = mask.at<MASK_T>(y1, x0);
+  unsigned char i11 = mask.at<MASK_T>(y1, x1);
   if ((i00 == 0) || (i01 == 0) || (i10 == 0) || (i11 == 0))
     return 0;
   

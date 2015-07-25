@@ -98,9 +98,11 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
             
             if maskList: # Make sure this tile is not completely masked out
                 # Find the info for the corresponding mask tile
+                # If the image is larger than the mask, there is a chance there will be no
+                #  mask tile for this image tile.  If so we can still skip the image tile,,
                 tilePrefix   = getTilePrefix(r, c)
-                maskTileInfo = [x for x in maskList if x['prefix'] == tilePrefix][0]
-                if maskTileInfo['percentValid'] < MIN_TILE_PERCENT_PIXELS_VALID:
+                maskTileInfo = [x for x in maskList if x['prefix'] == tilePrefix]
+                if not maskTileInfo or (maskTileInfo[0]['percentValid'] < MIN_TILE_PERCENT_PIXELS_VALID):
                     continue
             
             # Get the pixel ROI for this tile
@@ -294,7 +296,7 @@ class HrscImage():
         cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathStringAndMask +' '
                 + self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath)
         MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)
-        
+
         print 'Finished with low resolution processing for HRSC set ' + setName
         
         # Now we have done everything we plan to with the low resolution maps
@@ -350,7 +352,8 @@ class HrscImage():
                 os.mkdir(self._tileFolder)
                 
         # Break up the mask image into tiles first
-        maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE)
+        maskTileList = splitImage(self._highResMaskPath, self._tileFolder, HRSC_HIGH_RES_TILE_SIZE,
+                                  force=force, pool=self._threadPool)
                 
         tileInfoLists = [[], [], [], [], []] # One list per channel
         for c in range(NUM_HRSC_CHANNELS):

@@ -656,7 +656,7 @@ bool pasteImage(cv::Mat &outputImage,
       
       // Extract all of the basemap values at that location.
       // - Call the mirror version of the function so we retain all edges.
-      pastePixel = interpPixelMirrorRgb(imageToAdd, imageMask, interpX, interpY, gotValue);      
+      pastePixel = interpPixelMirrorRgb<BINARY_MASK_DATA_TYPE>(imageToAdd, imageMask, interpX, interpY, gotValue);      
       
       // Skip masked pixels and out of bounds pixels
       if (!gotValue)
@@ -762,6 +762,10 @@ int main(int argc, char** argv)
     return -1;
   }
   
+  // An ugly hack to use the simple 8 bit mask paste with debug images!
+  bool isDebugImage = false;
+  if (outputPath.find("debug") != std::string::npos)
+    isDebugImage = true;
 
   // The spatial transform is from the base map to HRSC
 
@@ -772,12 +776,9 @@ int main(int argc, char** argv)
   //printf("Painting on HRSC images...\n");
   cv::Mat outputImage;
 
-  // Hack to use the simple paste method for the tiny debug images
-  if ( (FORCE_SIMPLE_PASTE == false) && (basemapImage.cols > 500) )
+  // Hack to use the simple paste method
+  if ( (FORCE_SIMPLE_PASTE == false) && (isDebugImage == false) )
   {
-    //// OpenCV based image blending
-    //pasteImagesFeather(basemapImage, hrscImages, hrscMasks, spatialTransforms, outputImage);
-
     // Blending based on the weighted input masks
     outputImage = basemapImage;
     for (int i=0; i<numHrscImages; ++i)

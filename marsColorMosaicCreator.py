@@ -11,6 +11,7 @@ import logging
 import datetime
 import time
 import traceback
+import shutil
 
 import IrgGeoFunctions
 import mosaicTileManager # TODO: Normalize caps!
@@ -96,7 +97,8 @@ BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
 
 #-----------------------------------------------------------------------------------------
 # Functions
@@ -354,13 +356,14 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 #databasePath     = 'FAIL'
 
 # Lunokhod 2
-fullBasemapPath  = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
-sourceHrscFolder = '/home/smcmich1/data/hrscDownloadCache'
-hrscOutputFolder = '/home/smcmich1/data/hrscProcessedFiles'
-outputTileFolder = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
-backupFolder     = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
-databasePath     = '/byss/smcmich1/data/google/googlePlanetary.db'
-kmlPyramidFolder = '/byss/docroot/smcmich1/hrscMosaicKml'
+fullBasemapPath     = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
+sourceHrscFolder    = '/home/smcmich1/data/hrscDownloadCache'
+hrscOutputFolder    = '/home/smcmich1/data/hrscProcessedFiles'
+outputTileFolder    = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
+backupFolder        = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
+databasePath        = '/byss/smcmich1/data/google/googlePlanetary.db'
+kmlPyramidFolder    = '/byss/docroot/smcmich1/hrscMosaicKml'
+hrscThumbnailFolder = '/byss/smcmich1/data/hrscThumbnails'
 
 
 # --- Folder notes ---
@@ -422,7 +425,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h2410_0000'] # DEBUG
+hrscImageList = ['h5263_0001'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -531,6 +534,23 @@ if processPool:
 downloadCommandQueue.put('STOP') # Stop the download thread
 downloadThread.join()
 
+# Copy some debug files to a centralized location for easy viewing
+# TODO: The HRSC manager should take care of this?
+for dataSet in processedDataSets:
+    setName = dataSet[0]
+    # Copy the low res nadir image overlaid on a section of the low res mosaic
+    debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_registration_debug_mosaic.tif')
+    debugImageCopyPath  = os.path.join(kmlPyramidFolder, setName+'_registration_image.tif')
+    shutil.copy(debugImageInputPath, debugImageCopyPath)
+
+    # Copy the low res nadir image to a thumbnail folder
+    debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_nd3_basemap_res.tif')
+    debugImageCopyPath  = os.path.join(hrscThumbnailFolder, setName+'_nadir_thumbnail.tif')
+    shutil.copy(debugImageInputPath, debugImageCopyPath)
+
+
+
+
 # Compute the run time for the output message
 SECONDS_TO_HOURS = 1.0 / (60.0*60.0)
 stopTime = time.time()
@@ -566,9 +586,10 @@ Processed image list:
 '''
     for i in processedDataSets:
         msgText += i[0] + '\n'
-    msgText += '\n Failed image list:\n'
-    for i in failedDataSets:
-        msgText += i + '\n'
+    if failedDataSets:
+      msgText += '\n Failed image list:\n'
+      for i in failedDataSets:
+          msgText += i + '\n'
 else:
     msgText = '''ERROR: No HRSC images in the batch could be processed!\n''' + str(failedDataSets)
     

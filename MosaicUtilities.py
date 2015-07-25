@@ -51,7 +51,8 @@ def cmdRunnerWrapper(params):
         except CmdRunException:
             print 'Encountered command run error, rerunning:\n   ' + cmd
             numRetries -= 1
-        raise CmdRunException('Failed to create output file: ' + outputPath)
+        raise CmdRunException('Failed to create output file: ' + outputPath +
+                              '\n  running command: ' + cmd)
 
 
 def countBlackPixels(imagePath, isGray=True):

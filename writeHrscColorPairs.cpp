@@ -129,7 +129,7 @@ int main(int argc, char** argv)
     return -1;
   }
   
-  printf("Loading input images...\n");
+  //printf("Loading input images...\n");
   cv::Mat hrscMask, basemapImage, spatialTransform, gain;
   std::string outputPath;
   std::vector<cv::Mat> hrscChannels(NUM_HRSC_CHANNELS);
@@ -140,7 +140,7 @@ int main(int argc, char** argv)
   // TODO: The spatial transform should be from HRSC to BASEMAP
 
   // Generate the list of color pairs
-  printf("Writing pixel pairs...\n");
+  //printf("Writing pixel pairs...\n");
   const int MIN_PIXEL_PAIRS = 80;
   int sampleDist = 64;
   int numSamples = 0;

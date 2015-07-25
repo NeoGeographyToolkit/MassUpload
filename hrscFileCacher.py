@@ -11,7 +11,7 @@ import sqlite3
 import MosaicUtilities
 
 # Set the size limit of our data set cache
-MAX_STORED_DATA_SETS = 25
+MAX_STORED_DATA_SETS = 40
     
 
 

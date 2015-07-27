@@ -76,7 +76,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 12 # This should be set equal to the HRSC cache size
 
 
 
@@ -425,7 +425,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h5263_0001'] # DEBUG
+#hrscImageList = ['h5263_0001'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -525,10 +525,13 @@ for i in range(0,numHrscDataSets):
 
 numHrscImagesProcessed = len(processedDataSets)
 
-PROCESS_POOL_KILL_TIMEOUT = 180 # The pool should not be doing any work at this point!
+#PROCESS_POOL_KILL_TIMEOUT = 180 # The pool should not be doing any work at this point!
 if processPool:
     logger.info('Cleaning up the processing thread pool...')
+    # Give the pool processes a little time to stop, them kill them.
     processPool.close()
+    time.sleep(10)
+    processPool.terminate()
     processPool.join()
 
 downloadCommandQueue.put('STOP') # Stop the download thread
@@ -570,6 +573,17 @@ elapsed time = ''' + str(runTime) + ''' hours.
 
 KML pyramid link:
 '''+kmlPyramidWebAddress+'''
+
+Registration debug images are here:
+'''+kmlPyramidFolder+'''
+--> To clear:
+rm '''+kmlPyramidFolder+'''/*.tif
+
+Image thumbnails are stored here:
+'''+hrscThumbnailFolder+'''
+Don't clear these!
+-------
+
 To undo the tile changes:
 rm  '''+outputTileFolder+'''/*
 

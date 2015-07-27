@@ -8,9 +8,6 @@ import copy
 import math
 import subprocess
 
-# TODO: Organize further!
-
-
 
 #----------------------------------------------------------------------------
 # Functions
@@ -43,16 +40,18 @@ def cmdRunnerWrapper(params):
     numRetries = 1
     if len(params) > 3:
         numRetries = params[3]
+    retryCount = numRetries
     # Try to call the command one or more times
-    while numRetries > 0:
+    while retryCount > 0:
         try:
             cmdRunner(cmd, outputPath, force)
             return True
         except CmdRunException:
             print 'Encountered command run error, rerunning:\n   ' + cmd
-            numRetries -= 1
+            retryCount -= 1
         raise CmdRunException('Failed to create output file: ' + outputPath +
-                              '\n  running command: ' + cmd)
+                              '\n  running command: ' + cmd +
+                              '\n after '+str(numRetries)+ ' attempts.')
 
 
 def countBlackPixels(imagePath, isGray=True):

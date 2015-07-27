@@ -233,7 +233,7 @@ class MarsBasemap:
                     MosaicUtilities.cmdRunner(cmd2, outputTilePath, force)
                 else: # Add the commands to a list
                     # The seconds command seems prone to failure, so try it more than once.
-                    NUM_CONVERT_RETRIES = 3
+                    NUM_CONVERT_RETRIES = 5
                     cmdList.append( (cmd1, grayTilePath,   force) )
                     cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) )
     

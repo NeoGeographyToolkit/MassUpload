@@ -76,7 +76,7 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 12 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 
 
 
@@ -98,7 +98,8 @@ BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(177, 183, 11.0, 17.0) # Orcus Patera on dateline
 
 #-----------------------------------------------------------------------------------------
 # Functions
@@ -253,7 +254,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         return
 
     logger.info('Started updating tiles for HRSC image ' + hrscSetName)
-    logger.info('Found overlapping output tiles:  ' + str(outputTilesList))
+    #logger.info('Found overlapping output tiles:  ' + str(outputTilesList))
     
     # Do all the basemap calls first using the pool before doing the HRSC work
     # - This will make sure that the proper file exists in the output directory to 
@@ -301,7 +302,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         else: # Just run the function
             updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath)
         
-
+        #print 'DEBUG - only updating one tile!'
+        #break
 
     if pool: # Wait for all the tasks to complete
         logger.info('Finished initializing tile output tasks.')
@@ -315,8 +317,6 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             
             
         logger.info('All tile writing processes have completed')
-
-    #raise Exception('DEBUG')
         
     # Log the fact that we have finished adding this HRSC image    
     basemapInstance.updateLog(mainLogPath, hrscSetName)
@@ -324,14 +324,6 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
 #================================================================================
-
-# Laptop
-#testDirectory    = '/home/smcmich1/data/hrscMapTest/'
-#fullBasemapPath  = testDirectory + 'projection_space_basemap.tif'
-#sourceHrscFolder = testDirectory + 'external_data'
-#hrscOutputFolder = testDirectory + 'hrscFiles'
-#outputTileFolder = testDirectory + 'outputTiles'
-#databasePath     = 'FAIL'
 
 # Lunokhod 2
 fullBasemapPath     = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
@@ -410,7 +402,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = ['h5263_0001'] # DEBUG
+hrscImageList = ['h2216_0001'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
@@ -479,6 +471,8 @@ for i in range(0,numHrscDataSets):
             logger.info('Skipping data set ' + hrscSetName + ' which could not be fetched.')
             continue
 
+        #raise Exception('STOPPED AFTER DOWNLOAD')
+
         logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
 
         # Preprocess the HRSC image
@@ -487,6 +481,7 @@ for i in range(0,numHrscDataSets):
                                                   False, processPool)
 
         logger.info('--- Now initializing high res HRSC content ---')
+
 
         # Complete the high resolution components
         hrscInstance.prepHighResolutionProducts()
@@ -606,6 +601,7 @@ logger.info('Basemap generation script completed!')
 # gdal_translate projection_space_basemap.tif right.tif -srcwin 5760 0 5760 5760
 # montage -mode Concatenate -tile 2x1 -background black  -depth 8  right.tif left.tif center180.tif
 # gdal_translate center180.tif projection_space_basemap180.tif -a_srs "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr 0 5334738.600 21338954.2 -5334738.600
+#gdal_translate center180.tif projection_space_basemap180.tif -a_srs "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr -10669477.100 5334738.600 10669477.100 -5334738.600
 
 
 

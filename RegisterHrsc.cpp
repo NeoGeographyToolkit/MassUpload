@@ -124,7 +124,6 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
   std::vector<cv::KeyPoint> keypointsA, keypointsB;
   cv::Mat descriptorsA, descriptorsB;  
 
-  // TODO: May need to adaptively play around with this module!
   cv::Ptr<cv::FeatureDetector    > detector;
   cv::Ptr<cv::DescriptorExtractor> extractor;
   switch (detectorType)
@@ -154,7 +153,7 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
 
   // Rule out obviously bad matches based on the known starting alignment accuracy
   cv::Mat mask(keypointsA.size(), keypointsB.size(), CV_8UC1);
-  const float MAX_MATCH_PIXEL_DISTANCE = 20; // TODO: Tune this for the base map resolution!
+  const float MAX_MATCH_PIXEL_DISTANCE = 20; 
   size_t numPossibleMatches = 0;
   for (size_t j=0; j<keypointsB.size(); ++j)
   {
@@ -204,8 +203,8 @@ int computeImageTransform(const cv::Mat &refImageIn, const cv::Mat &matchImageIn
   printf("-- Max dist : %f \n", max_dist );
   printf("-- Min dist : %f \n", min_dist );
 
-  //-- Pick out "good" matches --> May need to adaptively set this one!
-  float goodDist = (min_dist + max_dist) / 2.0;//200;
+  //-- Pick out "good" matches
+  float goodDist = (min_dist + max_dist) / 2.0;
   //if (argc > 3)
   //  goodDist = atof(argv[3]);
   std::vector< cv::DMatch > good_matches;

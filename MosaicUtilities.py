@@ -261,7 +261,13 @@ class Tiling:
         ti = self.getTile(rect.maxX, rect.minY);  tileRect.expandToContain(ti.col, ti.row);
         ti = self.getTile(rect.maxX, rect.maxY);  tileRect.expandToContain(ti.col, ti.row);
         ti = self.getTile(rect.minX, rect.maxY);  tileRect.expandToContain(ti.col, ti.row);
-        tileRect.maxX += 1 # Until the rect is update for integers we need to do this!
+        
+        # Limit the rectangle to the legal tile range
+        maxRect  = Rectangle(0, self._numTileCols-1, 0, self._numTileRows-1)
+        tileRect = tileRect.getIntersection(maxRect)
+        
+        # Handle exclusive upper tile bounds
+        tileRect.maxX += 1 # Until the rect is updated for integers we need to do this!
         tileRect.maxY += 1
         return tileRect
     
@@ -521,7 +527,8 @@ class TiledGeoRefImage(ImageWithGeoRef):
         rectCopyL = copy.copy(rectDegrees)
         rectCopyR = copy.copy(rectDegrees)
         rectCopyL.shift(-360.0, 0) 
-        rectCopyL.shift( 360.0, 0)
+        rectCopyR.shift( 360.0, 0)
+        
         # Convert to pixels
         rectPixels  = self.degreeRectToPixelRect(rectDegrees)
         rectPixelsL = self.degreeRectToPixelRect(rectCopyL  )
@@ -531,7 +538,7 @@ class TiledGeoRefImage(ImageWithGeoRef):
         rectTiles   = self._tiling.getIntersectingTiles(rectPixels )
         rectTilesL  = self._tiling.getIntersectingTiles(rectPixelsL)
         rectTilesR  = self._tiling.getIntersectingTiles(rectPixelsR)
-        
+       
         # Concatenate all intersecting tiles into a single list
         outputTileList = []
         outputTileList += list(rectTiles.indexGenerator())

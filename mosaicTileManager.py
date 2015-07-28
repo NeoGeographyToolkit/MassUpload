@@ -137,19 +137,22 @@ class MarsBasemap:
     #------------------------------------------------------------
     # Tile creation functions
     
-    def makeCroppedRegionProjMeters(self, boundingBoxProj, outputPath):
+    def makeCroppedRegionProjMeters(self, boundingBoxProj, outputPath, force=False):
         '''Crops out a region of the original basemap image.'''
         
         (minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
+        if self._isCenter180: # Hack because the 180 version uses shifted projection coordinates!
+            minX -= 10669477.100
+            maxX -= 10669477.100
         projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
         cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
                                  +' -projwin '+ projCoordString)
-        MosaicUtilities.cmdRunner(cmd, outputPath, False)
+        MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
-    def makeCroppedRegionDegrees(self, boundingBoxDegrees, outputPath):
+    def makeCroppedRegionDegrees(self, boundingBoxDegrees, outputPath, force=False):
         '''Crops out a region of the original basemap image.'''
         boundingBoxProj = self._highResImage.degreeRectToProjectedRect(boundingBoxDegrees)
-        self.makeCroppedRegionProjMeters(boundingBoxProj, outputPath)
+        self.makeCroppedRegionProjMeters(boundingBoxProj, outputPath, force)
     
 
    
@@ -187,29 +190,6 @@ class MarsBasemap:
         '''Returns an iterator containing all the tiles which intersect the input rectangle'''
         return self._highResImage.getIntersectingTiles(rectDegrees)
     
-    
-    #def _backupTiles(self):
-    #    '''Back up all tiles to the backup folder if they are not already backup up.
-    #       In this way, each file only gets backed up when the previous backup is manually cleared.'''
-    #    raise Exception('DEPRECATED FUNCTION!!!!!')
-    #    self._logger.info('Backing up tiles to folder ' + self._backupFolder)
-    #    
-    #    # Get list of files in the output folder
-    #    fileList = os.listdir(self._outputTileFolder)
-    #    
-    #    numFilesBackedUp = 0
-    #    for f in fileList:
-    #        if ('.tif' not in f) and ('.txt' not in f):
-    #            continue # Skip all other file types
-    #    
-    #        # If the file does not exist in the backup folder, copy it there now.
-    #        inputPath  = os.path.join(self._outputTileFolder, f)
-    #        backupPath = os.path.join(self._backupFolder,     f)
-    #        if not os.path.exists(backupPath):
-    #            shutil.copy(inputPath, backupPath)
-    #            numFilesBackedUp += 1
-    #            
-        self._logger.info('Copied ' + str(numFilesBackedUp) + ' files to the backup folder')
 
     def generateMultipleTileImages(self, tileList, pool=None, force=False):
         '''Generate all the tile images in a range'''

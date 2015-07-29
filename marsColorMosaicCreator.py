@@ -76,7 +76,49 @@ NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 20
 
 
-IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+
+
+# Lunokhod 2
+fullBasemapPath        = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
+fullBasemapPath180     = '/byss/smcmich1/data/hrscBasemap180/projection_space_basemap180.tif'
+outputTileFolder       = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
+backupFolder           = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
+databasePath           = '/byss/smcmich1/data/google/googlePlanetary.db'
+logFolder              = '/byss/smcmich1/data/hrscMosaicLogs'
+hrscThumbnailFolder    = '/byss/smcmich1/data/hrscThumbnails'
+hrscRegistrationFolder = '/byss/smcmich1/data/hrscRegistration'
+BAD_HRSC_FILE_PATH     = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
+kmlPyramidFolder       = '/byss/docroot/smcmich1/hrscMosaicKml'
+sourceHrscFolder       = '/home/smcmich1/data/hrscDownloadCache'
+hrscOutputFolder       = '/home/smcmich1/data/hrscProcessedFiles'
+
+# TODO: Alderaan
+
+# --- Folder notes ---
+# - sourceHrscFolder holds the downloaded and preprocessed HRSC data
+# - hrscOutputFolder holds the fully processed HRSC files
+# - The current crop of tiles is written to outputTileFolder
+# - The persistent set of final output tiles is kept in backupFolder
+
+
+
+# Used to control the area we operate over
+#HRSC_FETCH_ROI = None # Fetch ALL hrsc images
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0, 180.0, -60.0, 60.0) # Right half: L2
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0,   0.0, -60.0, 60.0) # Left half:  Alderaan
+
+# DEBUG regions
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(177, 183, 11.0, 17.0) # Orcus Patera on dateline
+
+
+#================================================================================
 
 
 
@@ -84,28 +126,16 @@ IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 # - Log tiles are timestamped as is each line in the log file
 LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
 currentTime = datetime.datetime.now()
-logPath = ('/byss/smcmich1/data/hrscMosaicLogs/hrscMosaicLog_%s.txt' % currentTime.isoformat() )
+logPath = (os.path.join(logFolder, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
 logging.basicConfig(filename=logPath,
                     format=LOG_FORMAT_STR,
                     level=logging.DEBUG)
-
-BAD_HRSC_FILE_PATH = '/byss/smcmich1/repo/MassUpload/badHrscSets.csv'
-
-# Currently used to control the area we operate over
-#HRSC_FETCH_ROI = None # Fetch ALL hrsc images
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(177, 183, 11.0, 17.0) # Orcus Patera on dateline
 
 #-----------------------------------------------------------------------------------------
 # Functions
 
 def getDiskUsage():
-    '''Return simpe disk space usage information'''
+    '''Return simple disk space usage information'''
     cmd = ['df', '-h']
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     textOutput, err = p.communicate()
@@ -325,27 +355,6 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
 #================================================================================
 
-# Lunokhod 2
-fullBasemapPath     = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
-fullBasemapPath180  = '/byss/smcmich1/data/hrscBasemap180/projection_space_basemap180.tif'
-sourceHrscFolder    = '/home/smcmich1/data/hrscDownloadCache'
-hrscOutputFolder    = '/home/smcmich1/data/hrscProcessedFiles'
-outputTileFolder    = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
-backupFolder        = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
-databasePath        = '/byss/smcmich1/data/google/googlePlanetary.db'
-kmlPyramidFolder    = '/byss/docroot/smcmich1/hrscMosaicKml'
-hrscThumbnailFolder = '/byss/smcmich1/data/hrscThumbnails'
-
-
-# --- Folder notes ---
-# - sourceHrscFolder holds the downloaded and preprocessed HRSC data
-# - hrscOutputFolder holds the fully processed HRSC files
-# - The current crop of tiles is written to outputTileFolder
-# - The persistent set of final output tiles is kept in backupFolder
-
-#================================================================================
-
-
 print 'Starting basemap enhancement script...'
 
 startTime = time.time()
@@ -402,12 +411,12 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h2216_0001'] # DEBUG
+#hrscImageList = ['h2216_0001'] # DEBUG
 
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
-hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]   #['h3276_0000']
-batchName     = hrscImageList[0] # TODO: Assign the batches a number.
+hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]
+batchName     = hrscImageList[0]
 print 'Image list for this batch: ' + str(hrscImageList)
 
 # Set up the HRSC file manager thread
@@ -451,7 +460,7 @@ for i in range(0,numHrscDataSets):
     # - The next improvement to be made would be to download multiple data sets at the same time.
 
    
-    ## Pick a location to store the data for this HRSC image
+    # Pick a location to store the data for this HRSC image
     thisHrscFolder = os.path.join(hrscOutputFolder, hrscSetName)
 
     try:
@@ -524,7 +533,7 @@ for dataSet in processedDataSets:
     setName = dataSet[0]
     # Copy the low res nadir image overlaid on a section of the low res mosaic
     debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_registration_debug_mosaic.tif')
-    debugImageCopyPath  = os.path.join(kmlPyramidFolder, setName+'_registration_image.tif')
+    debugImageCopyPath  = os.path.join(hrscRegistrationFolder, setName+'_registration_image.tif')
     shutil.copy(debugImageInputPath, debugImageCopyPath)
 
     # Copy the low res nadir image to a thumbnail folder
@@ -600,7 +609,6 @@ logger.info('Basemap generation script completed!')
 # gdal_translate projection_space_basemap.tif left.tif -srcwin 0 0 5760 5760
 # gdal_translate projection_space_basemap.tif right.tif -srcwin 5760 0 5760 5760
 # montage -mode Concatenate -tile 2x1 -background black  -depth 8  right.tif left.tif center180.tif
-# gdal_translate center180.tif projection_space_basemap180.tif -a_srs "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr 0 5334738.600 21338954.2 -5334738.600
 #gdal_translate center180.tif projection_space_basemap180.tif -a_srs "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m" -a_ullr -10669477.100 5334738.600 10669477.100 -5334738.600
 
 

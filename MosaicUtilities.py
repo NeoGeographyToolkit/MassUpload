@@ -40,6 +40,10 @@ def cmdRunnerWrapper(params):
     numRetries = 1
     if len(params) > 3:
         numRetries = params[3]
+        
+    if cmd.strip() == ':':
+        return True
+        
     retryCount = numRetries
     # Try to call the command one or more times
     while retryCount > 0:

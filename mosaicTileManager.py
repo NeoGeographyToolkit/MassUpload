@@ -80,7 +80,7 @@ class MarsBasemap:
     def copySupportFilesFromBackupDir(self):
         '''Moves any needed files from the backup folder to the output folder'''
         backupMainLogPath = os.path.join(self._backupFolder, 'main_log.txt')
-        shutil.copy(self.getMainLogPath(), backupMainLogPath)
+        shutil.copy(backupMainLogPath, self.getMainLogPath())
 
     def _makeGrayBasemap(self):
         '''Creates a grayscale version of the basemap if it does not already exist'''
@@ -202,7 +202,8 @@ class MarsBasemap:
             
             # Now that we have selected a tile, generate all of the tile images for it.
             # - The first time this is called for a tile it generates the backup image for the tile.
-            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1 , cmd2) =  \
+            (smallTilePath, largeTilePath, grayTilePath, outputTilePath, 
+              tileLogPath, tileBackupPath, cmd1 , cmd2) =  \
                         self._generateImagesForTile(tileIndex, force=False)
             
             if not pool: # Go ahead and run the last two commands
@@ -212,14 +213,16 @@ class MarsBasemap:
                 # The seconds command seems prone to failure, so try it more than once.
                 NUM_CONVERT_RETRIES = 5
                 cmdList.append( (cmd1, grayTilePath,   force) )
-                cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) )
+                cmdList.append( (cmd2, outputTilePath, force, NUM_CONVERT_RETRIES) ) # Normal operation
+                #cmdList.append( (cmd2, tileBackupPath, force, NUM_CONVERT_RETRIES) ) # BATCH GENERATE ONLY!
+                
     
         if not pool: # No pool, we are finished.
             return True
         
         # Otherwise send all the commands to the processor.
-        for cmd in cmdList:
-            pool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+        print 'Sending ' + str(len(cmdList)) + ' mosaic tile commands to the pool.'
+        pool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
         return True
         
     def getPathsForTile(self, tileIndex):
@@ -264,10 +267,12 @@ class MarsBasemap:
         # - This operation is expensive and only needs to happen once per tile.
         # - All future tile updates will be pasted on top of this tile.
         if not os.path.exists(tileBackupPath):
-            cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
-                   + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
-            if os.path.exists(outputTilePath):
-                raise Exception('Output tile should never exist without backup file!')
+            raise Exception('There should not be any tiles missing from the backup folder!\n'
+                            +tileBackupPath)
+#            cmd2 = ('/byss/smcmich1/programs/ImageMagick-6.9.1_install/bin/convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+#                   + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
+#            if os.path.exists(outputTilePath):
+#                raise Exception('Output tile should never exist without backup file!')
         else: # Just make this a dummy command
             cmd2 = ':'
         # If this tile does not yet exist in the output folder, copy the latest backup there
@@ -278,7 +283,9 @@ class MarsBasemap:
         cmd = 'touch ' + tileLogPath
         os.system(cmd)
         
-        return (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, cmd1, cmd2)
+        return (smallTilePath, largeTilePath, grayTilePath, outputTilePath, 
+                    tileLogPath, tileBackupPath, cmd1, cmd2)
+        
     
     def checkLog(self, logPath, name):
         '''Return True if the name exists in the log file'''

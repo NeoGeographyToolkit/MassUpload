@@ -40,14 +40,12 @@ height = 10669477.2
 
 Input basemap is 128x256 tiles, each tile 45x45, mpp = ~1852
 - Total 32768 tiles.
-- Between +/-60 degrees, 86x256 tiles = 22016 tiles
+- Between +/-60 degrees, 86x256 tiles = 22016 tiles (actually between +/-60.46875)
 With 32x  increase, each tile is 1440x1440,   ~6MB,  190GB, mpp = ~58
 With 64x  increase, each tile is 2880x2880,  ~24MB,  760GB, mpp = ~29
-With 128x increase, each tile is 5760x5760,  ~95MB,    3TB, mpp = ~14.5 <-- Probably fine
-With 160x increase, each tile is 7200x7200, ~150MB,  4.6TB, mpp = ~11.6 <--- PLENTY of resolution!
+With 128x increase, each tile is 5760x5760,  ~95MB,    3TB, mpp = ~14.5 <-- Using this!
+With 160x increase, each tile is 7200x7200, ~150MB,  4.6TB, mpp = ~11.6
 
-Currently using 64x !!
-TODO: Go down to 128!
 
 
 If there are about 3600 HRSC images (more if we fetch updates from the last few months)
@@ -73,17 +71,18 @@ Batch procedure:
 # Constants
 
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 20
+NUM_PROCESS_THREADS  = 16
 
-
-IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 14 # This should be set equal to the HRSC cache size
 
 
 # Lunokhod 2
 fullBasemapPath        = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
 fullBasemapPath180     = '/byss/smcmich1/data/hrscBasemap180/projection_space_basemap180.tif'
-outputTileFolder       = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
+#outputTileFolder       = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
+outputTileFolder       = '/home/smcmich1/data/hrscNewOutputTiles'
 backupFolder           = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
+#backupFolder           = '/home/smcmich1/data/hrscSmoothed'
 databasePath           = '/byss/smcmich1/data/google/googlePlanetary.db'
 logFolder              = '/byss/smcmich1/data/hrscMosaicLogs'
 hrscThumbnailFolder    = '/byss/smcmich1/data/hrscThumbnails'
@@ -106,8 +105,8 @@ hrscOutputFolder       = '/home/smcmich1/data/hrscProcessedFiles'
 # Used to control the area we operate over
 #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0, 180.0, -60.0, 60.0) # Right half: L2
-#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0,   0.0, -60.0, 60.0) # Left half:  Alderaan
+HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
+#HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, -0.0001, -60.0, 60.0) # Left half:  Alderaan
 
 # DEBUG regions
 #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
@@ -126,7 +125,7 @@ HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0, 180.0, -60.0, 60.0) # Right h
 # - Log tiles are timestamped as is each line in the log file
 LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
 currentTime = datetime.datetime.now()
-logPath = (os.path.join(logFolder, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
+logPath = os.path.join(logFolder, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
 logging.basicConfig(filename=logPath,
                     format=LOG_FORMAT_STR,
                     level=logging.DEBUG)
@@ -197,7 +196,6 @@ def cacheManagerThreadFunction(databasePath, hrscDownloadFolder, hrscProcessedFo
             dataSet = request[len('FETCH'):].strip()
             logger.info('Got request to fetch data set ' + dataSet)
             # Download this HRSC image using the thread pool
-            # - TODO: Allow download overlap of multiple data sets at once!
             try:
                 hrscInfoDict = hrscFileFetcher.fetchHrscDataSet(dataSet)
             except Exception, e:
@@ -353,6 +351,22 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
+
+def generateAllUpsampledBasemapTiles(basemapInstance, pool):
+    '''Generate all the basemap tiles from the input low-res image.
+       There are 128*256 = 32,768 tiles in the full image, about 20,000 tiles
+       in the +/-60 version.'''
+
+    print 'GENERATING ALL BASEMAP TILES'
+
+    # Get all the tiles we are interested in.
+    # Should have tiles from -180 to 180 in the +/-60 range. (on /byss)
+    allTileList = basemapInstance.getIntersectingTiles(MosaicUtilities.Rectangle(-180, 180, -60, 60))
+    
+    # Make all the outputs.  This will take a while!
+    basemapInstance.generateMultipleTileImages(allTileList, pool, force=False)
+    
+
 #================================================================================
 
 print 'Starting basemap enhancement script...'
@@ -385,9 +399,11 @@ dummyFolder = '/dev/null'
 basemapInstance180 = mosaicTileManager.MarsBasemap(fullBasemapPath180, dummyFolder, dummyFolder, center180=True)
 logger.info('--- Finished initializing the base map object ---\n')
 
+## Run once code to generate all of the starting basemap tiles!
+#generateAllUpsampledBasemapTiles(basemapInstance, processPool)
+#raise Exception('DONE GENERATING ALL INPUT TILES')
 
 # Get a list of the HRSC images we are testing with
-#fullImageList = getHrscImageList()
 tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder, 
                                                hrscOutputFolder, BAD_HRSC_FILE_PATH)
 
@@ -515,12 +531,12 @@ for i in range(0,numHrscDataSets):
 
 numHrscImagesProcessed = len(processedDataSets)
 
-#PROCESS_POOL_KILL_TIMEOUT = 180 # The pool should not be doing any work at this point!
+PROCESS_POOL_KILL_TIMEOUT = 10 # The pool should not be doing any work at this point!
 if processPool:
     logger.info('Cleaning up the processing thread pool...')
     # Give the pool processes a little time to stop, them kill them.
     processPool.close()
-    time.sleep(10)
+    time.sleep(PROCESS_POOL_KILL_TIMEOUT)
     processPool.terminate()
     processPool.join()
 
@@ -543,6 +559,7 @@ for dataSet in processedDataSets:
 
 
 
+# TODO: Add progress counter!
 
 # Compute the run time for the output message
 SECONDS_TO_HOURS = 1.0 / (60.0*60.0)
@@ -565,9 +582,9 @@ KML pyramid link:
 '''+kmlPyramidWebAddress+'''
 
 Registration debug images are here:
-'''+kmlPyramidFolder+'''
+'''+hrscRegistrationFolder+'''
 --> To clear:
-rm '''+kmlPyramidFolder+'''/*.tif
+rm '''+hrscRegistrationFolder+'''/*.tif
 
 Image thumbnails are stored here:
 '''+hrscThumbnailFolder+'''
@@ -578,7 +595,7 @@ To undo the tile changes:
 rm  '''+outputTileFolder+'''/*
 
 To accept the tile changes:
-rsync  -urv '''+outputTileFolder +' '+ backupFolder+'''
+rsync  --update --existing -avz '''+outputTileFolder +'/ '+ backupFolder+'''/
 rm  '''+outputTileFolder+'''/*
 
 To start the next batch, run:

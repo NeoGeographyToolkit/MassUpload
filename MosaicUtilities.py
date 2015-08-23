@@ -88,11 +88,26 @@ def countBlackPixels(imagePath, isGray=True):
     #otherCount = int(otherLine[:otherLine.find(':')])
     
 
+def isImageFileValid(path):
+    '''Returns false if the image file is invalid (gdal can't read it)'''
+
+    cmd = ['gdalinfo', path]
+    #p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #textOutput, err = p.communicate()
+    
+    try:
+      FNULL = open(os.devnull, 'w')
+      subprocess.check_call(cmd, stdout=FNULL, stderr=FNULL)
+      return True
+    except:
+      return False
+    
+
 def sendEmail(address, subject, message):
-  '''Email someone!'''
-  cmd = 'echo "'+message+'" | mail -s '+subject+' '+address
-  print cmd
-  os.system(cmd)
+    '''Email someone!'''
+    cmd = 'echo "'+message+'" | mail -s '+subject+' '+address
+    print cmd
+    os.system(cmd)
 
 
 # TODO: Stuff up here should come from common files

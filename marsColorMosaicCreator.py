@@ -73,7 +73,7 @@ Batch procedure:
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 16
 
-IMAGE_BATCH_SIZE = 14 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 16 # This should be set equal to the HRSC cache size
 
 
 # Lunokhod 2
@@ -279,6 +279,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     # Skip this function if we have completed adding this HRSC image
     if basemapInstance.checkLog(mainLogPath, hrscSetName):
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
+        basemapInstance.updateLog(mainLogPath, hrscSetName) # This should have already been logged!
         return
 
     logger.info('Started updating tiles for HRSC image ' + hrscSetName)
@@ -298,23 +299,20 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     for tileIndex in outputTilesList:
 
         tileBounds = basemapInstance.getTileRectDegree(tileIndex)
-        
-        logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
-        logger.info('--> Tile bounds = ' + str(tileBounds))
-
-        #logger.info('\nMaking sure basemap info is present...')
-        
+                
         # Retrieve the needed paths for this tile
         (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
             basemapInstance.getPathsForTile(tileIndex) 
     
-        #print '\nPasting on HRSC tiles...'
-
         # Have we already written this HRSC image to this tile?
         comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
-        if comboAlreadyWritten:
-            logger.info('-- Skipping already written tile!') #Don't want to double-write the same image.
+        if comboAlreadyWritten: #Don't want to double-write the same image.
+            logger.info('-- Skipping already written tile: ' + str(tileIndex)) 
             continue
+
+        logger.info('Using HRSC image ' + hrscSetName + ' to update tile: ' + str(tileIndex))
+        logger.info('--> Tile bounds = ' + str(tileBounds))
+        #logger.info('\nMaking sure basemap info is present...')
     
         # Get information about which HRSC tiles to paste on to the basemap
         hrscTileInfoDict = hrscInstance.getTileInfo(basemapInstance, tileBounds, tileIndex.getPostfix())
@@ -416,8 +414,7 @@ tempFileFinder = hrscFileCacher.HrscFileCacher(databasePath, sourceHrscFolder,
 fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
 tempgFileFinder = None # Delete this temporary object
 
-logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region:\n'+
-            str(fullImageList))
+logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region.')
 
 
 # Prune out all the HRSC images that we have already added to the mosaic.
@@ -429,35 +426,43 @@ for hrscSetName in fullImageList:
         hrscImageList.append(hrscSetName)
 #hrscImageList = ['h2216_0001'] # DEBUG
 
+numDataSetsRemainingToProcess = len(hrscImageList)
+logger.info('Num data sets remaining to process = ' + str(numDataSetsRemainingToProcess))
+
 # Restrict the image list to the batch size
 # - It would be more accurate to only count valid images but this is good enough
 hrscImageList = hrscImageList[0:IMAGE_BATCH_SIZE]
-batchName     = hrscImageList[0]
-print 'Image list for this batch: ' + str(hrscImageList)
+try:
+  batchName = hrscImageList[0]
+except:
+  batchName = 'Default Name'
+logger.info('Image list for this batch: ' + str(hrscImageList))
 
-# Set up the HRSC file manager thread
-logger.info('Starting communication queues')
-downloadCommandQueue  = multiprocessing.Queue()
-downloadResponseQueue = multiprocessing.Queue()
-logger.info('Initializing HRSC file caching thread')
-downloadThread = threading.Thread(target=cacheManagerThreadFunction,
-                                  args  =(databasePath, sourceHrscFolder, hrscOutputFolder,       
-                                          downloadCommandQueue, downloadResponseQueue)
-                                 )
-downloadThread.daemon = True # Needed for ctrl-c to work
-logger.info('Running thread...')
-downloadThread.start()
+if len(hrscImageList) > 0:
+  # Set up the HRSC file manager thread
+  logger.info('Starting communication queues')
+  downloadCommandQueue  = multiprocessing.Queue()
+  downloadResponseQueue = multiprocessing.Queue()
+  logger.info('Initializing HRSC file caching thread')
+  downloadThread = threading.Thread(target=cacheManagerThreadFunction,
+                                    args  =(databasePath, sourceHrscFolder, hrscOutputFolder,       
+                                            downloadCommandQueue, downloadResponseQueue)
+                                   )
+  downloadThread.daemon = True # Needed for ctrl-c to work
+  logger.info('Running thread...')
+  downloadThread.start()
 
 
-# Go ahead and send a request to fetch the first HRSC image
-logger.info('Sending FETCH command: ' + hrscImageList[0])
-downloadCommandQueue.put('FETCH ' + hrscImageList[0])
+  # Go ahead and send a request to fetch the first HRSC image
+  logger.info('Sending FETCH command: ' + hrscImageList[0])
+  downloadCommandQueue.put('FETCH ' + hrscImageList[0])
 
 
 # Loop through input HRSC images
 numHrscDataSets   = len(hrscImageList) 
 processedDataSets = []
 failedDataSets    = []
+setProcessTimes   = []
 for i in range(0,numHrscDataSets): 
     
     # Get the name of this and the next data set
@@ -498,6 +503,7 @@ for i in range(0,numHrscDataSets):
 
         #raise Exception('STOPPED AFTER DOWNLOAD')
 
+        setStartTime = time.time()
         logger.info('\n=== Initializing HRSC image ' + hrscSetName + ' ===')
 
         # Preprocess the HRSC image
@@ -521,6 +527,10 @@ for i in range(0,numHrscDataSets):
         # Record that we finished processing this HRSC image
         processedDataSets.append( (hrscSetName, hrscInstance.getBoundingBoxDegrees()) )
 
+        # Record how long this data set took to process
+        setStopTime = time.time()
+        setProcessTimes.append(setStopTime - setStartTime)
+
     except Exception, e:
         # When we fail to fetch a data set, log a failure message and keep going.
         failedDataSets.append(hrscSetName)
@@ -540,8 +550,13 @@ if processPool:
     processPool.terminate()
     processPool.join()
 
-downloadCommandQueue.put('STOP') # Stop the download thread
-downloadThread.join()
+try:
+    downloadCommandQueue.put('STOP') # Stop the download thread
+    downloadThread.join()
+except:
+    print 'Exception thrown shutting down the downloader!'
+
+#raise Exception('DEBUG - SKIP HTML GENERATION!!')
 
 # Copy some debug files to a centralized location for easy viewing
 # TODO: The HRSC manager should take care of this?
@@ -559,14 +574,12 @@ for dataSet in processedDataSets:
 
 
 
-# TODO: Add progress counter!
-
 # Compute the run time for the output message
 SECONDS_TO_HOURS = 1.0 / (60.0*60.0)
 stopTime = time.time()
 runTime  = (stopTime - startTime) * SECONDS_TO_HOURS
 
-if numHrscImagesProcessed > 0:
+if (numHrscImagesProcessed > 0) or (IMAGE_BATCH_SIZE == 0):
     # Generate a KML pyramid of the tiles for diagnostics
     kmlPyramidLocalPath  = stackImagePyramid.main(outputTileFolder, kmlPyramidFolder, processedDataSets)
     pos                  = kmlPyramidLocalPath.find('/smcmich1')
@@ -577,6 +590,8 @@ if numHrscImagesProcessed > 0:
 Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
 
 elapsed time = ''' + str(runTime) + ''' hours.
+
+Number remaining data sets = ''' + str(numDataSetsRemainingToProcess) + '''
 
 KML pyramid link:
 '''+kmlPyramidWebAddress+'''
@@ -605,8 +620,10 @@ Disk usage info:
 ''' + getDiskUsage()+'''
 Processed image list:
 '''
+    index = 0
     for i in processedDataSets:
-        msgText += i[0] + '\n'
+        msgText += i[0] + ' in ' + str(setProcessTimes[index]/60.0)+ ' minutes\n'
+        index += 1
     if failedDataSets:
       msgText += '\n Failed image list:\n'
       for i in failedDataSets:

@@ -11,9 +11,9 @@ import sqlite3
 import MosaicUtilities
 
 # Set the size limit of our data set cache
-MAX_STORED_DATA_SETS = 40
+MAX_STORED_DATA_SETS = 24
     
-
+LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
 
 # This function has to be outside the class so it can work with multiprocessing
 def downloadHrscFile(remoteURL, localFilePath):
@@ -55,7 +55,7 @@ class BadHrscFileChecker():
                     name = 'h' + name
                 self._badList.append(name)
 
-        logger.info('Loaded bad HRSC list: \n' + str(self._badList))
+        logger.info('Loaded bad HRSC list of length: ' + str(len(self._badList)))
 
     def isSetBad(self, setName):
         '''Returns True if this is a known bad data set'''
@@ -83,6 +83,12 @@ class HrscFileCacher():
         self._logger = logging.getLogger('hrscFileCacher')
         self._logger.info('Initializing hrscFileCacher')
 
+        # Echo logging to stdout
+        #echo = logging.StreamHandler(sys.stdout)
+        #echo.setLevel(logging.DEBUG)
+        #echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+        #self._logger.addHandler(echo)
+
         if not os.path.exists(dbPath):
             raise Exception('ERROR: SQL database does not exist!')
         self._db = sqlite3.connect(dbPath)
@@ -107,6 +113,7 @@ class HrscFileCacher():
         # Load list of cached sets from disk.
         self._findCachedFiles()
         
+        self._logger.info('Found ' + str(len(self._cachedDataSets)) + ' cached data sets.')
 
     def __del__(self):
         '''Close the open DB'''
@@ -248,6 +255,7 @@ class HrscFileCacher():
             return # We still have room, don't delete anything.
         
         #print self._cachedDataSets
+        self._logger.info('Making room with ' + str(len(self._cachedDataSets)) + ' sets on disk.')
         self._logger.info('Searching for oldest data set to delete...')
         
         ## Clear out any incomplete data sets

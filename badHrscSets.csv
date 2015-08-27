@@ -347,10 +347,12 @@ c707_0000
 8703
 9209
 9237
+0047
+0329
+0072
 # These ones reveal possible processing problems
-0335
-1879
-8289
+#
+#
 # These images have bad registration, are otherwise ok.
 1864_0009
 2355
@@ -363,3 +365,6 @@ c707_0000
 6763
 6676_0001
 9262
+a872
+0010_0009
+1201

@@ -74,7 +74,8 @@ def solveTransform(inputPathList, outputPath):
             parts = line.strip().split(',')
             basePixel = [int(parts[0]), int(parts[1]), int(parts[2])]
             hrscPixel = [int(parts[3]), int(parts[4]), int(parts[5]), int(parts[6]), int(parts[7])]
-              
+            
+            # Convert the base pixel from RGB to YCbCr
             basePixelYCC = rgb2ycbcr(basePixel)
               
             # Build a list of lists
@@ -87,8 +88,8 @@ def solveTransform(inputPathList, outputPath):
             
         fileHandle.close()
 
-    targets = numpy.matrix(basePixelList) # Strip last semicolons
-    inputs  = numpy.matrix(hrscPixelList)
+    targets  = numpy.matrix(basePixelList) # Strip last semicolons
+    inputs   = numpy.matrix(hrscPixelList)
     targetsY = numpy.matrix(basePixelListY) # Strip last semicolons
     inputsY  = numpy.matrix(hrscPixelListY)
 
@@ -103,13 +104,20 @@ def solveTransform(inputPathList, outputPath):
 
     print 'Computing transform...'
 
-    # Solve ax = b
-    transform, residuals, rank, s = numpy.linalg.lstsq(inputs, targets)
-    print transform
-    print 'Residuals:'
-    print residuals
+    #print 'inputs'
+    #print inputs
+    #print 'targets'
+    #print targets
 
-    # Compute Y scaling
+    # Solve ax = b (5x3 matrix)
+    transform, residuals, rank, s = numpy.linalg.lstsq(inputs, targets)
+    print '--- Transform ---'
+    print transform
+    #print '--- Residuals ---'
+    #print residuals
+
+    # Compute Y scaling (just one number)
+    print 'Computing Y Scaling...'
     transformY, residualsY, rank, s = numpy.linalg.lstsq(inputsY, targetsY)
     #print 'YYYYY'
     #print numpy.mean(inputsY)
@@ -118,18 +126,27 @@ def solveTransform(inputPathList, outputPath):
     numRows = transform.shape[0] + 1
     numCols = transform.shape[1]
 
+    #print 'Show results:'
+    #print inputs*transform
+
+    #print 'Show diff:'
+    #diff = inputs*transform - targets
+    #print diff  
+    #print 'Mean abs(diff)'
+    #print numpy.mean(abs(diff), axis=0)
 
     # Write the output transform to file
     f = open(outputPath, 'w')
     f.write(str(numRows) +', '+ str(numCols) + '\n')
     for r in range(numRows-1):
-        print str(transform[r])
+        #print str(transform[r])
         for c in range(numCols-1):
             f.write(str(transform[r,c]) + ', ')
         f.write(str(transform[r,numCols-1]) + '\n')
     f.write(str(float(transformY)) + ', 0.0, 0.0') # Extra row to store Y scaling
     f.close()
 
+    print 'Finished writing out the transform file.'
 
 def main():
 

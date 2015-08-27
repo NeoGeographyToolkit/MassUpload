@@ -73,16 +73,14 @@ Batch procedure:
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 16
 
-IMAGE_BATCH_SIZE = 16 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 
 
 # Lunokhod 2
 fullBasemapPath        = '/byss/smcmich1/data/hrscBasemap/projection_space_basemap.tif'
 fullBasemapPath180     = '/byss/smcmich1/data/hrscBasemap180/projection_space_basemap180.tif'
-#outputTileFolder       = '/byss/smcmich1/data/hrscBasemap/outputTiles_128'
 outputTileFolder       = '/home/smcmich1/data/hrscNewOutputTiles'
 backupFolder           = '/byss/smcmich1/data/hrscBasemap/output_tile_backups'
-#backupFolder           = '/home/smcmich1/data/hrscSmoothed'
 databasePath           = '/byss/smcmich1/data/google/googlePlanetary.db'
 logFolder              = '/byss/smcmich1/data/hrscMosaicLogs'
 hrscThumbnailFolder    = '/byss/smcmich1/data/hrscThumbnails'
@@ -424,7 +422,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-#hrscImageList = ['h2216_0001'] # DEBUG
+hrscImageList = ['h0998_0000'] # DEBUG
 
 numDataSetsRemainingToProcess = len(hrscImageList)
 logger.info('Num data sets remaining to process = ' + str(numDataSetsRemainingToProcess))
@@ -561,17 +559,20 @@ except:
 # Copy some debug files to a centralized location for easy viewing
 # TODO: The HRSC manager should take care of this?
 for dataSet in processedDataSets:
-    setName = dataSet[0]
-    # Copy the low res nadir image overlaid on a section of the low res mosaic
-    debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_registration_debug_mosaic.tif')
-    debugImageCopyPath  = os.path.join(hrscRegistrationFolder, setName+'_registration_image.tif')
-    shutil.copy(debugImageInputPath, debugImageCopyPath)
 
-    # Copy the low res nadir image to a thumbnail folder
-    debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_nd3_basemap_res.tif')
-    debugImageCopyPath  = os.path.join(hrscThumbnailFolder, setName+'_nadir_thumbnail.tif')
-    shutil.copy(debugImageInputPath, debugImageCopyPath)
+    try:
+        setName = dataSet[0]
+        # Copy the low res nadir image overlaid on a section of the low res mosaic
+        debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_registration_debug_mosaic.tif')
+        debugImageCopyPath  = os.path.join(hrscRegistrationFolder, setName+'_registration_image.tif')
+        shutil.copy(debugImageInputPath, debugImageCopyPath)
 
+        # Copy the low res nadir image to a thumbnail folder
+        debugImageInputPath = os.path.join(hrscOutputFolder, setName+'/'+setName+'_nd3_basemap_res.tif')
+        debugImageCopyPath  = os.path.join(hrscThumbnailFolder, setName+'_nadir_thumbnail.tif')
+        shutil.copy(debugImageInputPath, debugImageCopyPath)
+    except:
+        logger.error('Error copying a debug file for set ' + setName)
 
 
 # Compute the run time for the output message

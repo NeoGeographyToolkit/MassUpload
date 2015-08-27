@@ -267,7 +267,7 @@ class HrscImage():
             self._basemapInstance = basemapInstance
 
         # Record input parameters
-        self._basemapColorPath = basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
+        self._basemapColorPath = self._basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
         
 
 
@@ -485,7 +485,7 @@ class HrscImage():
         # Now that we have all the color transforms, generate the new color image for each tile.
         # - This function utilizes the thread pool
         self._generateNewHrscColorTiles(self._tileDict, force)
-        
+
         print 'Finished generating high resolution content for HRSC image.'
         
         

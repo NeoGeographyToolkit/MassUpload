@@ -236,6 +236,9 @@ cv::Vec3b transformPixelYCC(const std::vector<unsigned char> &hrscPixel, const c
     outputPixel[j] = static_cast<unsigned char>(temp);
   }
   
+  //return outputPixel; // DEBUG -> No YCC replacement!
+
+  // Convert RGB --> YCbCr
   cv::Vec3b ycbcrPixel = rgb2ycbcr(outputPixel);
   
   // Replace the image intensity with the scaled NADIR channel.
@@ -248,9 +251,8 @@ cv::Vec3b transformPixelYCC(const std::vector<unsigned char> &hrscPixel, const c
     temp2 = 255.0;  
   ycbcrPixel[Y] = static_cast<unsigned char>(temp2);
 
-  
+  // Convert back from YCbCr to RGB
   return ycbcr2rgb(ycbcrPixel);
-  //return (outputPixel);
 }
 
 
@@ -384,9 +386,6 @@ int main(int argc, char** argv)
                      corrector, newColorImage,
                      colorTransform, mainWeight,
                      otherColorTransforms, otherWeights, otherOffsets);
-
-  // TODO: Apply unsharp masking to the color image?
-
   
   // Write the output image
   cv::imwrite(outputPath, newColorImage);

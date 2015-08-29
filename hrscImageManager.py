@@ -90,6 +90,7 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
 
     # Compute the bounding box for each tile
     inputImageSize    = IrgGeoFunctions.getImageSize(imagePath)
+    #print imagePath + ' is size ' + str(inputImageSize)
     numTilesX = int(math.ceil(float(inputImageSize[0]) / float(tileSize)))
     numTilesY = int(math.ceil(float(inputImageSize[1]) / float(tileSize)))
     print 'Using gdal_translate to generate ' + str(int(numTilesX*numTilesY)) + ' tiles!'
@@ -123,13 +124,14 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
             thisTilePath = outputPrefix + str(r) +'_'+ str(c) + '.tif'
             cmd = 'gdal_translate -q -srcwin ' + thisPixelRoi +' '+ imagePath +' '+ thisTilePath
             if pool:
+                #print cmd
                 cmdList.append((cmd, thisTilePath, force))
             else:
                 MosaicUtilities.cmdRunner(cmd, thisTilePath, force)
 
     if pool:
         # Pass all of these commands to a multiprocessing worker pool
-        print 'Launching multiple gdalwarp threads...'
+        print 'splitImageGdal is launching '+str(len(cmdList))+' gdalwarp threads...'
         pool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
             
             
@@ -168,7 +170,7 @@ def splitImage(imagePath, outputFolder, tileSize=512, force=False, pool=None, ma
 
     if pool:
         # Pass all of these commands to a multiprocessing worker pool
-        print 'Launching multiple tile info generation threads...'
+        print 'splitImage is launching '+str(len(cmdList))+' tile info generation threads...'
         outputTileInfoList = pool.map(generateTileInfoWrapper, cmdList)
 
 
@@ -387,6 +389,7 @@ class HrscImage():
         cmd = './bigMaskGrassfire --cache 4096 -o ' + self._highResMaskPath +' '+ self._highResBinaryMaskPath
         MosaicUtilities.cmdRunner(cmd, self._highResMaskPath, force)        
         self._highResPathStringAndMask = self._highResPathString +' '+ self._highResMaskPath
+
 
         # Split the image up into tiles at the full output resolution       
         # - There is one list of tiles per HRSC channel

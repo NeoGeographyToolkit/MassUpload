@@ -246,7 +246,6 @@ int main( int argc, char *argv[] ) {
 
   DiskImageView<PixelT> disk_image(opt.input_file);
 
-
   vw_out() << "Writing: " << output << std::endl;
   block_write_gdal_image(output, 
                         GrassfireView<ImageView<PixelGray<MASK_DATA_TYPE> > >(disk_image),

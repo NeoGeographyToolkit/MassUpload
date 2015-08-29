@@ -477,6 +477,12 @@ build_gdal_rsrc( const std::string &filename,
                vw::ImageViewBase<ImageT> const& image) 
 {
   vw::DiskImageResourceGDAL::Options gdal_options;
+
+  // If the image is big, make sure we write bigtiff format.
+  //if ( (disk_image.cows() > 30000) && (disk_image.rows() > 15000))
+  gdal_options["BIGTIFF"] = "IF_SAFER";//"YES";
+
+
   // The tile size is hardcoded to a good number!
   vw::Vector2i raster_tile_size(1024, 1024);
   return new vw::DiskImageResourceGDAL(filename, image.impl().format(), raster_tile_size, gdal_options);

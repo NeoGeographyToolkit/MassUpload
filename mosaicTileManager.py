@@ -80,7 +80,8 @@ class MarsBasemap:
     def copySupportFilesFromBackupDir(self):
         '''Moves any needed files from the backup folder to the output folder'''
         backupMainLogPath = os.path.join(self._backupFolder, 'main_log.txt')
-        shutil.copy(backupMainLogPath, self.getMainLogPath())
+        cmd = 'rsync --update ' + backupMainLogPath +' '+ self.getMainLogPath()
+        MosaicUtilities.cmdRunner(cmd, self.getMainLogPath(), True)
 
     def _makeGrayBasemap(self):
         '''Creates a grayscale version of the basemap if it does not already exist'''

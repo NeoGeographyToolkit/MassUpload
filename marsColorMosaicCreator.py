@@ -73,7 +73,7 @@ Batch procedure:
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
 NUM_PROCESS_THREADS  = 16
 
-IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
 
 
 # Lunokhod 2
@@ -90,7 +90,6 @@ kmlPyramidFolder       = '/byss/docroot/smcmich1/hrscMosaicKml'
 sourceHrscFolder       = '/home/smcmich1/data/hrscDownloadCache'
 hrscOutputFolder       = '/home/smcmich1/data/hrscProcessedFiles'
 
-# TODO: Alderaan
 
 # --- Folder notes ---
 # - sourceHrscFolder holds the downloaded and preprocessed HRSC data
@@ -342,7 +341,9 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
             
         logger.info('All tile writing processes have completed')
         
-    # Log the fact that we have finished adding this HRSC image    
+    # Log the fact that we have finished adding this HRSC image
+    print 'Log path: #' + mainLogPath+ '#'
+    print 'Set name: #' + hrscSetName+ '#'
     basemapInstance.updateLog(mainLogPath, hrscSetName)
 
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
@@ -387,6 +388,7 @@ logger.info('==== Initializing the base map object ====')
 basemapInstance = mosaicTileManager.MarsBasemap(fullBasemapPath, outputTileFolder, backupFolder)
 basemapInstance.copySupportFilesFromBackupDir() # Copies the main log from the backup dir to output dir
 basemapInputsUsedLog = basemapInstance.getMainLogPath()
+print 'CHECKING LOG PATH: ' + basemapInputsUsedLog
 
 # Create another basemap instance centered on 180 lon.
 # - This instance should not be creating any tiles in its output folders!
@@ -422,7 +424,7 @@ for hrscSetName in fullImageList:
         logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
     else:
         hrscImageList.append(hrscSetName)
-hrscImageList = ['h0998_0000'] # DEBUG
+#hrscImageList = ['h8289_0000'] # DEBUG
 
 numDataSetsRemainingToProcess = len(hrscImageList)
 logger.info('Num data sets remaining to process = ' + str(numDataSetsRemainingToProcess))
@@ -539,7 +541,7 @@ for i in range(0,numHrscDataSets):
 
 numHrscImagesProcessed = len(processedDataSets)
 
-PROCESS_POOL_KILL_TIMEOUT = 10 # The pool should not be doing any work at this point!
+PROCESS_POOL_KILL_TIMEOUT = 5 # The pool should not be doing any work at this point!
 if processPool:
     logger.info('Cleaning up the processing thread pool...')
     # Give the pool processes a little time to stop, them kill them.

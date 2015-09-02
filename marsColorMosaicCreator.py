@@ -12,6 +12,7 @@ import datetime
 import time
 import traceback
 import shutil
+import optparse
 
 import IrgGeoFunctions
 import mosaicTileManager # TODO: Normalize caps!
@@ -72,10 +73,9 @@ Batch procedure:
 
 # Control how many threads are in the thread pools.
 NUM_DOWNLOAD_THREADS = 5 # There are five files we download per data set
-NUM_PROCESS_THREADS  = 16
 
 # This limits the program to parsing this many HRSC files before stopping.
-IMAGE_BATCH_SIZE = 2 # This should be set equal to the HRSC cache size
+IMAGE_BATCH_SIZE = 1 # This should be set equal to the HRSC cache size
 
 
 
@@ -105,7 +105,7 @@ def cacheManagerThreadFunction(DATABASE_PATH, hrscDownloadFolder, hrscProcessedF
     # Echo logging to stdout
     echo = logging.StreamHandler(sys.stdout)
     echo.setLevel(logging.DEBUG)
-    echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+    echo.setFormatter(logging.Formatter(MosaicUtilities.LOG_FORMAT_STR))
     logger.addHandler(echo)
 
 
@@ -195,11 +195,14 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
 def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
     '''Update a single output tile with the given HRSC image'''
 
+    # Write the output to a new temporary file in case we wreck it!
+    tempFilePath = outputTilePath + '_temp.tif'
+
     # Append all the tiles into one big command line call
     hrscTiles = ''
-    cmd = './hrscMosaic ' + outputTilePath +' '+ outputTilePath
+    cmd = './hrscMosaic ' + outputTilePath +' '+ tempFilePath
     for hrscTile in hrscTileInfoDict.itervalues():    
-        #try:
+
         # This pastes the HRSC tile on top of the current output tile.  Another function
         #  will have made sure the correct output tile is in place.
         cmd += (' '+ hrscTile['newColorPath'] +' '+
@@ -207,7 +210,19 @@ def updateTileWithHrscImage(hrscTileInfoDict, outputTilePath, tileLogPath):
         hrscTiles += hrscTile['prefix'] + ', '
 
     # Execute the command line call
-    MosaicUtilities.cmdRunner(cmd, outputTilePath, True)
+    MosaicUtilities.cmdRunner(cmd, tempFilePath, True)
+
+    # Make sure that the command did not ruin the output file!
+    if MosaicUtilities.isImageFileValid(tempFilePath):
+        # If we didn't ruin the output file, copy it to the proper location.
+        shutil.copyfile(tempFilePath, outputTilePath)
+        os.remove(tempFilePath)
+    else:
+        # On a failure, just log the error so that we can keep going.
+        logger = logging.getLogger('MainProgram')
+        logger.error('Running command:  ' + cmd + '\n' +
+                     'has broken file: ' + tempFilePath)
+        return (tileLogPath, 'FAILED')
 
     # Return the path to log the success to
     return (tileLogPath, hrscTiles)
@@ -311,7 +326,7 @@ def generateAllUpsampledBasemapTiles(basemapInstance, pool):
 
     # Get all the tiles we are interested in.
     # Should have tiles from -180 to 180 in the +/-60 range. (on /byss)
-    allTileList = basemapInstance.getIntersectingTiles(MosaicUtilities.Rectangle(-180, 180, -60, 60))
+    allTileList = basemapInstance.getIntersectingTiles(HRSC_FETCH_ROI)
     
     # Make all the outputs.  This will take a while!
     basemapInstance.generateMultipleTileImages(allTileList, pool, force=False)
@@ -320,7 +335,7 @@ def generateAllUpsampledBasemapTiles(basemapInstance, pool):
 #================================================================================
 
 
-def mainProcessingFunction():
+def mainProcessingFunction(options):
 
     print 'Starting basemap enhancement script...'
 
@@ -331,20 +346,24 @@ def mainProcessingFunction():
     # Echo logging to stdout
     echo = logging.StreamHandler(sys.stdout)
     echo.setLevel(logging.DEBUG)
-    echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+    echo.setFormatter(logging.Formatter(MosaicUtilities.LOG_FORMAT_STR))
     logger.addHandler(echo)
 
 
     # Initialize the multi-threading worker pool
     processPool  = None
-    if NUM_PROCESS_THREADS > 1:
-        processPool = multiprocessing.Pool(processes=NUM_PROCESS_THREADS)
+    if options.numThreads > 1:
+        processPool = multiprocessing.Pool(processes=options.numThreads)
 
     logger.info('==== Initializing the base map object ====')
     basemapInstance = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH, NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER)
     basemapInstance.copySupportFilesFromBackupDir() # Copies the main log from the backup dir to output dir
     basemapInputsUsedLog = basemapInstance.getMainLogPath()
     print 'CHECKING LOG PATH: ' + basemapInputsUsedLog
+
+    # Open a seperate text file to record the names of failed input data sets
+    failedSetsLogPath = os.path.join(NEW_OUTPUT_TILE_FOLDER, 'failed_input_list.txt')
+    failedSetsLogFile = open(failedSetsLogPath, 'a')
 
     # Create another basemap instance centered on 180 lon.
     # - This instance should not be creating any tiles in its output folders!
@@ -353,9 +372,11 @@ def mainProcessingFunction():
     basemapInstance180 = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH180, dummyFolder, dummyFolder, center180=True)
     logger.info('--- Finished initializing the base map object ---\n')
 
-    ## Run once code to generate all of the starting basemap tiles!
-    #generateAllUpsampledBasemapTiles(basemapInstance, processPool)
-    #raise Exception('DONE GENERATING ALL INPUT TILES')
+    # Run once code to generate all of the starting basemap tiles!
+    if options.genBasemapTiles:
+        generateAllUpsampledBasemapTiles(basemapInstance, processPool)
+        print 'DONE GENERATING ALL INPUT TILES'
+        return False # Stop with no email message sent
 
     # Get a list of the HRSC images we are testing with
     tempFileFinder = hrscFileCacher.HrscFileCacher(DATABASE_PATH, HRSC_DOWNLOAD_FOLDER, 
@@ -497,9 +518,12 @@ def mainProcessingFunction():
             logger.error('Caught exception processing data set ' + hrscSetName + '\n' + 
                          str(e) + '\n' + str(sys.exc_info()[0]) + '\n')
             logger.error(traceback.format_exc())
+            failedSetsLogFile.write(hrscSetName)
                 
 
     numHrscImagesProcessed = len(processedDataSets)
+
+    failedSetsLogFile.close() # Close the failure list log file
 
     PROCESS_POOL_KILL_TIMEOUT = 5 # The pool should not be doing any work at this point!
     if processPool:
@@ -521,7 +545,7 @@ def mainProcessingFunction():
     # Call output reporting/logging functions
 
     sentEmail = generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-                                     processedDataSets, failedDataSets)
+                                     processedDataSets, failedDataSets, numDataSetsRemainingToProcess)
 
     logger.info('Basemap generation script completed!')
     return sentEmail
@@ -532,21 +556,21 @@ def recordThumbnails(setName):
 
     # TODO: The HRSC manager should take care of this!
     try:
-          # Copy the low res nadir image overlaid on a section of the low res mosaic
-          debugImageInputPath = os.path.join(HRSC_PROCESSING_FOLDER, setName+'/'+setName+'_registration_debug_mosaic.tif')
-          debugImageCopyPath  = os.path.join(OUTPUT_REGISTRATION_FOLDER, setName+'_registration_image.tif')
-          shutil.copy(debugImageInputPath, debugImageCopyPath)
+        # Copy the low res nadir image overlaid on a section of the low res mosaic
+        debugImageInputPath = os.path.join(HRSC_PROCESSING_FOLDER, setName+'/'+setName+'_registration_debug_mosaic.tif')
+        debugImageCopyPath  = os.path.join(OUTPUT_REGISTRATION_FOLDER, setName+'_registration_image.tif')
+        shutil.copy(debugImageInputPath, debugImageCopyPath)
 
-          # Copy the low res nadir image to a thumbnail folder
-          debugImageInputPath = os.path.join(HRSC_PROCESSING_FOLDER, setName+'/'+setName+'_nd3_basemap_res.tif')
-          debugImageCopyPath  = os.path.join(OUTPUT_THUMBNAIL_FOLDER, setName+'_nadir_thumbnail.tif')
-          shutil.copy(debugImageInputPath, debugImageCopyPath)
-      except:
-          logger.error('Error copying a debug file for set ' + setName)
+        # Copy the low res nadir image to a thumbnail folder
+        debugImageInputPath = os.path.join(HRSC_PROCESSING_FOLDER, setName+'/'+setName+'_nd3_basemap_res.tif')
+        debugImageCopyPath  = os.path.join(OUTPUT_THUMBNAIL_FOLDER, setName+'_nadir_thumbnail.tif')
+        shutil.copy(debugImageInputPath, debugImageCopyPath)
+    except:
+        logger.error('Error copying a debug file for set ' + setName)
 
 
 def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-               processedDataSets, failedDataSets):
+               processedDataSets, failedDataSets, numDataSetsRemainingToProcess):
     '''Generate an HRSC image pyramid and then send out a status email'''
 
     # Compute the run time for the output message
@@ -627,30 +651,66 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
 def setGlobalConfigs(argsIn):
   '''Parse the input arguments and set global variables'''
 
-  print 'argsIn = ' + str(argsIn)
+  # Define global variables we will use
+  global FULL_BASEMAP_PATH
+  global FULL_BASEMAP_PATH180
+  global BACKUP_FOLDER
+  global DATABASE_PATH
+  global RUN_LOG_FOLDER
+
+  global BAD_HRSC_FILE_PATH
+
+  global NEW_OUTPUT_TILE_FOLDER
+  global HRSC_DOWNLOAD_FOLDER
+  global HRSC_PROCESSING_FOLDER
+
+  global KML_PYRAMID_FOLDER
+  global OUTPUT_THUMBNAIL_FOLDER
+  global OUTPUT_REGISTRATION_FOLDER
+
+  global HRSC_FETCH_ROI
+
+
+  # Input argument parsing
+  usage = "usage: marsColorMosaicCreator.py [--help]\n"
+  parser = optparse.OptionParser(usage=usage)
   
-  # TODO: Parse these from input parameters!
+  parser.add_option("-u", "--upload", dest="upload", type=int,
+                    help="Upload this many files instead of fetching the list.")
+  parser.add_option('--generate-basemap-tiles', action='store_true', 
+                    dest='genBasemapTiles', default=False,
+                    help='Generate the basemap tiles instead of normal processing..')
+  parser.add_option("--threads", type="int", dest="numThreads", default=16,
+                    help="Number of threads to use for processing.")
+  parser.add_option("--safe-folder", dest="safeFolder", default='/byss/smcmich1/data',
+                    help="Folder to store output files in.")
+  parser.add_option("--volatile-folder", dest="volatileFolder", default='/home/smcmich1/data',
+                    help="Folder to store temporary files in.")
+  parser.add_option("--repo-folder", dest="repoFolder", default='/byss/smcmich1/repo',
+                    help="Folder where the repository is installed.")
+  (options, args) = parser.parse_args()
 
-  SAFE_FOLDER     = '/byss/smcmich1/data' # Permanent files go here
-  VOLATILE_FOLDER = '/home/smcmich1/data' # Temporary files go here
-  REPO_FOLDER     = '/home/smcmich1/data' # Source code folder
+
+  SAFE_FOLDER     = options.safeFolder     # Permanent files go here
+  VOLATILE_FOLDER = options.volatileFolder # Temporary files go here
+  REPO_FOLDER     = options.repoFolder     # Source code folder
 
 
-  global FULL_BASEMAP_PATH    = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
-  global FULL_BASEMAP_PATH180 = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
-  global BACKUP_FOLDER        = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
-  global DATABASE_PATH        = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
-  global RUN_LOG_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
+  FULL_BASEMAP_PATH    = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
+  FULL_BASEMAP_PATH180 = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
+  BACKUP_FOLDER        = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
+  DATABASE_PATH        = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
+  RUN_LOG_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
 
-  global BAD_HRSC_FILE_PATH = os.path.join(REPO_FOLDER, 'MassUpload/badHrscSets.csv')
+  BAD_HRSC_FILE_PATH = os.path.join(REPO_FOLDER, 'MassUpload/badHrscSets.csv')
 
-  global NEW_OUTPUT_TILE_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscNewOutputTiles')
-  global HRSC_DOWNLOAD_FOLDER   = os.path.join(VOLATILE_FOLDER, 'hrscDownloadCache')
-  global HRSC_PROCESSING_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscProcessedFiles')
+  NEW_OUTPUT_TILE_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscNewOutputTiles')
+  HRSC_DOWNLOAD_FOLDER   = os.path.join(VOLATILE_FOLDER, 'hrscDownloadCache')
+  HRSC_PROCESSING_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscProcessedFiles')
 
-  global KML_PYRAMID_FOLDER         = '/byss/docroot/smcmich1/hrscMosaicKml'
-  global OUTPUT_THUMBNAIL_FOLDER    = os.path.join(SAFE_FOLDER, 'hrscThumbnails')
-  global OUTPUT_REGISTRATION_FOLDER = os.path.join(SAFE_FOLDER, 'hrscRegistration')
+  KML_PYRAMID_FOLDER         = '/byss/docroot/smcmich1/hrscMosaicKml'
+  OUTPUT_THUMBNAIL_FOLDER    = os.path.join(SAFE_FOLDER, 'hrscThumbnails')
+  OUTPUT_REGISTRATION_FOLDER = os.path.join(SAFE_FOLDER, 'hrscRegistration')
 
 
   # --- Folder notes ---
@@ -666,7 +726,7 @@ def setGlobalConfigs(argsIn):
   # Used to control the area we operate over
   #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-  global HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
+  HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, -0.0001, -60.0, 60.0) # Left half:  Alderaan
 
   # DEBUG regions
@@ -680,14 +740,14 @@ def setGlobalConfigs(argsIn):
 
   # Also set up logging here.
   # - Log tiles are timestamped as is each line in the log file
-  LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
   currentTime = datetime.datetime.now()
   logPath = os.path.join(RUN_LOG_FOLDER, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
   logging.basicConfig(filename=logPath,
-                      format=LOG_FORMAT_STR,
+                      format=MosaicUtilities.LOG_FORMAT_STR,
                       level=logging.DEBUG)
 
 
+  return options
 
 def main(argsIn):
     '''Outer try-catch handling to make sure the program does not silently die.
@@ -697,9 +757,9 @@ def main(argsIn):
 
         # Parse the input arguments and set global params
         # - Using global params to avoid passing a giant list of paths around.
-        setGlobalConfigs(argsIn)
+        options = setGlobalConfigs(argsIn)
 
-        sentMessage = mainProcessingFunction()
+        sentMessage = mainProcessingFunction(options)
         text = 'Outer processing function exited without exception.'
     except Exception, e:
         # When we fail to fetch a data set, send out a failure message and keep going.

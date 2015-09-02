@@ -222,7 +222,7 @@ class HrscImage():
         # Echo logging to stdout
         echo = logging.StreamHandler(sys.stdout)
         echo.setLevel(logging.DEBUG)
-        echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+        echo.setFormatter(logging.Formatter(MosaicUtilities.LOG_FORMAT_STR))
         self._logger.addHandler(echo)
         self._logger.info('Initializing hrscImageManager for set ' + setName)
         

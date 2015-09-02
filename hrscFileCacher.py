@@ -13,8 +13,6 @@ import MosaicUtilities
 # Set the size limit of our data set cache
 MAX_STORED_DATA_SETS = 24
     
-LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
-
 # This function has to be outside the class so it can work with multiprocessing
 def downloadHrscFile(remoteURL, localFilePath):
     '''Download a single HRSC file and convert to TIFF format'''
@@ -86,7 +84,7 @@ class HrscFileCacher():
         # Echo logging to stdout
         #echo = logging.StreamHandler(sys.stdout)
         #echo.setLevel(logging.DEBUG)
-        #echo.setFormatter(logging.Formatter(LOG_FORMAT_STR))
+        #echo.setFormatter(logging.Formatter(MosaicUtilities.LOG_FORMAT_STR))
         #self._logger.addHandler(echo)
 
         if not os.path.exists(dbPath):

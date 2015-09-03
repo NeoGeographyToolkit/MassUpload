@@ -28,8 +28,15 @@ if(NOT VISIONWORKBENCH_INSTALL_DIR)
 endif()
 
 
+set(OPENCV_INSTALL_DIR "" CACHE FILEPATH "Path to OpenCV installation directory")
+if(NOT OPENCV_INSTALL_DIR)
+  message(SEND_ERROR "You need to set OPENCV_INSTALL_DIR: ${OPENCV_INSTALL_DIR}")
+endif()
+
 message("Base System path      = ${BASESYSTEM_INSTALL_DIR}")
 message("Vision Workbench path = ${VISIONWORKBENCH_INSTALL_DIR}")
+message("OpenCV install path   = ${OPENCV_INSTALL_DIR}")
+
 
 # Copy the nice input variable names to the messy internal names
 set(VISIONWORKBENCH_ROOT   ${VISIONWORKBENCH_INSTALL_DIR})
@@ -50,12 +57,12 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 message("--------------------------------------------------------------")
 message("Searching for boost...")
 
-set(BOOST_ROOT "${BASESYSTEM_INSTALL_DIR}/include/boost-1_55")
+set(BOOST_ROOT "${BASESYSTEM_INSTALL_DIR}/include/boost-1_58")
 set(BOOST_LIBRARYDIR  "${BASESYSTEM_INSTALL_DIR}/lib")
-set(BOOST_INCLUDEDIR "${BASESYSTEM_INSTALL_DIR}/include/boost-1_55/boost")
+set(BOOST_INCLUDEDIR "${BASESYSTEM_INSTALL_DIR}/include/boost-1_58/boost")
 set(Boost_NO_SYSTEM_PATHS ON) #This does not seem to work
 #set(Boost_DEBUG 1) # Uncomment for useful finding boost debug output
-set(BOOST_MIN_VERSION "1.55.0")
+set(BOOST_MIN_VERSION "1.58.0")
 set(REQUIRED_BOOST_LIBS program_options system filesystem regex date_time thread iostreams)
 
 find_package(Boost ${BOOST_MIN_VERSION} REQUIRED COMPONENTS ${REQUIRED_BOOST_LIBS})
@@ -85,16 +92,17 @@ message("Found vision workbench include directory: ${VISIONWORKBENCH_INCLUDE_DIR
 
 # Manually force it to find the correct path!
 set(OpenCV_FOUND True)
-set(OpenCV_LIBS "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_core.so" 
-                "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_highgui.so" 
-                "/byss/smcmich1/programs/opencv_3.0_install/lib/libopencv_stitching.so")
-set(OpenCV_INCLUDE_DIR "/byss/smcmich1/programs/opencv_3.0_install/include"
-                       "/byss/smcmich1/programs/opencv_3.0_install/include/opencv"
-                       "/byss/smcmich1/programs/opencv_3.0_install/include/opencv2")
+set(OpenCV_LIBS "${OPENCV_INSTALL_DIR}/lib/libopencv_core.so" 
+                "${OPENCV_INSTALL_DIR}/lib/libopencv_highgui.so" 
+                "${OPENCV_INSTALL_DIR}/lib/libopencv_stitching.so"
+                "${OPENCV_INSTALL_DIR}/lib/libopencv_features2d.so")
+set(OpenCV_INCLUDE_DIR "${OPENCV_INSTALL_DIR}/include"
+                       "${OPENCV_INSTALL_DIR}/include/opencv"
+                       "${OPENCV_INSTALL_DIR}/include/opencv2")
 set(OpenCV_INCLUDE_DIRS "${OpenCV_INCLUDE_DIR}")
-#set(OpenCV_VERSION (OpenCV_VERSION_MAJOR, OpenCV_VERSION_MINOR, OpenCV_VERSION_PATCH)
 
 message("Found OpenCV ${OpenCV_INCLUDE_DIRS}")
+
 
 
 #find_package(TIFF REQUIRED)

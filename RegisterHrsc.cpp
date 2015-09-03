@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
-//#include <opencv2/xfeatures2d.hpp>
+#include <opencv2/features2d.hpp>
 
 #include <vw/Math/Geometry.h>
 #include <vw/Math/RANSAC.h>

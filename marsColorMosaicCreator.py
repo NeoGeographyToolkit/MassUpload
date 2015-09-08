@@ -176,19 +176,19 @@ def cacheManagerThreadFunction(DATABASE_PATH, hrscDownloadFolder, hrscProcessedF
 def getCoveredOutputTiles(basemapInstance, hrscInstance):
     '''Return a bounding box containing all the output tiles covered by the HRSC image'''
     
-    # This bounding box can be in either the +/-180 range or the 0-360 range
-    hrscBoundingBoxDegrees = hrscInstance.getBoundingBoxDegrees()
+    ## This bounding box can be in either the +/-180 range or the 0-360 range
+    hrscBoundingBoxProjected = hrscInstance.getBoundingBoxProjected()
     #print 'HRSC BB = ' + str(hrscBoundingBoxDegrees)
     
     # Expand the computed bounding box a little bit to insure that
     #  we don't miss any tiles around the edges.
-    BUFFER_SIZE = 0.1 # BB buffer size in degrees
-    hrscBoundingBoxDegrees.expand(BUFFER_SIZE, BUFFER_SIZE)
+    BUFFER_SIZE = 10000 # BB buffer size in meters
+    hrscBoundingBoxProjected.expand(BUFFER_SIZE, BUFFER_SIZE)
         
     # DEBUG!  Restrict to a selected area.
-    hrscBoundingBoxDegrees = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxDegrees)
+    hrscBoundingBoxProjected = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxProjected)
 
-    intersectTileList = basemapInstance.getIntersectingTiles(hrscBoundingBoxDegrees)
+    intersectTileList = basemapInstance.getIntersectingTiles(hrscBoundingBoxProjected)
     return intersectTileList
     
 
@@ -263,7 +263,7 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     tileResults = []
     for tileIndex in outputTilesList:
 
-        tileBounds = basemapInstance.getTileRectDegree(tileIndex)
+        tileBounds = basemapInstance.getTileRectProjected(tileIndex)
                 
         # Retrieve the needed paths for this tile
         (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
@@ -316,6 +316,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
 
     logger.info('Finished updating tiles for HRSC image ' + hrscSetName)
 
+
+# TODO: Need a polar version of this!
 
 def generateAllUpsampledBasemapTiles(basemapInstance, pool):
     '''Generate all the basemap tiles from the input low-res image.
@@ -489,7 +491,6 @@ def mainProcessingFunction(options):
                                                       False, processPool)
 
             logger.info('--- Now initializing high res HRSC content ---')
-
 
             # Complete the high resolution components
             hrscInstance.prepHighResolutionProducts()

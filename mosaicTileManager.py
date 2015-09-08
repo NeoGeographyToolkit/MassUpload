@@ -21,25 +21,47 @@ class MarsBasemap:
        The top left tile is index 0,0.
     '''
     
-    def __init__(self, fullBasemapPath, outputTileFolder, backupFolder, center180=False):
+    def __init__(self, fullBasemapPath, outputTileFolder, backupFolder, projectionType):
         
         # Info about Noel's base map
-        DEGREES_TO_PROJECTION_METERS = 59274.9
-        FULL_BASEMAP_HEIGHT = 5760  # In pixels, low resolution.
-        FULL_BASEMAP_WIDTH  = 11520
+        DEGREES_TO_PROJECTION_METERS = 59274.9 # Only true for the eqc maps!
+        FULL_RECT_BASEMAP_HEIGHT = 5760  # In pixels, low resolution.
+        FULL_RECT_BASEMAP_WIDTH  = 11520
         
-        BASEMAP_TILE_HEIGHT = 45 # In pixels, chosen to divide evenly.
+        # Info about the polar conversions of Noel's map
+        # --> TODO: Round up to multiple of 45!
+        NORTH_POLE_BASEMAP_HEIGHT = 2135
+        NORTH_POLE_BASEMAP_WIDTH  = 2129
+        
+        SOUTH_POLE_BASEMAP_HEIGHT = 2138
+        SOUTH_POLE_BASEMAP_WIDTH  = 2132
+        
+        BASEMAP_TILE_HEIGHT = 45 # In pixels, chosen to divide evenly (but only for eqc case!)
         BASEMAP_TILE_WIDTH  = 45
-        # --> Basemap size is 256 x 128 tiles
+        # --> EQC Basemap size is 256 x 128 tiles, STE basemap size is x x x tiles.
         
-        #self.NOEL_MAP_METERS_PER_PIXEL = 1852.340625 # TODO: Make sure this is accurate before reprojecting everything        
+        #self.NOEL_MAP_METERS_PER_PIXEL = 1852.34 --> Polar maps were created to match this
+        
+        if projectionType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+            thisBasemapHeight = NORTH_POLE_BASEMAP_HEIGHT
+            thisBasemapWidth  = NORTH_POLE_BASEMAP_WIDTH
+        elif projectionType == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
+            thisBasemapHeight = SOUTH_POLE_BASEMAP_HEIGHT
+            thisBasemapWidth  = SOUTH_POLE_BASEMAP_WIDTH
+        else: # Use EQC values
+            thisBasemapHeight = FULL_RECT_BASEMAP_HEIGHT
+            thisBasemapWidth  = FULL_RECT_BASEMAP_WIDTH
+        
 
         # Derived output parameters
         self.resolutionIncrease = 128
-        outputHeight = FULL_BASEMAP_HEIGHT*self.resolutionIncrease
-        outputWidth  = FULL_BASEMAP_WIDTH *self.resolutionIncrease
-        numTileRows  = FULL_BASEMAP_HEIGHT / BASEMAP_TILE_HEIGHT
-        numTileCols  = FULL_BASEMAP_WIDTH  / BASEMAP_TILE_WIDTH
+        outputHeight = thisBasemapHeight*self.resolutionIncrease
+        outputWidth  = thisBasemapWidth *self.resolutionIncrease
+        numTileRows  = int(thisBasemapHeight / BASEMAP_TILE_HEIGHT) # This should round exactly
+        numTileCols  = int(thisBasemapWidth  / BASEMAP_TILE_WIDTH )
+
+        # TODO: Generate padded versions of the polar images that cleanly divide into 45x45 tiles.
+        #       If we end up with junk in this area, we can always clean/crop it in the end.
 
         self._logger = logging.getLogger('mosaicTileManager')
 
@@ -48,9 +70,10 @@ class MarsBasemap:
 
         # Initialize two class instance to manage the coordinate systems
         # - The pixel operations are different but GDC/projection calls will return the same results.
-        self._isCenter180 = center180
-        self._lowResImage  = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, FULL_BASEMAP_WIDTH, FULL_BASEMAP_HEIGHT, numTileCols, numTileRows, center180)
-        self._highResImage = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, outputWidth,        outputHeight,        numTileCols, numTileRows, center180)
+        # - Because of hackish nature of polar code, degrees_to_projection_meters is not used for polar images!
+        self._projectionType = projectionType
+        self._lowResImage  = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, thisBasemapWidth, thisBasemapHeight, numTileCols, numTileRows, projectionType)
+        self._highResImage = MosaicUtilities.TiledGeoRefImage(DEGREES_TO_PROJECTION_METERS, outputWidth,      outputHeight,      numTileCols, numTileRows, projectionType)
 
         # Set up image products
         self.fullBasemapPath     = fullBasemapPath
@@ -99,10 +122,6 @@ class MarsBasemap:
         '''Get the path to the original full basemap image'''
         return self.fullBasemapPath
 
-    #def getGrayBasemapPath(self):
-    #    '''Get the path to the grayscale full basemap image'''
-    #    return self.fullBasemapGrayPath
-
     def getLowResMpp(self):
         return self._lowResImage.getMetersPerPixelX() # Same in both dimensions
     
@@ -114,14 +133,22 @@ class MarsBasemap:
     
     def getProj4String(self):
         '''This is the projection system used for the global Mars map'''
-        if self._isCenter180:
-            return "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
+        if self._projectionType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+            return "+proj=stere +lat_0=90 +lat_ts=90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"
+        elif self._projectionType == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
+            return "+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"
+        elif self._projectionType == MosaicUtilities.PROJ_TYPE_360:
+            return "+proj=eqc +lon_0=180 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m +no_defs"
         else: # Center 0
-            return "+proj=eqc +lon_0=0   +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m"
+            return "+proj=eqc +lon_0=0   +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m +no_defs"
 
-    def getTileRectDegree(self, tileIndex):
-        '''Get the bounding box of a tile in degrees'''
-        return self._lowResImage.getTileRectDegree(tileIndex)
+    #def getTileRectDegree(self, tileIndex):
+    #    '''Get the bounding box of a tile in degrees'''
+    #    return self._lowResImage.getTileRectDegree(tileIndex)
+
+    def getTileRectProjected(self, tileIndex):
+        '''Get the bounding box of a tile in projected coordinates (same for high and low res)'''
+        return self._lowResImage.getTileRectProjected(tileIndex)
 
     def degreeRoiToPixelRoi(self, roi, isHighRes=False):
         if isHighRes:
@@ -141,14 +168,30 @@ class MarsBasemap:
     def makeCroppedRegionProjMeters(self, boundingBoxProj, outputPath, force=False):
         '''Crops out a region of the original basemap image.'''
         
+        # TODO: Handle polar regions!
+        # --> This would work fine, except that we plan on padding the basemap image
+        #     and thus the gdal_translate won't work!
+        
+        #(minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
+        ## Hack because the 180 version uses shifted projection coordinates!
+        ## - In the python code the projected space is just the degree value (0-360)
+        ##   times a constant, but on disk the projected coords are the same as the -180-180 case.
+        #if self._projectionType == MosaicUtilities.PROJ_TYPE_360: 
+        #    minX -= 10669477.100
+        #    maxX -= 10669477.100
+        #projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
+        #cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
+        #                         +' -projwin '+ projCoordString)
+        #MosaicUtilities.cmdRunner(cmd, outputPath, force)
+        
+        # --> This should be equally accurate.
+        pixelRect = self._lowResImage.projectedRectToPixelRect(boundingBoxProj)
         (minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
-        if self._isCenter180: # Hack because the 180 version uses shifted projection coordinates!
-            minX -= 10669477.100
-            maxX -= 10669477.100
-        projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
+        pixelCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
         cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
-                                 +' -projwin '+ projCoordString)
+                                 +' -srcwin '+ pixelCoordString)
         MosaicUtilities.cmdRunner(cmd, outputPath, force)
+        
         
     def makeCroppedRegionDegrees(self, boundingBoxDegrees, outputPath, force=False):
         '''Crops out a region of the original basemap image.'''
@@ -181,11 +224,11 @@ class MarsBasemap:
         '''Converts a pixel ROI from the low to the high resolution image or vice versa'''
         
         if inputIsHighRes:
-            degreeRect = self._highResImage.pixelRectToDegreeRect(pixelRectIn)
-            return self._lowResImage.degreeRectToPixelRect(degreeRect)
+            degreeRect = self._highResImage.pixelRectToProjectedRect(pixelRectIn)
+            return self._lowResImage.projectedRectToPixelRect(degreeRect)
         else:
-            degreeRect = self._lowResImage.pixelRectToDegreeRect(pixelRectIn)
-            return self._highResImage.degreeRectToPixelRect(degreeRect)
+            degreeRect = self._lowResImage.pixelRectToProjectedRect(pixelRectIn)
+            return self._highResImage.projectedRectToPixelRect(degreeRect)
     
     def getIntersectingTiles(self, rectDegrees):
         '''Returns an iterator containing all the tiles which intersect the input rectangle'''
@@ -198,8 +241,6 @@ class MarsBasemap:
         # Loop through all the tiles
         cmdList = []
         for tileIndex in tileList:
-            
-            tileBounds = self.getTileRectDegree(tileIndex)
             
             # Now that we have selected a tile, generate all of the tile images for it.
             # - The first time this is called for a tile it generates the backup image for the tile.
@@ -254,11 +295,11 @@ class MarsBasemap:
         (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
             self.getPathsForTile(tileIndex)        
 
-        degreeRoi = self.getTileRectDegree(tileIndex)
-        self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(degreeRoi))
+        projectedRoi = self.getTileRectProjected(tileIndex)
+        self._logger.info('MosaicTileManager: Generating tile images for region: ' + str(projectedRoi))
 
         # Crop out the section of the original base map for this tile
-        self.makeCroppedRegionDegrees(degreeRoi, smallTilePath)
+        self.makeCroppedRegionProjected(projectedRoi, smallTilePath)
 
         # Generate a grayscale version of the small copy of this tile
         cmd1 = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)

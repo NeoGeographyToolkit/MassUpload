@@ -193,6 +193,7 @@ HRSC_NIR   = 3
 HRSC_NADIR = 4
 CHANNEL_STRINGS = ['red', 'green', 'blue', 'nir', 'nadir']
 
+
 HRSC_HIGH_RES_TILE_SIZE = 4096
 
 MIN_TILE_PERCENT_PIXELS_VALID = 0.0001 # Useful to have the tiles even with extremely few pixels!
@@ -212,7 +213,8 @@ class HrscImage():
     # TODO: Add setup/teardown functions that remove large image data but keep the small outputs on disk
     
     def __init__(self, sourceFileInfoDict, outputFolder,
-                 basemapInstance, basemapInstance180,
+                 basemapInstance, basemapInstance360,
+                 basemapInstanceNorthPole, basemapInstanceSouthPole,
                  force=False, threadPool=None):
         '''Set up all the low resolution HRSC products.'''
         
@@ -259,23 +261,24 @@ class HrscImage():
         self._inputHrscPaths.append( [s for s in rawList if 'ir3' in s][0] )
         self._inputHrscPaths.append( [s for s in rawList if 'nd3' in s][0] )
 
-        # TODO: Always store path to regular basemap?
-        # Determine if a 180-centered basemap should be used for image preprocessing.
-        self._isCentered180 = (self.chooseLonCenter() == 180)
-        if self._isCentered180:
+        # Determine which basemap should be used for image preprocessing.
+        self._basemapProjectionMode = self.chooseLonCenter()
+        if self._basemapProjectionMode == PROJ_TYPE_360:
             self._logger.info('HRSC image is centered around 180')
-            self._basemapInstance = basemapInstance180
+            self._basemapInstance = basemapInstance360
+        elif self._basemapProjectionMode == PROJ_TYPE_NORTH_POLE:
+            self._logger.info('HRSC image is near the north pole')
+            self._basemapInstance = basemapInstanceNorthPole
+        elif self._basemapProjectionMode == PROJ_TYPE_SOUTH_POLE:
+            self._logger.info('HRSC image is near the south pole')
+            self._basemapInstance = basemapInstanceSouthPole
         else: # Normal case, use the 0 centered basemap
             self._basemapInstance = basemapInstance
 
         # Record input parameters
         self._basemapColorPath = self._basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
         
-
-
         print 'Generating low res image copies...'
-        
-        # TODO: Warp to the correct basemap!
         
         # Generate a copy of each input HRSC channel at the low basemap resolution
         self._lowResWarpedPaths = [self._warpToProjection(path, outputFolder, '_basemap_res',
@@ -296,6 +299,9 @@ class HrscImage():
         self._lowResMaskImageSize = IrgGeoFunctions.getImageSize(self._lowResMaskPath)
         
         
+        # TODO: Make sure this handles over the poles images!
+        #       -> Should we do this work in projected coordinates?  May be ok since image was gdalwarped.
+        
         # Compute the HRSC bounding box
         # - This is a pretty good estimate based on the metadata
         lowResNadirPath = self._lowResWarpedPaths[HRSC_NADIR]
@@ -310,6 +316,7 @@ class HrscImage():
         if hrscBoundingBoxDegrees.maxX < hrscBoundingBoxDegrees.minX:
             hrscBoundingBoxDegrees.maxX += 360 # If needed, get both lon values into 0-360 degree range
         print 'Estimated HRSC bounds: ' + str(hrscBoundingBoxDegrees)
+        
         
         # Cut out a region from the basemap around the location of the HRSC image
         # - We record the ROI in degrees and low res pixels
@@ -331,6 +338,8 @@ class HrscImage():
         # Compute the brightness scaling gains relative to the cropped base map
         # - This is done at low resolution
         # - The low resolution output is smoothed out later to avoid jagged edges.
+        # - This correction was intended to work with vertically aligned HRSC images,
+        #   so it won't work as well with many polar images!
         cmd = ('./computeBrightnessCorrection ' + self._basemapCropPath +' '+ self._lowResPathStringAndMask +' '
                 + self._lowResSpatialCroppedRegistrationPath +' '+ self._brightnessGainsPath)
         MosaicUtilities.cmdRunner(cmd, self._brightnessGainsPath, force)
@@ -340,17 +349,32 @@ class HrscImage():
         # Now we have done everything we plan to with the low resolution maps
         
     def chooseLonCenter(self):
-        '''Choose whether to align to the 0 centered or 180 centered basemap'''
+        '''Choose which of the basemap images to align to'''
         (minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getImageBoundingBox(self._inputHrscPaths[0])
-        meanLon = (minLon + maxLon) / 2 # TODO: Verify how these bounds work!
+        meanLon = (minLon + maxLon) / 2
+        meanLat = (minLat + maxLat) / 2
+        
+        # The original data run only processed tiles < 60 lat.  Some images will need to be
+        #   reprocessed and a few new ones will need to be reprocessed also.  Since we
+        #   only want to generate the polar tiles, ignore all images not in the area and
+        #   classify all the others as either north or south pole.
+        
+        # Detect if the image is near the north or south pole
+        if abs(maxLat) > 60:
+            return MosaicUtilities.PROJ_TYPE_NORTH_POLE
+        if abs(minLat) < -60:
+            return MosaicUtilities.PROJ_TYPE_SOUTH_POLE
+        
+        raise Exception('--> On polar pass, ignoring all non-polar images!')
+        
         # Detect if the image is located nearby the 180 degree line
         if (abs(abs(meanLon)-180) < 10) or (abs(maxLon - minLon) > 200):
-            return 180
+            return MosaicUtilities.PROJ_TYPE_360
         else: # Use the normal 0 centered image
-            return 0
+            return MosaicUtilities.PROJ_TYPE_NORMAL
             
-        
-        
+
+
     def getSetName(self):
         return self._setName
     
@@ -358,6 +382,11 @@ class HrscImage():
         '''Returns the bounding box of the entire HRSC image.
            This BB is based on the image registration so it should be fairly accurate.'''
         return self._hrscBoundingBoxDegrees
+
+    def getBoundingBoxProjected(self):
+        '''Returns the bounding box of the entire HRSC image.
+           This BB is based on the image registration so it should be fairly accurate.'''
+        return self._hrscBoundingBoxProjected
         
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
         '''Convert an image on disk to grayscale'''
@@ -373,7 +402,6 @@ class HrscImage():
         
         # Convert each high res input image into the output format
         
-        # TODO: Could avoid this expensive step by handling the transform in the c++ programs
         # Generate a copy of each input HRSC channel at the high output resolution
         print 'Generating high resolution warped channel images...'
         self._generateHighResWarpedPaths(force)
@@ -423,8 +451,6 @@ class HrscImage():
             assert(len(pathList) == numTiles)
         print 'Generated ' +str(numTiles)+ ' tiles.'
         
-        # TODO: We can probably delete the original warped images now
-
         # Loop through each of the tiles we created and consolidate information across channels
         print 'Consolidating tile information...'
         self._tileDict = {}
@@ -465,9 +491,7 @@ class HrscImage():
             thisTileInfo['spatialTransformToLowResBasePath'   ] = tileInfoBasePath+'_spatial_transform_to_low_res_base.csv'
             
             thisTileInfo['stillValid'] = True # Set this to false if there is an error processing this tile
-            
-            # TODO: Use the correct basemap!
-            
+                        
             # Generate the transform from the high resolution tile to the low resolution basemap
             self._computeTileBoundsAndTransform(thisTileInfo, force)
                
@@ -567,13 +591,13 @@ class HrscImage():
             self._highResPathString += path + ' '
         
         
-    def getTileInfo(self, basemap, boundsDegrees, transformId=''):
+    def getTileInfo(self, basemap, boundsProjected, transformId=''):
         '''Return the high resolution tile information needed for mosaic creation.
            If an ROI in degrees is passed in, only tiles that intersect that ROI will be returned and
            a transform to that ROI will be created under 'tileToTileTransformPath'.  Pass in the ID argument
            if you want the path to be unique!'''
         
-        if not boundsDegrees: # No region specified, return information about all tiles!
+        if not boundsProjected: # No region specified, return information about all tiles!
             raise Exception('getTileInfo currently REQUIRES a bounding box!')
         
         # Otherwise we need to make a new dictionary containing only the intersecting tiles
@@ -585,8 +609,7 @@ class HrscImage():
             
             #print hrscTile['degreeRect']
             
-            # Check overlap, accounting for possible 180 degree hrsc tile center
-            if MosaicUtilities.degreeRectOverlap(boundsDegrees, hrscTile['degreeRect']):
+            if boundsProjected.overlaps(hrscTile['projectedRect']):
             
                 #print 'Overlap!'
                 
@@ -598,29 +621,27 @@ class HrscImage():
                 hrscTile['tileToTileTransformPath'] = os.path.join(self._tileFolder, transformFileName)
                 
                 # Compute the transform to the provided ROI
-                self.getTransformToBasemapRoi(hrscTile, boundsDegrees, hrscTile['tileToTileTransformPath'])
+                self.getTransformToBasemapRoi(hrscTile, boundsProjected, hrscTile['tileToTileTransformPath'])
                 
                 outputDict[key] = hrscTile # Add this tile info to the output dictionary
         return outputDict
         
     
-
-
-    def getTransformToBasemapRoi(self, tileInfo, basemapRoiDegrees, outputPath):
+    def getTransformToBasemapRoi(self, tileInfo, basemapRoiProjected, outputPath):
         '''Computes the transform of an HRSC tile to a specific basemap tile.'''
         
         # Load the low res transform and compute to high res
         tf = MosaicUtilities.SpatialTransform(tileInfo['spatialTransformToLowResBasePath'])
         
-        # Special case handling for when the registration basemap is centered on 180 degrees
-        # - The output basemap will never be 180 degree centered!
-        if self._isCentered180:
-            # If the input degree ROI is in the -180/0 region, convert to 180/360 region
-            if basemapRoiDegrees.minX < 0:
-                basemapRoiDegrees.shift(360.0, 0.0)
+        ## Special case handling for when the registration basemap is centered on 180 degrees
+        ## - The output basemap will never be 180 degree centered!
+        #if self._basemapProjectionMode:
+        #    # If the input degree ROI is in the -180/0 region, convert to 180/360 region
+        #    if basemapRoiDegrees.minX < 0:
+        #        basemapRoiDegrees.shift(360.0, 0.0)
         
         # Get the high res pixel ROI of the basemap tile
-        basemapRoiHighResPixels = self._basemapInstance.degreeRoiToPixelRoi(basemapRoiDegrees, True)
+        basemapRoiHighResPixels = self._basemapInstance.projectedRoiToPixelRoi(basemapRoiProjected, True)
         
         # Update the transform scale (low res -> high res)
         # - Also subtract out the pixel position of the tile
@@ -699,7 +720,6 @@ class HrscImage():
         MosaicUtilities.cmdRunner(cmd, self._lowResSpatialCroppedRegistrationPath, force)
 
 
-        # TODO: Fix bug here, probably caused by 8 bit mask depth.
         # DEBUG - Paste the low resolution aligned images so we can evaluate the registration
         registrationDebugImagePath = self._hrscBasePathOut + '_registration_debug_mosaic.tif'
         cmd = ('./hrscMosaic ' + self._basemapGrayCropPath +' '+ registrationDebugImagePath +' '+ hrscPath +' '+
@@ -719,8 +739,9 @@ class HrscImage():
         # Convert back to a transform and record to disk
         self._rectToTransform(highResPixelRoi, self._highResSpatialRegistrationPath)
         
-        # Also convert to a bounding box in degrees
-        self._hrscBoundingBoxDegrees = basemapInstance.pixelRoiToDegreeRoi(highResPixelRoi, True)
+        # Also convert to a bounding box which we keep around
+        self._hrscBoundingBoxDegrees   = basemapInstance.pixelRoiToDegreeRoi(   highResPixelRoi, True)
+        self._hrscBoundingBoxProjected = basemapInstance.pixelRoiToProjectedRoi(highResPixelRoi, True)
 
     
     def _computeTileBoundsAndTransform(self, tileInfo, force=False):
@@ -740,8 +761,10 @@ class HrscImage():
         tileInfo['highResPixelRect'] = highResPixelRect
         
         # Record the ROI in degrees
-        degreeRect = self._basemapInstance.pixelRoiToDegreeRoi(highResPixelRect, True)
-        tileInfo['degreeRect'] = degreeRect
+        degreeRect    = self._basemapInstance.pixelRoiToDegreeRoi(highResPixelRect, True)
+        projectedRect = self._basemapInstance.pixelRoiToProjectedRoi(highResPixelRect, True)
+        tileInfo['degreeRect'   ] = degreeRect
+        tileInfo['projectedRect'] = projectedRect
         
         # Update the transform scale (high res -> low res)
         scaling = self._basemapInstance.getHighResMpp() / self._basemapInstance.getLowResMpp()

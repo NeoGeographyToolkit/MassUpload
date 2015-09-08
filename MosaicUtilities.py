@@ -7,7 +7,7 @@ import sys
 import copy
 import math
 import subprocess
-
+import tempfile
 
 #----------------------------------------------------------------------------
 # Constants
@@ -115,6 +115,26 @@ def sendEmail(address, subject, message):
     os.system(cmd)
 
 
+def runGdalTransform(s_srs, t_srs, x, y):
+    '''Calls the gdaltransform command line utility for the input point'''
+    
+    # Create a temporary file with the lonlat location
+    temp = tempfile.NamedTemporaryFile(mode='w+t')
+    temp.write('%f, %f' % (x, y))
+    
+    # Call the command with the file as input
+    LONLAT_SRS = "+proj=longlat +lon_0=0 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m +no_defs"
+    cmd = ('gdal_transform -s_srs '+ s_srs +' -t_srs ' + t_srs + ' < ' + temp.name)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    text, err = p.communicate()
+    temp.close()
+    
+    # Parse the command output
+    parts = text.split(text)
+    return (parts[0], parts[1])
+
+
+
 # TODO: Stuff up here should come from common files
 #=======================================================================================
 #=======================================================================================
@@ -150,11 +170,17 @@ class Rectangle:
         return ('minX: %f, maxX: %f, minY: %f, maxY: %f' % (self.minX, self.maxX, self.minY, self.maxY))
     
     def indexGenerator(self):
-        '''Generator function used to iterate over all integer indices.
+        '''Generator function used to iterate over all integer indices as TileIndices.
            Only use this with integer boundaries!'''
         for row in range(self.minY, self.maxY):
             for col in range(self.minX, self.maxX):
                 yield(TileIndex(row,col))
+
+    def cornerGenerator(self):
+        '''Generator function which iterates through the four corners as x,y pairs.'''
+        for y in [self.minY, self.maxY]:
+            for x in [self.minX, self.maxX]:
+                yield( (x, y) )
     
     def getBounds(self):
         '''Returns (minX, maxX, minY, maxY)'''
@@ -385,41 +411,87 @@ def getTransformedBoundingBox(transform, rectangle):
         x,y = transform(rectangle.minX,rectangle.maxY);  bb.expandToContain(x,y);
         return bb
 
+
+
+# These are the four basemap options.  Each HRSC image is best handled by
+#  a certain one of these maps.
+PROJ_TYPE_NORMAL     = 0
+PROJ_TYPE_360        = 1
+PROJ_TYPE_NORTH_POLE = 2
+PROJ_TYPE_SOUTH_POLE = 3
+
+# TODO: A cleaner implementation would just store these here, and not in mosaicTileManager!!!!
+
+# --> Remove the degree rect functions?
 class GeoReference:
     '''Handles GDC / projected space transforms.
        Currently only works for a simple, global Mercator transform.'''
     
-    def __init__(self, degreesToMeters, center180=False):
+    def __init__(self, degreesToMeters, projectionType):
         self._degreesToMeters = degreesToMeters
-        if center180:
+        
+        if projectionType == PROJ_TYPE_NORTH_POLE:
+            self._lonLatBounds = Rectangle(0, 360, -90, 45.394539)
+            self._projectionBounds = Rectangle(-1972254.465, 1971376.914, -1976960.700, 1977784.755)
+            self._projStr = '"+proj=stere +lat_0=90 +lat_ts=90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"'
+        elif projectionType == PROJ_TYPE_SOUTH_POLE:
+            self._lonLatBounds = Rectangle(0, 360, -90, -45.346103)
+            self._projectionBounds = Rectangle(-1972254.465, 1972147.381, -1977725.361, 1977784.755)
+            self._projStr = '"+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"'
+        elif projectionType == PROJ_TYPE_360:
             self._lonLatBounds = Rectangle(0, 360, -90, 90)
+            self._projectionBounds = copy.copy(self._lonLatBounds)
+            self._projectionBounds.scaleByConstant(degreesToMeters)
+            self._projStr = '' # Not needed...
         else: # Center on zero, the default
             self._lonLatBounds = Rectangle(-180, 180, -90, 90)
-        self._projectionBounds = copy.copy(self._lonLatBounds)
-        self._projectionBounds.scaleByConstant(degreesToMeters)
+            self._projectionBounds = copy.copy(self._lonLatBounds)
+            self._projectionBounds.scaleByConstant(degreesToMeters)
+            self._projStr = '' # Not needed...
+            
         #print 'GeoReference init: ' + str(self)
-    
+        
     def degreesToProjected(self, lon, lat):
         '''Given a (lon, lat) coordinate, convert to the projected coordinate system.'''
-        return (lon * self._degreesToMeters,
-                lat * self._degreesToMeters)
+        
+        if ((projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
+            (projectionType == PROJ_TYPE_SOUTH_POLE)  ):
+            return runGdalTransform(LONLAT_SRS, self._projStr, lon, lat)
+            
+        else: # Both eqc cases use the same code
+            return (lon * self._degreesToMeters,
+                    lat * self._degreesToMeters)
    
     def projectedToDegrees(self, projX, projY):
         '''Given a projected coordinate, returns (lon, lat) in degrees'''
-        return (proxX / self._degreesToMeters,
-                projY / self._degreesToMeters)
+        
+        if ((projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
+            (projectionType == PROJ_TYPE_SOUTH_POLE)  ):
+            return runGdalTransform(self._projStr, LONLAT_SRS, projX, projY)
+            
+        else: # Both eqc cases use the same code
+            return (proxX / self._degreesToMeters,
+                    projY / self._degreesToMeters)
     
     def degreeRectToProjectedRect(self, degreeRect):
         '''Convert a bounding box in degrees to one in projected coordinates'''
-        projRect = copy.copy(degreeRect)
-        projRect.scaleByConstant(self._degreesToMeters)
+        
+        # Project each corner individually, then take the bounding rect!
+        projPoints = [ degreesToProjected(x) for x in degreeRect.cornerGenerator()]
+        projRect = Rectangle(projPoints[0][0], projPoints[0][0], projPoints[0][1], projPoints[0][1])
+        for p in projPoints:
+            projRect.expandToContain(p[0], p[1])
         return projRect
     
     def projectedRectToDegreeRect(self, projRect):
         '''Convert a bounding box in degrees to one in projected coordinates'''
-        degreeRect = copy.copy(projRect)
-        degreeRect.scaleByConstant(1.0/self._degreesToMeters)
-        return degreeRect
+        
+        # Project each corner individually, then take the bounding rect!
+        degPoints = [ projectedToDegrees(x) for x in projRect.cornerGenerator()]
+        degRect = Rectangle(degPonints[0][0], degPonints[0][0], degPonints[0][1], degPonints[0][1])
+        for p in degRect:
+            projRect.expandToContain(p[0], p[1])
+        return projRect
     
     def getLonLatBounds(self):
         return self._lotLatBounds
@@ -432,19 +504,20 @@ class GeoReference:
     
 
 class ImageCoverage:
-    '''Handles XY space to image space transforms'''
+    '''Handles XY (projection) space to image space transforms.
+       Only simple scale/shift transforms are supported.'''
     
-    def __init__(self, numCols, numRows, geoBounds):
-        self._geoBounds = geoBounds
+    def __init__(self, numCols, numRows, projBounds):
+        self._projBounds = projBounds
         self._numCols   = numCols
         self._numRows   = numRows
-        self._metersPerPixelX = self._geoBounds.width()  / numCols
-        self._metersPerPixelY = self._geoBounds.height() / numRows
+        self._metersPerPixelX = self._projBounds.width()  / numCols
+        self._metersPerPixelY = self._projBounds.height() / numRows
         #print 'ImageCoverage init: ' + str(self)
         
     def __str__(self):
         return ('geoBounds: %s, numCols: %d, numRows: %d, mppX: %lf, mppy: %lf'
-                   % (str(self._geoBounds), self._numCols, self._numRows,
+                   % (str(self._projBounds), self._numCols, self._numRows,
                       self._metersPerPixelX, self._metersPerPixelY))
     
     def numRows(self):
@@ -461,13 +534,13 @@ class ImageCoverage:
     # - Note that image rows increase down while projected increases going up!
     def projectedToPixel(self, projX, projY):
         '''Convert projected coordinates to pixels, low res'''
-        return ( (projX - self._geoBounds.minX) / self._metersPerPixelX,
-                 (self._geoBounds.maxY - projY) / self._metersPerPixelY)
+        return ( (projX - self._projBounds.minX) / self._metersPerPixelX,
+                 (self._projBounds.maxY - projY) / self._metersPerPixelY)
     
     def pixelToProjected(self, col, row):
         '''Convert projected coordinates to pixels, low res'''
-        return ( col*self._metersPerPixelX + self._geoBounds.minX,
-                 self._geoBounds.maxY - row*self._metersPerPixelY)
+        return ( col*self._metersPerPixelX + self._projBounds.minX,
+                 self._projBounds.maxY - row*self._metersPerPixelY)
     
     # ROI conversion functions ---------------------------------------------
     def pixelRectToProjectedRect(self, pixelRect):
@@ -487,11 +560,11 @@ class ImageCoverage:
 class ImageWithGeoRef(GeoReference, ImageCoverage):
     '''Adds an image to a GeoReference'''
 
-    def __init__(self, degreesToMeters, numCols, numRows, center180=False):
+    def __init__(self, degreesToMeters, numCols, numRows, projType):
         
         # Iniatialize with the GeoReference and the image size
         # - GeoReference happens first so we can call getProjectionBounds()
-        GeoReference.__init__(self, degreesToMeters, center180)
+        GeoReference.__init__(self, degreesToMeters, projType)
         ImageCoverage.__init__(self, numCols, numRows, self.getProjectionBounds())
 
     # Condensed conversion functions
@@ -513,14 +586,13 @@ class ImageWithGeoRef(GeoReference, ImageCoverage):
         return self.projectedRectToPixelRect(projRect)
 
 
-# TODO: This needs to handle degree wraparound!
 class TiledGeoRefImage(ImageWithGeoRef):
     '''ImageWithGeoRef with tiles added'''
     
-    def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows, center180=False):
+    def __init__(self, degreesToMeters, numCols, numRows, numTileCols, numTileRows, projType):
         '''These are the total image height/width, not per tile.'''
         # This class requires that the pixel dimensions work out exactly!
-        ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows, center180) # Init this first!
+        ImageWithGeoRef.__init__(self, degreesToMeters, numCols, numRows, projType) # Init this first!
         pixelBounds  = Rectangle(0, numCols, 0, numRows)
         tileWidth    = numCols / numTileCols
         tileHeight   = numRows / numTileRows
@@ -538,6 +610,9 @@ class TiledGeoRefImage(ImageWithGeoRef):
     def getTileRectPixel(self, tile):
         '''Returns the boundaries of a given tile in pixels'''
         return self._tiling.getTileBounds(tile)
+     
+     
+    # TODO: Less reliance on lonlat here!
      
     def getTileRectDegree(self, tile):
         '''Returns the boundaries of a given tile in degrees'''

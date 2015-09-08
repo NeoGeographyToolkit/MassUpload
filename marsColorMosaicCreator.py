@@ -403,7 +403,7 @@ def mainProcessingFunction(options):
             logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
         else:
             hrscImageList.append(hrscSetName)
-    #hrscImageList = ['h8289_0000'] # DEBUG
+    hrscImageList = ['h1167_0000'] # DEBUG
 
     numDataSetsRemainingToProcess = len(hrscImageList)
     logger.info('Num data sets remaining to process = ' + str(numDataSetsRemainingToProcess))
@@ -546,7 +546,7 @@ def mainProcessingFunction(options):
     # Call output reporting/logging functions
 
     sentEmail = generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-                                     processedDataSets, failedDataSets, numDataSetsRemainingToProcess)
+                                     processedDataSets, failedDataSets, numDataSetsRemainingToProcess, options)
 
     logger.info('Basemap generation script completed!')
     return sentEmail
@@ -571,7 +571,7 @@ def recordThumbnails(setName):
 
 
 def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-               processedDataSets, failedDataSets, numDataSetsRemainingToProcess):
+               processedDataSets, failedDataSets, numDataSetsRemainingToProcess, options):
     '''Generate an HRSC image pyramid and then send out a status email'''
 
     # Compute the run time for the output message
@@ -579,15 +579,22 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
     stopTime = time.time()
     runTime  = (stopTime - startTime) * SECONDS_TO_HOURS
 
-    if (numHrscImagesProcessed > 0) or (IMAGE_BATCH_SIZE == 0):
-        try:
-            # Generate a KML pyramid of the tiles for diagnostics
-            kmlPyramidLocalPath  = stackImagePyramid.main(NEW_OUTPUT_TILE_FOLDER, KML_PYRAMID_FOLDER, processedDataSets)
-            pos                  = kmlPyramidLocalPath.find('/smcmich1')
-            kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
-        except:
-            logger.error('Error generating image pyramid!')
-            kmlPyramidWebAddress = 'FAILED!'
+    if (numHrscImagesProcessed <= 0) and (IMAGE_BATCH_SIZE != 0):
+        # Brief message when no data was processed
+        msgText = '''ERROR: No HRSC images in the batch could be processed!\n''' + str(failedDataSets)
+    else: # Full data handling
+        if not options.skipKmlPyramid:
+            try:
+                # Generate a KML pyramid of the tiles for diagnostics
+                kmlPyramidLocalPath  = stackImagePyramid.main(NEW_OUTPUT_TILE_FOLDER, KML_PYRAMID_FOLDER, processedDataSets)
+                pos                  = kmlPyramidLocalPath.find('/smcmich1')
+                kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
+            except:
+                logger.error('Error generating image pyramid!')
+                kmlPyramidWebAddress = 'FAILED!'
+        else:
+            kmlPyramidWebAddress = 'Skipped production.'
+            
         # Send a message notifiying that the output needs to be reviewed!
         msgText = '''
     Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
@@ -631,8 +638,6 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
           msgText += '\n Failed image list:\n'
           for i in failedDataSets:
               msgText += i + '\n'
-    else:
-        msgText = '''ERROR: No HRSC images in the batch could be processed!\n''' + str(failedDataSets)
         
         
     MosaicUtilities.sendEmail('scott.t.mcmichael@nasa.gov', 
@@ -680,6 +685,9 @@ def setGlobalConfigs(argsIn):
                     help="Upload this many files instead of fetching the list.")
   parser.add_option('--generate-basemap-tiles', action='store_true', 
                     dest='genBasemapTiles', default=False,
+                    help='Generate the basemap tiles instead of normal processing..')
+  parser.add_option('--skip-kml-pyramid', action='store_true', 
+                    dest='skipKmlPyramid', default=False,
                     help='Generate the basemap tiles instead of normal processing..')
   parser.add_option("--threads", type="int", dest="numThreads", default=16,
                     help="Number of threads to use for processing.")

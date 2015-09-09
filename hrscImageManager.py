@@ -275,6 +275,8 @@ class HrscImage():
         else: # Normal case, use the 0 centered basemap
             self._basemapInstance = basemapInstance
 
+        raise Exception('DEBUG!!!!')
+
         # Record input parameters
         self._basemapColorPath = self._basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
         

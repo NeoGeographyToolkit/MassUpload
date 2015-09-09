@@ -54,14 +54,13 @@ class MarsBasemap:
         
 
         # Derived output parameters
+        # - A tiny bit was trimmed off the polar images to make them multiples of 45 pixels
         self.resolutionIncrease = 128
         outputHeight = thisBasemapHeight*self.resolutionIncrease
         outputWidth  = thisBasemapWidth *self.resolutionIncrease
-        numTileRows  = int(thisBasemapHeight / BASEMAP_TILE_HEIGHT) # This should round exactly
-        numTileCols  = int(thisBasemapWidth  / BASEMAP_TILE_WIDTH )
+        numTileRows  = math.floor(thisBasemapHeight / BASEMAP_TILE_HEIGHT)
+        numTileCols  = math.floor(thisBasemapWidth  / BASEMAP_TILE_WIDTH )
 
-        # TODO: Generate padded versions of the polar images that cleanly divide into 45x45 tiles.
-        #       If we end up with junk in this area, we can always clean/crop it in the end.
 
         self._logger = logging.getLogger('mosaicTileManager')
 
@@ -314,7 +313,7 @@ class MarsBasemap:
             #                +tileBackupPath)
             if os.path.exists(outputTilePath):
                 raise Exception('Output tile should never exist without backup file!')
-            cmd2 = ('/byss/smcmich1/programs/ImageMagick-6.9.1_install/bin/convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+            cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
                    + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
         else: # Just make this a dummy command
             cmd2 = ':'

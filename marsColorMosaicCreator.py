@@ -358,7 +358,8 @@ def mainProcessingFunction(options):
         processPool = multiprocessing.Pool(processes=options.numThreads)
 
     logger.info('==== Initializing the base map object ====')
-    basemapInstance = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH, NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER)
+    basemapInstance = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH, NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER,
+                                                    MosaicUtilities.PROJ_TYPE_NORMAL)
     basemapInstance.copySupportFilesFromBackupDir() # Copies the main log from the backup dir to output dir
     basemapInputsUsedLog = basemapInstance.getMainLogPath()
     print 'CHECKING LOG PATH: ' + basemapInputsUsedLog
@@ -367,16 +368,32 @@ def mainProcessingFunction(options):
     failedSetsLogPath = os.path.join(NEW_OUTPUT_TILE_FOLDER, 'failed_input_list.txt')
     failedSetsLogFile = open(failedSetsLogPath, 'a')
 
-    # Create another basemap instance centered on 180 lon.
-    # - This instance should not be creating any tiles in its output folders!
-    # - This instance is only for registration and preprocessing of wraparound HRSC images.
+    # Create additional basemap instances.
+    # - The 180 degree centered map is never for creating output tiles, only for
+    #   registration and preprocessing of wraparound HRSC images.
+    # - The other two basemaps have their own set of tiles and are used in place of the normal basemap.
     dummyFolder = '/dev/null'
-    basemapInstance180 = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH180, dummyFolder, dummyFolder, center180=True)
+    basemapInstance180   = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH180,    
+                                                         dummyFolder, dummyFolder, 
+                                                         MosaicUtilities.PROJ_TYPE_360)
+    basemapInstanceNorth = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH_NORTH, 
+                                                         NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER_NORTH,
+                                                         MosaicUtilities.PROJ_TYPE_NORTH_POLE)
+    basemapInstanceSouth = mosaicTileManager.MarsBasemap(FULL_BASEMAP_PATH_SOUTH, 
+                                                         NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER_SOUTH,
+                                                         MosaicUtilities.PROJ_TYPE_SOUTH_POLE)
+    basemapForOutputTiles = basemapInstance
+    if options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+        basemapForOutputTiles = basemapInstanceNorth
+    elif options.mapType = MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
+        basemapForOutputTiles = basemapInstanceSouth
+
+
     logger.info('--- Finished initializing the base map object ---\n')
 
     # Run once code to generate all of the starting basemap tiles!
     if options.genBasemapTiles:
-        generateAllUpsampledBasemapTiles(basemapInstance, processPool)
+        generateAllUpsampledBasemapTiles(basemapForOutputTiles, processPool)
         print 'DONE GENERATING ALL INPUT TILES'
         return False # Stop with no email message sent
 
@@ -399,7 +416,7 @@ def mainProcessingFunction(options):
     # Prune out all the HRSC images that we have already added to the mosaic.
     hrscImageList = []
     for hrscSetName in fullImageList:
-        if basemapInstance.checkLog(basemapInputsUsedLog, hrscSetName):
+        if basemapForOutputTiles.checkLog(basemapInputsUsedLog, hrscSetName):
             logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
         else:
             hrscImageList.append(hrscSetName)
@@ -488,6 +505,7 @@ def mainProcessingFunction(options):
             # Preprocess the HRSC image
             hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder,
                                                       basemapInstance, basemapInstance180,
+                                                      basemapInstanceNorth, basemapInstanceSouth,
                                                       False, processPool)
 
             logger.info('--- Now initializing high res HRSC content ---')
@@ -498,7 +516,7 @@ def mainProcessingFunction(options):
             logger.info('--- Finished initializing HRSC image ---\n')
 
             # Call the function to update all the output images for this HRSC image
-            updateTilesContainingHrscImage(basemapInstance, hrscInstance, processPool)
+            updateTilesContainingHrscImage(basemapForOutputTiles, hrscInstance, processPool)
 
             logger.info('<<<<< Finished writing all tiles for this HRSC image! >>>>>')
             
@@ -681,8 +699,6 @@ def setGlobalConfigs(argsIn):
   usage = "usage: marsColorMosaicCreator.py [--help]\n"
   parser = optparse.OptionParser(usage=usage)
   
-  parser.add_option("-u", "--upload", dest="upload", type=int,
-                    help="Upload this many files instead of fetching the list.")
   parser.add_option('--generate-basemap-tiles', action='store_true', 
                     dest='genBasemapTiles', default=False,
                     help='Generate the basemap tiles instead of normal processing..')
@@ -697,19 +713,35 @@ def setGlobalConfigs(argsIn):
                     help="Folder to store temporary files in.")
   parser.add_option("--repo-folder", dest="repoFolder", default='/byss/smcmich1/repo',
                     help="Folder where the repository is installed.")
+  parser.add_option("--map-type", dest="mapRaw", default='normal',
+                    help="Type of map to make (normal, north, south).")
   (options, args) = parser.parse_args()
 
+  # Parse out the desired map type
+  if options.mapRaw == 'normal':
+      options.mapType = MosaicUtilities.PROJ_TYPE_NORMAL
+  elif options.mapRaw == 'north':
+      options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE
+  elif options.mapRaw == 'south':
+      options.mapType = MosaicUtilities.PROJ_TYPE_SOUTH_POLE
+  else:
+      raise Exception('Map type not recognized!')
 
   SAFE_FOLDER     = options.safeFolder     # Permanent files go here
   VOLATILE_FOLDER = options.volatileFolder # Temporary files go here
   REPO_FOLDER     = options.repoFolder     # Source code folder
 
+  FULL_BASEMAP_PATH       = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
+  FULL_BASEMAP_PATH180    = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
+  FULL_BASEMAP_PATH_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/map_north_pole_low.tif')
+  FULL_BASEMAP_PATH_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/map_south_pole_low.tif')
 
-  FULL_BASEMAP_PATH    = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
-  FULL_BASEMAP_PATH180 = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
-  BACKUP_FOLDER        = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
-  DATABASE_PATH        = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
-  RUN_LOG_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
+  BACKUP_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
+  BACKUP_FOLDER_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/output_tile_backups')
+  BACKUP_FOLDER_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/output_tile_backups')
+
+  DATABASE_PATH  = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
+  RUN_LOG_FOLDER = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
 
   BAD_HRSC_FILE_PATH = os.path.join(REPO_FOLDER, 'MassUpload/badHrscSets.csv')
 

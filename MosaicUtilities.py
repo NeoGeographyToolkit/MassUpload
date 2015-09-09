@@ -431,12 +431,16 @@ class GeoReference:
         self._degreesToMeters = degreesToMeters
         
         if projectionType == PROJ_TYPE_NORTH_POLE:
-            self._lonLatBounds = Rectangle(0, 360, -90, 45.394539)
-            self._projectionBounds = Rectangle(-1972254.465, 1971376.914, -1976960.700, 1977784.755)
+            #self._lonLatBounds = Rectangle(0, 360, -90, 45.394539)
+            #self._projectionBounds = Rectangle(-1972254.465, 1971376.914, -1976960.700, 1977784.755) # Uncropped
+            self._lonLatBounds = Rectangle(0, 360, -90, 45.71756)
+            self._projectionBounds = Rectangle(-1959288.087, 1958410.536, -1958437.302, 1959261.357)
             self._projStr = '"+proj=stere +lat_0=90 +lat_ts=90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"'
         elif projectionType == PROJ_TYPE_SOUTH_POLE:
-            self._lonLatBounds = Rectangle(0, 360, -90, -45.346103)
-            self._projectionBounds = Rectangle(-1972254.465, 1972147.381, -1977725.361, 1977784.755)
+            #self._lonLatBounds = Rectangle(0, 360, -90, -45.346103)
+            #self._projectionBounds = Rectangle(-1972254.465, 1972147.381, -1977725.361, 1977784.755) # Uncropped
+            self._lonLatBounds = Rectangle(0, 360, -90, 45.71439)
+            self._projectionBounds = Rectangle(-1959439.740, 1958258.882, -1958280.029, 1959418.630)
             self._projStr = '"+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=3396200 +b=3376200 +units=m +no_defs"'
         elif projectionType == PROJ_TYPE_360:
             self._lonLatBounds = Rectangle(0, 360, -90, 90)

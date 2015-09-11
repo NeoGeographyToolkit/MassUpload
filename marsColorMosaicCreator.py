@@ -579,14 +579,28 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
     runTime  = (stopTime - startTime) * SECONDS_TO_HOURS
 
     if (numHrscImagesProcessed > 0) or (IMAGE_BATCH_SIZE == 0):
-        try:
-            # Generate a KML pyramid of the tiles for diagnostics
-            kmlPyramidLocalPath  = stackImagePyramid.main(NEW_OUTPUT_TILE_FOLDER, KML_PYRAMID_FOLDER, processedDataSets)
-            pos                  = kmlPyramidLocalPath.find('/smcmich1')
-            kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
-        except:
-            logger.error('Error generating image pyramid!')
-            kmlPyramidWebAddress = 'FAILED!'
+        if not options.skipKmlPyramid:
+            try:
+                # Generate a KML pyramid of the tiles for diagnostics
+                kmlPyramidLocalPath  = stackImagePyramid.main(NEW_OUTPUT_TILE_FOLDER, KML_PYRAMID_FOLDER, processedDataSets)
+                pos                  = kmlPyramidLocalPath.find('/smcmich1')
+                kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
+
+                if options.uploadBucket:
+                    # --> GSutil needs to be provided or on the path!
+                    # -- gsutil also needs to be configured to upload to the correct bucket
+                    # --gsutil-path /byss/smcmich1/programs/gsutil_install/gsutil
+                    cmd = ('python sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
+                             ' -p 1 --chunk-size 200')
+                    if options.bucketPrefix:
+                        cmd += (' --prepend-path '+options.bucketPrefix)
+                    print cmd
+                    os.system(cmd)
+            except:
+                logger.error('Error generating image pyramid!')
+                kmlPyramidWebAddress = 'FAILED!'
+        else: # Skipping pyramid production
+            kmlPyramidWebAddress = 'Skipped production.'
         # Send a message notifiying that the output needs to be reviewed!
         msgText = '''
     Finished processing ''' +str(numHrscImagesProcessed) + ''' HRSC images!
@@ -675,8 +689,6 @@ def setGlobalConfigs(argsIn):
   usage = "usage: marsColorMosaicCreator.py [--help]\n"
   parser = optparse.OptionParser(usage=usage)
   
-  parser.add_option("-u", "--upload", dest="upload", type=int,
-                    help="Upload this many files instead of fetching the list.")
   parser.add_option('--generate-basemap-tiles', action='store_true', 
                     dest='genBasemapTiles', default=False,
                     help='Generate the basemap tiles instead of normal processing..')
@@ -688,6 +700,14 @@ def setGlobalConfigs(argsIn):
                     help="Folder to store temporary files in.")
   parser.add_option("--repo-folder", dest="repoFolder", default='/byss/smcmich1/repo',
                     help="Folder where the repository is installed.")
+  parser.add_option('--skip-kml-pyramid', action='store_true', 
+                    dest='skipKmlPyramid', default=False,
+                    help='Generate the basemap tiles instead of normal processing..')
+  parser.add_option("--upload-bucket", dest="uploadBucket", default='',
+                    help="If provided, upload the KML tree to a Google Cloud Storage Bucket.")
+  parser.add_option("--bucket-prefix", dest="bucketPrefix", default='',
+                    help="Optional upload bucket prefix to keep results seperate.")
+
   (options, args) = parser.parse_args()
 
 

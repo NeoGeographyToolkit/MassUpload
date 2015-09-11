@@ -163,7 +163,7 @@ class HrscFileCacher():
         # Only need to retrieve the nadir files here
         query = ('SELECT * FROM Files WHERE sensor=%d AND subtype="nd3" AND status=%d' %
                       (common.SENSOR_TYPE_HRSC, common.STATUS_CONFIRMED))
-        if lonlatRect != None: # Incorporate a bounding box
+        if lonlatRect != None: # Incorporate intersection with a bounding box
             query += (' AND minLat<%d AND maxLat>%d AND minLon<%d AND maxLon>%d' %
                       (lonlatRect.maxY, lonlatRect.minY, lonlatRect.maxX, lonlatRect.minX))
         #query += ' AND (maxLon - minLon) < 100.0' # FOR NOW: Skip wraparound images.  Later we need to fix!

@@ -120,18 +120,28 @@ def runGdalTransform(s_srs, t_srs, x, y):
     
     # Create a temporary file with the lonlat location
     temp = tempfile.NamedTemporaryFile(mode='w+t')
-    temp.write('%f, %f' % (x, y))
-    
+    temp.write('%f %f' % (x, y)) # No comma is important!
+    temp.flush() # Make sure the data gets to the file
+
+    #os.system('cat ' + temp.name)
+
     # Call the command with the file as input
-    LONLAT_SRS = "+proj=longlat +lon_0=0 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m +no_defs"
-    cmd = ('gdal_transform -s_srs '+ s_srs +' -t_srs ' + t_srs + ' < ' + temp.name)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+
+    # Split up the proj strings
+    s_srs_split = s_srs.replace('"', '').split(' ')
+    t_srs_split = t_srs.replace('"', '').split(' ')
+    cmd = ['cs2cs', '-f', '"%.6f"'] + s_srs_split + ['+to']  + t_srs_split + [temp.name]
+    FNULL = open(os.devnull, 'w')
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
     text, err = p.communicate()
     temp.close()
+    #print '==='    
+    #print text
+    text = text.replace('"', '')
     
     # Parse the command output
-    parts = text.split(text)
-    return (parts[0], parts[1])
+    parts = text.split()
+    return (float(parts[0]), float(parts[1]))
 
 
 
@@ -422,6 +432,8 @@ PROJ_TYPE_SOUTH_POLE = 3
 
 # TODO: A cleaner implementation would just store these here, and not in mosaicTileManager!!!!
 
+LONLAT_SRS = '"+proj=longlat +lon_0=0 +lat_ts=0 +lat_0=0 +a=3396200 +b=3376200 units=m +no_defs"'
+
 # --> Remove the degree rect functions?
 class GeoReference:
     '''Handles GDC / projected space transforms.
@@ -429,7 +441,7 @@ class GeoReference:
     
     def __init__(self, degreesToMeters, projectionType):
         self._degreesToMeters = degreesToMeters
-        
+        self.projectionType   = projectionType
         if projectionType == PROJ_TYPE_NORTH_POLE:
             #self._lonLatBounds = Rectangle(0, 360, -90, 45.394539)
             #self._projectionBounds = Rectangle(-1972254.465, 1971376.914, -1976960.700, 1977784.755) # Uncropped
@@ -458,8 +470,8 @@ class GeoReference:
     def degreesToProjected(self, lon, lat):
         '''Given a (lon, lat) coordinate, convert to the projected coordinate system.'''
         
-        if ((projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
-            (projectionType == PROJ_TYPE_SOUTH_POLE)  ):
+        if ((self.projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
+            (self.projectionType == PROJ_TYPE_SOUTH_POLE)  ):
             return runGdalTransform(LONLAT_SRS, self._projStr, lon, lat)
             
         else: # Both eqc cases use the same code
@@ -469,8 +481,8 @@ class GeoReference:
     def projectedToDegrees(self, projX, projY):
         '''Given a projected coordinate, returns (lon, lat) in degrees'''
         
-        if ((projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
-            (projectionType == PROJ_TYPE_SOUTH_POLE)  ):
+        if ((self.projectionType == PROJ_TYPE_NORTH_POLE) or # Use GDAL to handle the polar cases
+            (self.projectionType == PROJ_TYPE_SOUTH_POLE)  ):
             return runGdalTransform(self._projStr, LONLAT_SRS, projX, projY)
             
         else: # Both eqc cases use the same code
@@ -481,7 +493,7 @@ class GeoReference:
         '''Convert a bounding box in degrees to one in projected coordinates'''
         
         # Project each corner individually, then take the bounding rect!
-        projPoints = [ degreesToProjected(x) for x in degreeRect.cornerGenerator()]
+        projPoints = [ self.degreesToProjected(x[0], x[1]) for x in degreeRect.cornerGenerator()]
         projRect = Rectangle(projPoints[0][0], projPoints[0][0], projPoints[0][1], projPoints[0][1])
         for p in projPoints:
             projRect.expandToContain(p[0], p[1])
@@ -491,11 +503,11 @@ class GeoReference:
         '''Convert a bounding box in degrees to one in projected coordinates'''
         
         # Project each corner individually, then take the bounding rect!
-        degPoints = [ projectedToDegrees(x) for x in projRect.cornerGenerator()]
-        degRect = Rectangle(degPonints[0][0], degPonints[0][0], degPonints[0][1], degPonints[0][1])
-        for p in degRect:
-            projRect.expandToContain(p[0], p[1])
-        return projRect
+        degPoints = [ self.projectedToDegrees(x[0], x[1]) for x in projRect.cornerGenerator()]
+        degRect = Rectangle(degPoints[0][0], degPoints[0][0], degPoints[0][1], degPoints[0][1])
+        for p in degPoints:
+            degRect.expandToContain(p[0], p[1])
+        return degRect
     
     def getLonLatBounds(self):
         return self._lotLatBounds
@@ -614,39 +626,43 @@ class TiledGeoRefImage(ImageWithGeoRef):
     def getTileRectPixel(self, tile):
         '''Returns the boundaries of a given tile in pixels'''
         return self._tiling.getTileBounds(tile)
-     
-     
-    # TODO: Less reliance on lonlat here!
-     
+        
     def getTileRectDegree(self, tile):
         '''Returns the boundaries of a given tile in degrees'''
         pixelRect = self.getTileRectPixel(tile)
         return self.pixelRectToDegreeRect(pixelRect)
         
-    def getIntersectingTiles(self, rectDegrees):
+    def getTileRectProjected(self, tile):
+        '''Returns the boundaries of a given tile in projected coordinates'''
+        pixelRect = self.getTileRectPixel(tile)
+        return self.pixelRectToProjectedRect(pixelRect)
+
+    def getIntersectingTiles(self, rectProjected):
         '''Returns a Rectangle containing all the tiles intersecting the input ROI'''
         
+        # TODO: Fix the 180 degree centered case!!!!
+
         # Make a copy of the input rect at +/- 360 degrees
-        rectCopyL = copy.copy(rectDegrees)
-        rectCopyR = copy.copy(rectDegrees)
-        rectCopyL.shift(-360.0, 0) 
-        rectCopyR.shift( 360.0, 0)
+        rectCopyL = copy.copy(rectProjected)
+        rectCopyR = copy.copy(rectProjected)
+        #rectCopyL.shift(-360.0, 0) 
+        #rectCopyR.shift( 360.0, 0)
         
         # Convert to pixels
-        rectPixels  = self.degreeRectToPixelRect(rectDegrees)
-        rectPixelsL = self.degreeRectToPixelRect(rectCopyL  )
-        rectPixelsR = self.degreeRectToPixelRect(rectCopyR  )
+        rectPixels  = self.projectedRectToPixelRect(rectProjected)
+        #rectPixelsL = self.projectedRectToPixelRect(rectCopyL  )
+        #rectPixelsR = self.projectedRectToPixelRect(rectCopyR  )
         
         # Find the tile intersection with each of the three rectangles
         rectTiles   = self._tiling.getIntersectingTiles(rectPixels )
-        rectTilesL  = self._tiling.getIntersectingTiles(rectPixelsL)
-        rectTilesR  = self._tiling.getIntersectingTiles(rectPixelsR)
+        #rectTilesL  = self._tiling.getIntersectingTiles(rectPixelsL)
+        #rectTilesR  = self._tiling.getIntersectingTiles(rectPixelsR)
        
         # Concatenate all intersecting tiles into a single list
         outputTileList = []
         outputTileList += list(rectTiles.indexGenerator())
-        outputTileList += list(rectTilesL.indexGenerator())
-        outputTileList += list(rectTilesR.indexGenerator())
+        #outputTileList += list(rectTilesL.indexGenerator())
+        #outputTileList += list(rectTilesR.indexGenerator())
         
         return outputTileList
     

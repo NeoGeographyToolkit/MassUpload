@@ -215,7 +215,7 @@ class HrscImage():
     def __init__(self, sourceFileInfoDict, outputFolder,
                  basemapInstance, basemapInstance360,
                  basemapInstanceNorthPole, basemapInstanceSouthPole,
-                 force=False, threadPool=None):
+                 force=False, threadPool=None, callerMapType=None):
         '''Set up all the low resolution HRSC products.'''
         
         setName = sourceFileInfoDict['setName']
@@ -263,19 +263,19 @@ class HrscImage():
 
         # Determine which basemap should be used for image preprocessing.
         self._basemapProjectionMode = self.chooseLonCenter()
-        if self._basemapProjectionMode == PROJ_TYPE_360:
+        if callerMapType and (callerMapType != self._basemapProjectionMode):
+            raise Exception('Requested map type does not match the HRSC image location, aborting processing.')
+        if self._basemapProjectionMode == MosaicUtilities.PROJ_TYPE_360:
             self._logger.info('HRSC image is centered around 180')
             self._basemapInstance = basemapInstance360
-        elif self._basemapProjectionMode == PROJ_TYPE_NORTH_POLE:
+        elif self._basemapProjectionMode == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
             self._logger.info('HRSC image is near the north pole')
             self._basemapInstance = basemapInstanceNorthPole
-        elif self._basemapProjectionMode == PROJ_TYPE_SOUTH_POLE:
+        elif self._basemapProjectionMode == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
             self._logger.info('HRSC image is near the south pole')
             self._basemapInstance = basemapInstanceSouthPole
         else: # Normal case, use the 0 centered basemap
             self._basemapInstance = basemapInstance
-
-        raise Exception('DEBUG!!!!')
 
         # Record input parameters
         self._basemapColorPath = self._basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
@@ -301,23 +301,25 @@ class HrscImage():
         self._lowResMaskImageSize = IrgGeoFunctions.getImageSize(self._lowResMaskPath)
         
         
-        # TODO: Make sure this handles over the poles images!
-        #       -> Should we do this work in projected coordinates?  May be ok since image was gdalwarped.
+        # TODO: Make sure this handles all map types!
         
         # Compute the HRSC bounding box
         # - This is a pretty good estimate based on the metadata
         lowResNadirPath = self._lowResWarpedPaths[HRSC_NADIR]
         geoInfo = IrgGeoFunctions.getImageGeoInfo(lowResNadirPath)
+
+        # print geoInfo['lonlat_bounds']
         #print geoInfo['projection_bounds']
-       # print geoInfo['lonlat_bounds']
-        if 'lonlat_bounds' in geoInfo:
-            (minLon, maxLon, minLat, maxLat) = geoInfo['lonlat_bounds']
+        if 'projection_bounds' in geoInfo:
+            #(minLon, maxLon, minLat, maxLat) = geoInfo['lonlat_bounds']
+            (minX, maxX, minY, maxY) = geoInfo['projection_bounds']
         else: # This function is not as reliable!
-            (minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getImageBoundingBox(lowResNadirPath)
-        hrscBoundingBoxDegrees = MosaicUtilities.Rectangle(minLon, maxLon, minLat, maxLat)
-        if hrscBoundingBoxDegrees.maxX < hrscBoundingBoxDegrees.minX:
-            hrscBoundingBoxDegrees.maxX += 360 # If needed, get both lon values into 0-360 degree range
-        print 'Estimated HRSC bounds: ' + str(hrscBoundingBoxDegrees)
+            raise Exception('Failed to read projection bounds from the image!')
+            #(minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getImageBoundingBox(lowResNadirPath)
+        hrscBoundingBoxProjected = MosaicUtilities.Rectangle(minX, maxX, minY, maxY)
+        #if hrscBoundingBoxProjected.maxX < hrscBoundingBoxProjected.minX:
+        #    hrscBoundingBoxDegrees.maxX += 360 # If needed, get both lon values into 0-360 degree range
+        print 'Estimated HRSC bounds: ' + str(hrscBoundingBoxProjected)
         
         
         # Cut out a region from the basemap around the location of the HRSC image
@@ -325,15 +327,16 @@ class HrscImage():
         print 'Generating low res base basemap region around HRSC data'
         CROP_BUFFER_LAT = 1.0
         CROP_BUFFER_LON = 1.0
-        self._croppedRegionBoundingBoxDegrees = copy.copy(hrscBoundingBoxDegrees)
-        self._croppedRegionBoundingBoxDegrees.expand(CROP_BUFFER_LON, CROP_BUFFER_LAT)
-        self._croppedRegionBoundingBoxPixels = self._basemapInstance.degreeRoiToPixelRoi(
-                                                       self._croppedRegionBoundingBoxDegrees, False)
-        self._basemapInstance.makeCroppedRegionDegrees(self._croppedRegionBoundingBoxDegrees,
-                                                       self._basemapCropPath, force)
+        CROP_BUFFER_METERS = 60000
+        self._croppedRegionBoundingBoxProjected = copy.copy(hrscBoundingBoxProjected)
+        self._croppedRegionBoundingBoxProjected.expand(CROP_BUFFER_METERS, CROP_BUFFER_METERS)
+        self._croppedRegionBoundingBoxPixels = self._basemapInstance.projectedRoiToPixelRoi(
+                                                       self._croppedRegionBoundingBoxProjected, False)
+        self._basemapInstance.makeCroppedRegionProjected(self._croppedRegionBoundingBoxProjected,
+                                                         self._basemapCropPath, force)
                                                        
         self._makeGrayscaleImage(self._basemapCropPath, self._basemapGrayCropPath)
-        
+
         # Compute the spatial registration from the HRSC image to the base map
         self._computeBaseSpatialRegistration(self._basemapInstance, lowResNadirPath, force)
         
@@ -367,7 +370,7 @@ class HrscImage():
         if abs(minLat) < -60:
             return MosaicUtilities.PROJ_TYPE_SOUTH_POLE
         
-        raise Exception('--> On polar pass, ignoring all non-polar images!')
+        #raise Exception('--> On polar pass, ignoring all non-polar images!')
         
         # Detect if the image is located nearby the 180 degree line
         if (abs(abs(meanLon)-180) < 10) or (abs(maxLon - minLon) > 200):
@@ -516,7 +519,7 @@ class HrscImage():
         self._generateNewHrscColorTiles(self._tileDict, force)
 
         print 'Finished generating high resolution content for HRSC image.'
-        
+       
         
     def _generateColorTransforms(self, force=False):
         '''Generate the color transform for each tile'''

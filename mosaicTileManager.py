@@ -58,8 +58,8 @@ class MarsBasemap:
         self.resolutionIncrease = 128
         outputHeight = thisBasemapHeight*self.resolutionIncrease
         outputWidth  = thisBasemapWidth *self.resolutionIncrease
-        numTileRows  = math.floor(thisBasemapHeight / BASEMAP_TILE_HEIGHT)
-        numTileCols  = math.floor(thisBasemapWidth  / BASEMAP_TILE_WIDTH )
+        numTileRows  = int(thisBasemapHeight / BASEMAP_TILE_HEIGHT) # Should always be exact!
+        numTileCols  = int(thisBasemapWidth  / BASEMAP_TILE_WIDTH )
 
 
         self._logger = logging.getLogger('mosaicTileManager')
@@ -154,6 +154,12 @@ class MarsBasemap:
             return self._highResImage.degreeRectToPixelRect(roi)
         else:
             return self._lowResImage.degreeRectToPixelRect(roi)
+
+    def projectedRoiToPixelRoi(self, roi, isHighRes=False):
+        if isHighRes:
+            return self._highResImage.projectedRectToPixelRect(roi)
+        else:
+            return self._lowResImage.projectedRectToPixelRect(roi)
         
     def pixelRoiToDegreeRoi(self, roi, isHighRes=False):
         if isHighRes:
@@ -161,35 +167,37 @@ class MarsBasemap:
         else:
             return self._lowResImage.pixelRectToDegreeRect(roi)
 
+    def pixelRoiToProjectedRoi(self, roi, isHighRes=False):
+        if isHighRes:
+            return self._highResImage.pixelRectToProjectedRect(roi)
+        else:
+            return self._lowResImage.pixelRectToProjectedRect(roi)
+
     #------------------------------------------------------------
     # Tile creation functions
     
-    def makeCroppedRegionProjMeters(self, boundingBoxProj, outputPath, force=False):
+    def makeCroppedRegionProjected(self, boundingBoxProj, outputPath, force=False):
         '''Crops out a region of the original basemap image.'''
         
-        # TODO: Handle polar regions!
-        # --> This would work fine, except that we plan on padding the basemap image
-        #     and thus the gdal_translate won't work!
-        
-        #(minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
-        ## Hack because the 180 version uses shifted projection coordinates!
-        ## - In the python code the projected space is just the degree value (0-360)
-        ##   times a constant, but on disk the projected coords are the same as the -180-180 case.
-        #if self._projectionType == MosaicUtilities.PROJ_TYPE_360: 
-        #    minX -= 10669477.100
-        #    maxX -= 10669477.100
-        #projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
-        #cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
-        #                         +' -projwin '+ projCoordString)
-        #MosaicUtilities.cmdRunner(cmd, outputPath, force)
-        
-        # --> This should be equally accurate.
-        pixelRect = self._lowResImage.projectedRectToPixelRect(boundingBoxProj)
         (minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
-        pixelCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
+        # Hack because the 180 version uses shifted projection coordinates!
+        # - In the python code the projected space is just the degree value (0-360)
+        #   times a constant, but on disk the projected coords are the same as the -180-180 case.
+        if self._projectionType == MosaicUtilities.PROJ_TYPE_360: 
+            minX -= 10669477.100
+            maxX -= 10669477.100
+        projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
         cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
-                                 +' -srcwin '+ pixelCoordString)
+                                 +' -projwin '+ projCoordString)
         MosaicUtilities.cmdRunner(cmd, outputPath, force)
+        
+        ## --> This should be equally accurate.
+        #pixelRect = self._lowResImage.projectedRectToPixelRect(boundingBoxProj)
+        #(minX, maxX, minY, maxY) = boundingBoxProj.getBounds()
+        #pixelCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
+        #cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
+        #                         +' -srcwin '+ pixelCoordString)
+        #MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
         
     def makeCroppedRegionDegrees(self, boundingBoxDegrees, outputPath, force=False):
@@ -229,9 +237,9 @@ class MarsBasemap:
             degreeRect = self._lowResImage.pixelRectToProjectedRect(pixelRectIn)
             return self._highResImage.projectedRectToPixelRect(degreeRect)
     
-    def getIntersectingTiles(self, rectDegrees):
+    def getIntersectingTiles(self, rectProjected):
         '''Returns an iterator containing all the tiles which intersect the input rectangle'''
-        return self._highResImage.getIntersectingTiles(rectDegrees)
+        return self._highResImage.getIntersectingTiles(rectProjected)
     
 
     def generateMultipleTileImages(self, tileList, pool=None, force=False):
@@ -311,14 +319,14 @@ class MarsBasemap:
             self._logger.warning('MosaicTileManager: Generating missing base tile: ' + tileBackupPath)
             #raise Exception('There should not be any tiles missing from the backup folder!\n'
             #                +tileBackupPath)
-            if os.path.exists(outputTilePath):
-                raise Exception('Output tile should never exist without backup file!')
-            cmd2 = ('convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
+            #if os.path.exists(outputTilePath):
+            #    raise Exception('Output tile should never exist without backup file!')
+            cmd2 = ('/byss/smcmich1/programs/ImageMagick-6.9.1_install/bin/convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 
                    + str(self.resolutionIncrease*100)+'% ' + smallTilePath +' '+ tileBackupPath)
         else: # Just make this a dummy command
             cmd2 = ':'
         # If this tile does not yet exist in the output folder, copy the latest backup there
-        if not os.path.exists(outputTilePath):
+        if (cmd2 == ':') or (not os.path.exists(outputTilePath)):
             cmd2 += ' && cp ' + tileBackupPath +' '+ outputTilePath
 
         # Create the empty tile log file

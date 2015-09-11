@@ -178,15 +178,17 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
     
     ## This bounding box can be in either the +/-180 range or the 0-360 range
     hrscBoundingBoxProjected = hrscInstance.getBoundingBoxProjected()
-    #print 'HRSC BB = ' + str(hrscBoundingBoxDegrees)
+    print 'HRSC BB = ' + str(hrscBoundingBoxProjected)
     
     # Expand the computed bounding box a little bit to insure that
     #  we don't miss any tiles around the edges.
-    BUFFER_SIZE = 10000 # BB buffer size in meters
+    BUFFER_SIZE = 5000 # BB buffer size in meters
     hrscBoundingBoxProjected.expand(BUFFER_SIZE, BUFFER_SIZE)
         
+
+# TODO: This the fetch ROI needs to be in projected coordinates for this to work!
     # DEBUG!  Restrict to a selected area.
-    hrscBoundingBoxProjected = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxProjected)
+#    hrscBoundingBoxProjected = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxProjected)
 
     intersectTileList = basemapInstance.getIntersectingTiles(hrscBoundingBoxProjected)
     return intersectTileList
@@ -238,6 +240,10 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     # Find all the output tiles that intersect with this
     outputTilesList = getCoveredOutputTiles(basemapInstance, hrscInstance)
 
+    #for t in outputTilesList:
+    #    print t
+    #raise Exception('DEBUG')
+
     hrscSetName = hrscInstance.getSetName()
     mainLogPath = basemapInstance.getMainLogPath()
     
@@ -255,7 +261,8 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
     #   paste incoming HRSC tiles on top of.
     logger.info('Making sure we have required basemap tiles for HRSC image ' + hrscSetName)
     basemapInstance.generateMultipleTileImages(outputTilesList, pool, force=False)
-    
+    #basemapInstance.generateMultipleTileImages(outputTilesList, None, force=False) # Single thread debug
+
     if pool:
         logger.info('Initializing tile output tasks...')
     
@@ -383,9 +390,9 @@ def mainProcessingFunction(options):
                                                          NEW_OUTPUT_TILE_FOLDER, BACKUP_FOLDER_SOUTH,
                                                          MosaicUtilities.PROJ_TYPE_SOUTH_POLE)
     basemapForOutputTiles = basemapInstance
-    if options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+    if options.mapType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
         basemapForOutputTiles = basemapInstanceNorth
-    elif options.mapType = MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
+    elif options.mapType == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
         basemapForOutputTiles = basemapInstanceSouth
 
 
@@ -506,7 +513,7 @@ def mainProcessingFunction(options):
             hrscInstance = hrscImageManager.HrscImage(hrscFileInfoDict, thisHrscFolder,
                                                       basemapInstance, basemapInstance180,
                                                       basemapInstanceNorth, basemapInstanceSouth,
-                                                      False, processPool)
+                                                      False, processPool, options.mapType)
 
             logger.info('--- Now initializing high res HRSC content ---')
 
@@ -607,6 +614,18 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
                 kmlPyramidLocalPath  = stackImagePyramid.main(NEW_OUTPUT_TILE_FOLDER, KML_PYRAMID_FOLDER, processedDataSets)
                 pos                  = kmlPyramidLocalPath.find('/smcmich1')
                 kmlPyramidWebAddress = 'http://byss.arc.nasa.gov' + kmlPyramidLocalPath[pos:]
+
+                if options.uploadBucket:
+                    # --> GSutil needs to be provided or on the path!
+                    # -- gsutil also needs to be configured to upload to the correct bucket
+                    # --gsutil-path /byss/smcmich1/programs/gsutil_install/gsutil
+                    cmd = ('python sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
+                              ' -p 1 --chunk-size 200')
+                    if options.bucketPrefix:
+                        cmd += (' --prepend-path '+options.bucketPrefix)
+                    print cmd
+                    os.system(cmd)
+
             except:
                 logger.error('Error generating image pyramid!')
                 kmlPyramidWebAddress = 'FAILED!'
@@ -678,7 +697,11 @@ def setGlobalConfigs(argsIn):
   # Define global variables we will use
   global FULL_BASEMAP_PATH
   global FULL_BASEMAP_PATH180
+  global FULL_BASEMAP_PATH_NORTH
+  global FULL_BASEMAP_PATH_SOUTH
   global BACKUP_FOLDER
+  global BACKUP_FOLDER_NORTH
+  global BACKUP_FOLDER_SOUTH
   global DATABASE_PATH
   global RUN_LOG_FOLDER
 
@@ -705,6 +728,8 @@ def setGlobalConfigs(argsIn):
   parser.add_option('--skip-kml-pyramid', action='store_true', 
                     dest='skipKmlPyramid', default=False,
                     help='Generate the basemap tiles instead of normal processing..')
+  parser.add_option("--upload-bucket", dest="uploadBucket", default='',
+                    help="If provided, upload the KML tree to a Google Cloud Storage Bucket.")
   parser.add_option("--threads", type="int", dest="numThreads", default=16,
                     help="Number of threads to use for processing.")
   parser.add_option("--safe-folder", dest="safeFolder", default='/byss/smcmich1/data',
@@ -715,11 +740,14 @@ def setGlobalConfigs(argsIn):
                     help="Folder where the repository is installed.")
   parser.add_option("--map-type", dest="mapRaw", default='normal',
                     help="Type of map to make (normal, north, south).")
+  parser.add_option("--bucket-prefix", dest="bucketPrefix", default='',
+                    help="Optional upload bucket prefix to keep results seperate.")
   (options, args) = parser.parse_args()
 
   # Parse out the desired map type
   if options.mapRaw == 'normal':
       options.mapType = MosaicUtilities.PROJ_TYPE_NORMAL
+      raise Exception('DEBUG ONLY DO POLES!')
   elif options.mapRaw == 'north':
       options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE
   elif options.mapRaw == 'south':
@@ -771,8 +799,10 @@ def setGlobalConfigs(argsIn):
   # Used to control the area we operate over
   #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-  HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, -0.0001, -60.0, 60.0) # Left half:  Alderaan
+  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
+
+  HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0,  60.0, 90.0) # North Pole
+  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -90.0, -60.0) # South Pole
 
   # DEBUG regions
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region

@@ -545,7 +545,7 @@ def mainProcessingFunction(options):
     # Call output reporting/logging functions
 
     sentEmail = generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-                                     processedDataSets, failedDataSets, numDataSetsRemainingToProcess)
+                                     processedDataSets, failedDataSets, numDataSetsRemainingToProcess, options)
 
     logger.info('Basemap generation script completed!')
     return sentEmail
@@ -570,7 +570,7 @@ def recordThumbnails(setName):
 
 
 def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes, 
-               processedDataSets, failedDataSets, numDataSetsRemainingToProcess):
+               processedDataSets, failedDataSets, numDataSetsRemainingToProcess, options):
     '''Generate an HRSC image pyramid and then send out a status email'''
 
     # Compute the run time for the output message
@@ -590,7 +590,7 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
                     # --> GSutil needs to be provided or on the path!
                     # -- gsutil also needs to be configured to upload to the correct bucket
                     # --gsutil-path /byss/smcmich1/programs/gsutil_install/gsutil
-                    cmd = ('python sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
+                    cmd = ('python ../sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
                              ' -p 1 --chunk-size 200')
                     if options.bucketPrefix:
                         cmd += (' --prepend-path '+options.bucketPrefix)
@@ -708,6 +708,9 @@ def setGlobalConfigs(argsIn):
   parser.add_option("--bucket-prefix", dest="bucketPrefix", default='',
                     help="Optional upload bucket prefix to keep results seperate.")
 
+  parser.add_option("--node-index", type="int", dest="nodeIndex", default=0,
+                    help="Designated Google Compute processing node, sets region and bucket prefix.")
+
   (options, args) = parser.parse_args()
 
 
@@ -760,6 +763,20 @@ def setGlobalConfigs(argsIn):
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
   #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(177, 183, 11.0, 17.0) # Orcus Patera on dateline
+
+  if options.nodeIndex > 0: 
+      # Then this is a specified Google Compute node, and has a designated processing 
+      #  region and options.
+      MIN_LAT = -70
+      MAX_LAT =  70
+      MAIN_LON_SIZE = 22.5
+
+      thisMinLon = -360 + (options.nodeIndex-1)*MAIN_LON_SIZE
+      thisMaxLon = thisMinLon + MAIN_LON_SIZE
+      HRSC_FETCH_ROI = MosaicUtilities.Rectangle(thisMinLon, thisMaxLon, MIN_LAT, MAX_LAT)
+
+      options.bucketPrefix = 'node_' + str(options.nodeIndex)
+      options.uploadBucket = 'hrsc_map_storage'
 
 
   # Also set up logging here.

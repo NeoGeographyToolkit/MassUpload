@@ -219,6 +219,10 @@ class Rectangle:
         return (self.minX, self.minY)
     def getMaxCoord(self):
         return (self.maxX, self.maxY)
+    def getCenterCoord(self):
+        return ((self.maxX - self.minX)/2.0,
+                (self.maxY - self.minY)/2.0)
+    
     
     def shift(self, dx, dy):
         '''Shifts the entire box'''

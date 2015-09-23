@@ -161,12 +161,6 @@ def cacheManagerThreadFunction(DATABASE_PATH, hrscDownloadFolder, hrscProcessedF
             # Put the output information on the output queue
             outputQueue.put(hrscInfoDict)
 
-   
-        
-        #--> Need to make sure we never delete an image until we are finished using it
-
-        # TODO: Implement 'finished' message?
-
     # We only get here when we break out of the main loop
     outputQueue.put('STOPPED')
     logger.info('Download manager thread stopped.')
@@ -184,11 +178,9 @@ def getCoveredOutputTiles(basemapInstance, hrscInstance):
     #  we don't miss any tiles around the edges.
     BUFFER_SIZE = 5000 # BB buffer size in meters
     hrscBoundingBoxProjected.expand(BUFFER_SIZE, BUFFER_SIZE)
-        
 
-# TODO: This the fetch ROI needs to be in projected coordinates for this to work!
     # DEBUG!  Restrict to a selected area.
-#    hrscBoundingBoxProjected = HRSC_FETCH_ROI.getIntersection(hrscBoundingBoxProjected)
+    hrscBoundingBoxProjected = HRSC_FETCH_PROJ_ROI.getIntersection(hrscBoundingBoxProjected)
 
     intersectTileList = basemapInstance.getIntersectingTiles(hrscBoundingBoxProjected)
     return intersectTileList
@@ -335,7 +327,7 @@ def generateAllUpsampledBasemapTiles(basemapInstance, pool):
 
     # Get all the tiles we are interested in.
     # Should have tiles from -180 to 180 in the +/-60 range. (on /byss)
-    allTileList = basemapInstance.getIntersectingTiles(HRSC_FETCH_ROI)
+    allTileList = basemapInstance.getIntersectingTiles(HRSC_FETCH_PROJ_ROI)
     
     # Make all the outputs.  This will take a while!
     basemapInstance.generateMultipleTileImages(allTileList, pool, force=False)
@@ -414,7 +406,7 @@ def mainProcessingFunction(options):
     #raise Exception('DONE FINDING BAD SETS')
 
 
-    fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_ROI)
+    fullImageList = tempFileFinder.getHrscSetList(HRSC_FETCH_DEG_ROI)
     tempgFileFinder = None # Delete this temporary object
 
     logger.info('Identified ' + str(len(fullImageList)) + ' HRSC images in the requested region.')
@@ -692,137 +684,180 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
 
 
 def setGlobalConfigs(argsIn):
-  '''Parse the input arguments and set global variables'''
-
-  # Define global variables we will use
-  global FULL_BASEMAP_PATH
-  global FULL_BASEMAP_PATH180
-  global FULL_BASEMAP_PATH_NORTH
-  global FULL_BASEMAP_PATH_SOUTH
-  global BACKUP_FOLDER
-  global BACKUP_FOLDER_NORTH
-  global BACKUP_FOLDER_SOUTH
-  global DATABASE_PATH
-  global RUN_LOG_FOLDER
-
-  global BAD_HRSC_FILE_PATH
-
-  global NEW_OUTPUT_TILE_FOLDER
-  global HRSC_DOWNLOAD_FOLDER
-  global HRSC_PROCESSING_FOLDER
-
-  global KML_PYRAMID_FOLDER
-  global OUTPUT_THUMBNAIL_FOLDER
-  global OUTPUT_REGISTRATION_FOLDER
-
-  global HRSC_FETCH_ROI
-
-
-  # Input argument parsing
-  usage = "usage: marsColorMosaicCreator.py [--help]\n"
-  parser = optparse.OptionParser(usage=usage)
-  
-  parser.add_option('--generate-basemap-tiles', action='store_true', 
-                    dest='genBasemapTiles', default=False,
-                    help='Generate the basemap tiles instead of normal processing..')
-  parser.add_option('--skip-kml-pyramid', action='store_true', 
-                    dest='skipKmlPyramid', default=False,
-                    help='Generate the basemap tiles instead of normal processing..')
-  parser.add_option("--upload-bucket", dest="uploadBucket", default='',
-                    help="If provided, upload the KML tree to a Google Cloud Storage Bucket.")
-  parser.add_option("--threads", type="int", dest="numThreads", default=16,
-                    help="Number of threads to use for processing.")
-  parser.add_option("--safe-folder", dest="safeFolder", default='/byss/smcmich1/data',
-                    help="Folder to store output files in.")
-  parser.add_option("--volatile-folder", dest="volatileFolder", default='/home/smcmich1/data',
-                    help="Folder to store temporary files in.")
-  parser.add_option("--repo-folder", dest="repoFolder", default='/byss/smcmich1/repo',
-                    help="Folder where the repository is installed.")
-  parser.add_option("--map-type", dest="mapRaw", default='normal',
-                    help="Type of map to make (normal, north, south).")
-  parser.add_option("--bucket-prefix", dest="bucketPrefix", default='',
-                    help="Optional upload bucket prefix to keep results seperate.")
-  (options, args) = parser.parse_args()
-
-  # Parse out the desired map type
-  if options.mapRaw == 'normal':
-      options.mapType = MosaicUtilities.PROJ_TYPE_NORMAL
-      raise Exception('DEBUG ONLY DO POLES!')
-  elif options.mapRaw == 'north':
-      options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE
-  elif options.mapRaw == 'south':
-      options.mapType = MosaicUtilities.PROJ_TYPE_SOUTH_POLE
-  else:
-      raise Exception('Map type not recognized!')
-
-  SAFE_FOLDER     = options.safeFolder     # Permanent files go here
-  VOLATILE_FOLDER = options.volatileFolder # Temporary files go here
-  REPO_FOLDER     = options.repoFolder     # Source code folder
-
-  FULL_BASEMAP_PATH       = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
-  FULL_BASEMAP_PATH180    = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
-  FULL_BASEMAP_PATH_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/map_north_pole_low.tif')
-  FULL_BASEMAP_PATH_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/map_south_pole_low.tif')
-
-  BACKUP_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
-  BACKUP_FOLDER_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/output_tile_backups')
-  BACKUP_FOLDER_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/output_tile_backups')
-
-  DATABASE_PATH  = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
-  RUN_LOG_FOLDER = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
-
-  BAD_HRSC_FILE_PATH = os.path.join(REPO_FOLDER, 'MassUpload/badHrscSets.csv')
-
-  NEW_OUTPUT_TILE_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscNewOutputTiles')
-  HRSC_DOWNLOAD_FOLDER   = os.path.join(VOLATILE_FOLDER, 'hrscDownloadCache')
-  HRSC_PROCESSING_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscProcessedFiles')
-
-  if 'byss' in SAFE_FOLDER: # On byss, write where we can post online.
-      KML_PYRAMID_FOLDER = '/byss/docroot/smcmich1/hrscMosaicKml'
-  else: # Just create somewhere
-      KML_PYRAMID_FOLDER = os.path.join(SAFE_FOLDER, 'hrscMosaicKml')
-
-  OUTPUT_THUMBNAIL_FOLDER    = os.path.join(SAFE_FOLDER, 'hrscThumbnails')
-  OUTPUT_REGISTRATION_FOLDER = os.path.join(SAFE_FOLDER, 'hrscRegistration')
-
-
-  # --- Folder notes ---
-  # - HRSC_DOWNLOAD_FOLDER holds the downloaded and preprocessed HRSC data
-  # - HRSC_PROCESSING_FOLDER holds the fully processed HRSC files
-  # - The current crop of tiles is written to NEW_OUTPUT_TILE_FOLDER
-  # - The persistent set of final output tiles is kept in BACKUP_FOLDER
-
-
-  # TODO: Split this ROI based on an input parameter!
-
-
-  # Used to control the area we operate over
-  #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -60.0, 60.0) # No Poles
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(   0.0,    180.0, -60.0, 60.0) # Right half: L2
-
-  HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0,  60.0, 90.0) # North Pole
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-180.0, 180.0, -90.0, -60.0) # South Pole
-
-  # DEBUG regions
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-116.0, -110.0, -2.0, 3.5) # Restrict to a mountain region
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(133.0, 142.0, 46, 50.0) # Viking 2 lander region
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-78.0, -63.0, -13.0, -2.5) # Candor Chasma region
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(-161.0, -154.0, -60.0, -50.0) # Region near -60 lat
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(62.0, 67.0, -35.0, -28.0) # Coronae Scolpulus
-  #HRSC_FETCH_ROI = MosaicUtilities.Rectangle(177, 183, 11.0, 17.0) # Orcus Patera on dateline
-
-
-  # Also set up logging here.
-  # - Log tiles are timestamped as is each line in the log file
-  currentTime = datetime.datetime.now()
-  logPath = os.path.join(RUN_LOG_FOLDER, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
-  logging.basicConfig(filename=logPath,
-                      format=MosaicUtilities.LOG_FORMAT_STR,
-                      level=logging.DEBUG)
-
-
-  return options
+    '''Parse the input arguments and set global variables'''
+    
+    # Define global variables we will use
+    global FULL_BASEMAP_PATH
+    global FULL_BASEMAP_PATH180
+    global FULL_BASEMAP_PATH_NORTH
+    global FULL_BASEMAP_PATH_SOUTH
+    global BACKUP_FOLDER
+    global BACKUP_FOLDER_NORTH
+    global BACKUP_FOLDER_SOUTH
+    global DATABASE_PATH
+    global RUN_LOG_FOLDER
+    
+    global BAD_HRSC_FILE_PATH
+    
+    global NEW_OUTPUT_TILE_FOLDER
+    global HRSC_DOWNLOAD_FOLDER
+    global HRSC_PROCESSING_FOLDER
+    
+    global KML_PYRAMID_FOLDER
+    global OUTPUT_THUMBNAIL_FOLDER
+    global OUTPUT_REGISTRATION_FOLDER
+    
+    global HRSC_FETCH_DEG_ROI
+    global HRSC_FETCH_PROJ_ROI
+    
+    
+    # Input argument parsing
+    usage = "usage: marsColorMosaicCreator.py [--help]\n"
+    parser = optparse.OptionParser(usage=usage)
+    
+    parser.add_option('--generate-basemap-tiles', action='store_true', 
+                      dest='genBasemapTiles', default=False,
+                      help='Generate the basemap tiles instead of normal processing..')
+    parser.add_option('--skip-kml-pyramid', action='store_true', 
+                      dest='skipKmlPyramid', default=False,
+                      help='Generate the basemap tiles instead of normal processing..')
+    parser.add_option("--upload-bucket", dest="uploadBucket", default='',
+                      help="If provided, upload the KML tree to a Google Cloud Storage Bucket.")
+    parser.add_option("--threads", type="int", dest="numThreads", default=16,
+                      help="Number of threads to use for processing.")
+    parser.add_option("--safe-folder", dest="safeFolder", default='/byss/smcmich1/data',
+                      help="Folder to store output files in.")
+    parser.add_option("--volatile-folder", dest="volatileFolder", default='/home/smcmich1/data',
+                      help="Folder to store temporary files in.")
+    parser.add_option("--repo-folder", dest="repoFolder", default='/byss/smcmich1/repo',
+                      help="Folder where the repository is installed.")
+    parser.add_option("--map-type", dest="mapRaw", default='normal',
+                      help="Type of map to make (normal, north, south).")
+    parser.add_option("--bucket-prefix", dest="bucketPrefix", default='',
+                      help="Optional upload bucket prefix to keep results seperate.")
+    
+    parser.add_option("--node-index", type="int", dest="nodeIndex", default=0,
+                      help="Designated Google Compute processing node, sets region and bucket prefix.")
+    
+    (options, args) = parser.parse_args()
+    
+    # Parse out the desired map type
+    if options.mapRaw == 'normal':
+        options.mapType = MosaicUtilities.PROJ_TYPE_NORMAL
+        raise Exception('DEBUG ONLY DO POLES!')
+    elif options.mapRaw == 'north':
+        options.mapType = MosaicUtilities.PROJ_TYPE_NORTH_POLE
+    elif options.mapRaw == 'south':
+        options.mapType = MosaicUtilities.PROJ_TYPE_SOUTH_POLE
+    else:
+        raise Exception('Map type not recognized!')
+    
+    SAFE_FOLDER     = options.safeFolder     # Permanent files go here
+    VOLATILE_FOLDER = options.volatileFolder # Temporary files go here
+    REPO_FOLDER     = options.repoFolder     # Source code folder
+    
+    FULL_BASEMAP_PATH       = os.path.join(SAFE_FOLDER, 'hrscBasemap/projection_space_basemap.tif')
+    FULL_BASEMAP_PATH180    = os.path.join(SAFE_FOLDER, 'hrscBasemap180/projection_space_basemap180.tif')
+    FULL_BASEMAP_PATH_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/map_north_pole_low.tif')
+    FULL_BASEMAP_PATH_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/map_south_pole_low.tif')
+    
+    BACKUP_FOLDER       = os.path.join(SAFE_FOLDER, 'hrscBasemap/output_tile_backups')
+    BACKUP_FOLDER_NORTH = os.path.join(SAFE_FOLDER, 'hrscBasemapNorth/output_tile_backups')
+    BACKUP_FOLDER_SOUTH = os.path.join(SAFE_FOLDER, 'hrscBasemapSouth/output_tile_backups')
+    
+    DATABASE_PATH  = os.path.join(SAFE_FOLDER, 'google/googlePlanetary.db')
+    RUN_LOG_FOLDER = os.path.join(SAFE_FOLDER, 'hrscMosaicLogs')
+    
+    BAD_HRSC_FILE_PATH = os.path.join(REPO_FOLDER, 'MassUpload/badHrscSets.csv')
+    
+    NEW_OUTPUT_TILE_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscNewOutputTiles')
+    HRSC_DOWNLOAD_FOLDER   = os.path.join(VOLATILE_FOLDER, 'hrscDownloadCache')
+    HRSC_PROCESSING_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscProcessedFiles')
+    
+    if 'byss' in SAFE_FOLDER: # On byss, write where we can post online.
+        KML_PYRAMID_FOLDER = '/byss/docroot/smcmich1/hrscMosaicKml'
+    else: # Just create somewhere
+        KML_PYRAMID_FOLDER = os.path.join(SAFE_FOLDER, 'hrscMosaicKml')
+    
+    OUTPUT_THUMBNAIL_FOLDER    = os.path.join(SAFE_FOLDER, 'hrscThumbnails')
+    OUTPUT_REGISTRATION_FOLDER = os.path.join(SAFE_FOLDER, 'hrscRegistration')
+    
+    
+    # --- Folder notes ---
+    # - HRSC_DOWNLOAD_FOLDER holds the downloaded and preprocessed HRSC data
+    # - HRSC_PROCESSING_FOLDER holds the fully processed HRSC files
+    # - The current crop of tiles is written to NEW_OUTPUT_TILE_FOLDER
+    # - The persistent set of final output tiles is kept in BACKUP_FOLDER
+    
+    
+    # TODO: Split this ROI based on an input parameter!
+    
+    
+    # Used to control the area we operate over
+    #HRSC_FETCH_ROI = None # Fetch ALL hrsc images
+    
+    # These are the full ROI's for the north and south pole images
+    if options.mapType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+        HRSC_FETCH_PROJ_ROI = MosaicUtilities.Rectangle(-1959288.087, 1958410.536, -1958437.302, 1959261.357)
+        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, 45, 90)
+    if options.mapType == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
+        HRSC_FETCH_PROJ_ROI = MosaicUtilities.Rectangle(-1959439.740, 1958258.882, -1958280.029, 1959418.630)
+        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, -90, -45)
+    
+    if options.nodeIndex > 0:
+        # Then this is a specified Google Compute node, and has a designated processing 
+        #  region and options.
+        # - The polar nodes are as follows: 17-20 (North), 21-24(South) [broken up into quadrants]
+        
+        def grabQuadrant(rect, quadrant):
+            '''Simple function to grab a certain quadrant out of a rectangle.'''
+            center = rect.getCenterCoord()
+            if quadrant==0: return MosaicUtilities.Rectangle(rect.minX, center[0], center[1], rect.maxY) # TL
+            if quadrant==1: return MosaicUtilities.Rectangle(center[0], rect.maxX, center[1], rect.maxY) # TR
+            if quadrant==2: return MosaicUtilities.Rectangle(center[0], rect.maxX, rect.minY, center[1]) # BR
+            if quadrant==3: return MosaicUtilities.Rectangle(rect.minX, center[0], rect.minY, center[1]) # BL
+            raise Exception('Illegal quadrant!')
+        
+        def grabLonSlice(rect, quadrant):
+            '''Similar function specialized for longitude.'''
+            center = rect.getCenterCoord()
+            if quadrant==0: return MosaicUtilities.Rectangle(-180, -90, rect.minY, rect.maxY) # TL
+            if quadrant==1: return MosaicUtilities.Rectangle(  90, 180, rect.minY, rect.maxY) # TR
+            if quadrant==2: return MosaicUtilities.Rectangle(   0,  90, rect.minY, rect.maxY) # BR
+            if quadrant==3: return MosaicUtilities.Rectangle( -90,   0, rect.minY, rect.maxY) # BL
+            raise Exception('Illegal quadrant!')
+        
+        if (options.nodeIndex == 17) or (options.nodeIndex == 21):
+            HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 0)
+            HRSC_FETCH_DEG_ROI  = grabLonSlice(HRSC_FETCH_DEG_ROI,  0)
+        if (options.nodeIndex == 18) or (options.nodeIndex == 22):
+            HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 1)
+            HRSC_FETCH_DEG_ROI  = grabLonSlice(HRSC_FETCH_DEG_ROI,  1)
+        if (options.nodeIndex == 19) or (options.nodeIndex == 23):
+            HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 2)
+            HRSC_FETCH_DEG_ROI  = grabLonSlice(HRSC_FETCH_DEG_ROI,  2)
+        if (options.nodeIndex == 20) or (options.nodeIndex == 24):
+            HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 3)
+            HRSC_FETCH_DEG_ROI  = grabLonSlice(HRSC_FETCH_DEG_ROI,  3)
+        
+        
+        print 'Using fetch ROI ' + str(HRSC_FETCH_DEG_ROI)
+    
+        options.bucketPrefix = 'node_' + str(options.nodeIndex)
+        options.uploadBucket = 'hrsc_map_storage'
+    
+    
+    
+    # Also set up logging here.
+    # - Log tiles are timestamped as is each line in the log file
+    currentTime = datetime.datetime.now()
+    logPath = os.path.join(RUN_LOG_FOLDER, ('hrscMosaicLog_%s.txt' % currentTime.isoformat()) )
+    logging.basicConfig(filename=logPath,
+                        format=MosaicUtilities.LOG_FORMAT_STR,
+                        level=logging.DEBUG)
+    
+    
+    return options
 
 def main(argsIn):
     '''Outer try-catch handling to make sure the program does not silently die.

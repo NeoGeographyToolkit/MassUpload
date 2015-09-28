@@ -811,11 +811,10 @@ def setGlobalConfigs(argsIn):
         
         def grabQuadrant(rect, quadrant):
             '''Simple function to grab a certain quadrant out of a rectangle.'''
-            center = rect.getCenterCoord()
-            if quadrant==0: return MosaicUtilities.Rectangle(rect.minX, center[0], center[1], rect.maxY) # TL
-            if quadrant==1: return MosaicUtilities.Rectangle(center[0], rect.maxX, center[1], rect.maxY) # TR
-            if quadrant==2: return MosaicUtilities.Rectangle(center[0], rect.maxX, rect.minY, center[1]) # BR
-            if quadrant==3: return MosaicUtilities.Rectangle(rect.minX, center[0], rect.minY, center[1]) # BL
+            if quadrant==0: return MosaicUtilities.Rectangle(rect.minX, 0.0, 0.0, rect.maxY) # TL
+            if quadrant==1: return MosaicUtilities.Rectangle(0.0, rect.maxX, 0.0, rect.maxY) # TR
+            if quadrant==2: return MosaicUtilities.Rectangle(0.0, rect.maxX, rect.minY, 0.0) # BR
+            if quadrant==3: return MosaicUtilities.Rectangle(rect.minX, 0.0, rect.minY, 0.0) # BL
             raise Exception('Illegal quadrant!')
         
         def grabLonSlice(rect, quadrant):

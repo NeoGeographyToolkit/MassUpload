@@ -122,7 +122,7 @@ def splitImageGdal(imagePath, outputPrefix, tileSize, force=False, pool=None, ma
             # Generate the tile (console output suppressed)
             thisPixelRoi = ('%d %d %d %d' % (minCol, minRow, width, height))
             thisTilePath = outputPrefix + str(r) +'_'+ str(c) + '.tif'
-            cmd = 'gdal_translate -q -srcwin ' + thisPixelRoi +' '+ imagePath +' '+ thisTilePath
+            cmd = MosaicUtilities.GDAL_TRANSLATE_PATH + ' -q -srcwin ' + thisPixelRoi +' '+ imagePath +' '+ thisTilePath
             if pool:
                 #print cmd
                 cmdList.append((cmd, thisTilePath, force))
@@ -398,7 +398,7 @@ class HrscImage():
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
         '''Convert an image on disk to grayscale'''
         # Currently we just take the red channel, later we should experiment.
-        cmd = 'gdal_translate -b 1 ' + inputPath +' '+ outputPath
+        cmd = MosaicUtilities.GDAL+' -b 1 ' + inputPath +' '+ outputPath
         MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
         
@@ -569,7 +569,7 @@ class HrscImage():
             os.mkdir(outputFolder)
         fileName   = sourcePath[sourcePath.rfind('/')+1:]
         warpedPath = os.path.join(outputFolder, fileName)[:-4] + postfix +'.tif'
-        cmd = ('gdalwarp ' + sourcePath +' '+ warpedPath + ' -r cubicspline'
+        cmd = (MosaicUtilities.GDALWARP_PATH +' ' + sourcePath +' '+ warpedPath + ' -r cubicspline'
                  +' -multi -co "BLOCKXSIZE=1024" -co "BLOCKYSIZE=1024" -co TILED=yes'
                  +' -t_srs "'+self._basemapInstance.getProj4String()+'" -tr '
                  + str(metersPerPixel)+' '+str(metersPerPixel)+' -overwrite')

@@ -615,7 +615,7 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
                     # --> GSutil needs to be provided or on the path!
                     # -- gsutil also needs to be configured to upload to the correct bucket
                     # --gsutil-path /byss/smcmich1/programs/gsutil_install/gsutil
-                    cmd = ('python sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
+                    cmd = ('python ../sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
                               ' -p 1 --chunk-size 200 --gsutil-path /home/scott_mcmichael/MOUNT_POINT/programs/gsutil/gsutil')
                     if options.bucketPrefix:
                         cmd += (' --prepend-path '+options.bucketPrefix)

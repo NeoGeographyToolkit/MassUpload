@@ -14,6 +14,11 @@ import tempfile
 
 LOG_FORMAT_STR = '%(asctime)s %(name)s %(message)s'
 
+GDALINFO_PATH = '/home/scott_mcmichael/MOUNT_POINT/repo/BinaryBuilder/build_dir/install/bin/gdalinfo'
+GDALWARP_PATH = '/home/scott_mcmichael/MOUNT_POINT/repo/BinaryBuilder/build_dir/install/bin/gdalwarp'
+GDAL_TRANSLATE_PATH = '/home/scott_mcmichael/MOUNT_POINT/repo/BinaryBuilder/build_dir/install/bin/gdal_translate'
+GSUTIL_PATH = '/home/scott_mcmichael/MOUNT_POINT/programs/gsutil/gsutil'
+
 #----------------------------------------------------------------------------
 # Functions
 
@@ -101,7 +106,7 @@ def countBlackPixels(imagePath, isGray=True):
 def isImageFileValid(path):
     '''Returns false if the image file is invalid (gdal can't read it)'''
 
-    cmd = ['gdalinfo', path]
+    cmd = [GDALINFO_PATH, path]
     #p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     #textOutput, err = p.communicate()
     

@@ -309,6 +309,10 @@ class HrscImage():
         hrscBoundingBoxDegrees = MosaicUtilities.Rectangle(minLon, maxLon, minLat, maxLat)
         if hrscBoundingBoxDegrees.maxX < hrscBoundingBoxDegrees.minX:
             hrscBoundingBoxDegrees.maxX += 360 # If needed, get both lon values into 0-360 degree range
+        if (hrscBoundingBoxDegrees.minX < 0) and self._isCentered180:
+            # If working in the 0-360 degree space, make sure the longitude values are positive
+            hrscBoundingBoxDegrees.minX += 360
+            hrscBoundingBoxDegrees.maxX += 360
         print 'Estimated HRSC bounds: ' + str(hrscBoundingBoxDegrees)
         
         # Cut out a region from the basemap around the location of the HRSC image

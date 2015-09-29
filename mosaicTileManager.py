@@ -269,8 +269,8 @@ class MarsBasemap:
         # - All future tile updates will be pasted on top of this tile.
         if not os.path.exists(tileBackupPath):
             self._logger.warning('MosaicTileManager: Generating missing base tile: ' + tileBackupPath)
-            #raise Exception('There should not be any tiles missing from the backup folder!\n'
-            #                +tileBackupPath)
+            raise Exception('There should not be any tiles missing from the backup folder!\n'
+                            +tileBackupPath) # Turn on to prevent unexpected tile generation!
             if os.path.exists(outputTilePath):
                 raise Exception('Output tile should never exist without backup file!')
             cmd2 = ('/byss/smcmich1/programs/ImageMagick-6.9.1_install/bin/convert -monitor -define filter:blur=0.88 -filter quadratic -resize ' 

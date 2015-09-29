@@ -744,6 +744,13 @@ def setGlobalConfigs(argsIn):
     HRSC_DOWNLOAD_FOLDER   = os.path.join(VOLATILE_FOLDER, 'hrscDownloadCache')
     HRSC_PROCESSING_FOLDER = os.path.join(VOLATILE_FOLDER, 'hrscProcessedFiles')
     
+    if not os.path.exists(NEW_OUTPUT_TILE_FOLDER):
+        os.mkdir(NEW_OUTPUT_TILE_FOLDER)
+    if not os.path.exists(HRSC_DOWNLOAD_FOLDER):
+        os.mkdir(HRSC_DOWNLOAD_FOLDER)
+    if not os.path.exists(HRSC_PROCESSING_FOLDER):
+        os.mkdir(HRSC_PROCESSING_FOLDER)
+    
     if 'byss' in SAFE_FOLDER: # On byss, write where we can post online.
         KML_PYRAMID_FOLDER = '/byss/docroot/smcmich1/hrscMosaicKml'
     else: # Just create somewhere

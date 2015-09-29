@@ -43,8 +43,12 @@ def cmdRunnerWrapper(params):
     outputPath = params[1]
     force      = params[2]
     numRetries = 1
+    suppressError = False
     if len(params) > 3:
         numRetries = params[3]
+    if len(params) > 4:
+        suppressError = params[4]
+
         
     if cmd.strip() == ':':
         return True
@@ -58,6 +62,7 @@ def cmdRunnerWrapper(params):
         except CmdRunException:
             print 'Encountered command run error, rerunning:\n   ' + cmd
             retryCount -= 1
+    if not suppressError:
         raise CmdRunException('Failed to create output file: ' + outputPath +
                               '\n  running command: ' + cmd +
                               '\n after '+str(numRetries)+ ' attempts.')

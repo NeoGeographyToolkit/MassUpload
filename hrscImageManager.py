@@ -263,8 +263,6 @@ class HrscImage():
 
         # Determine which basemap should be used for image preprocessing.
         self._basemapProjectionMode = self.chooseLonCenter()
-        if callerMapType and (callerMapType != self._basemapProjectionMode):
-            raise Exception('Requested map type does not match the HRSC image location, aborting processing.')
         if self._basemapProjectionMode == MosaicUtilities.PROJ_TYPE_360:
             self._logger.info('HRSC image is centered around 180')
             self._basemapInstance = basemapInstance360
@@ -275,7 +273,10 @@ class HrscImage():
             self._logger.info('HRSC image is near the south pole')
             self._basemapInstance = basemapInstanceSouthPole
         else: # Normal case, use the 0 centered basemap
+            self._logger.info('HRSC image is centered around 0')
             self._basemapInstance = basemapInstance
+        if callerMapType and (callerMapType != self._basemapProjectionMode):
+            raise Exception('Requested map type does not match the HRSC image location, aborting processing.')
 
         # Record input parameters
         self._basemapColorPath = self._basemapInstance.getColorBasemapPath() # Path to the color low res entire base map
@@ -356,6 +357,7 @@ class HrscImage():
     def chooseLonCenter(self):
         '''Choose which of the basemap images to align to'''
         (minLon, maxLon, minLat, maxLat) = IrgGeoFunctions.getImageBoundingBox(self._inputHrscPaths[0])
+        self._logger.info('Min Lon = ' + str(minLat) + ', max Lon = ' + str(maxLat))
         meanLon = (minLon + maxLon) / 2
         meanLat = (minLat + maxLat) / 2
         
@@ -365,9 +367,9 @@ class HrscImage():
         #   classify all the others as either north or south pole.
         
         # Detect if the image is near the north or south pole
-        if abs(maxLat) > 60:
+        if maxLat > 60:
             return MosaicUtilities.PROJ_TYPE_NORTH_POLE
-        if abs(minLat) < -60:
+        if minLat < -60:
             return MosaicUtilities.PROJ_TYPE_SOUTH_POLE
         
         #raise Exception('--> On polar pass, ignoring all non-polar images!')
@@ -534,11 +536,23 @@ class HrscImage():
             cmd = ('./writeHrscColorPairs ' + self._basemapColorPath +' '+ tile['allChannelsStringAndMask']
                    +' '+ tile['spatialTransformToLowResBasePath'] +' '+ tile['brightnessGainsPath'] +' '+ tile['colorPairPath'])
             if self._threadPool:
-                cmdList.append( (cmd, tile['colorPairPath'], force) )
+                suppressError = True
+                numRetries = 1
+                cmdList.append( (cmd, tile['colorPairPath'], force, numRetries, suppressError) )
             else: # Just run the command
                 MosaicUtilities.cmdRunner(cmd, tile['colorPairPath'], force)        
         if self._threadPool:
-            self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+            try:
+                self._threadPool.map(MosaicUtilities.cmdRunnerWrapper, cmdList)
+            except:
+                pass
+
+        # Delete any tiles in the dictionary that we could not get point pairs for
+        keys = self._tileDict.keys()
+        for key in keys:
+            if not os.path.exists(self._tileDict[key]['colorPairPath']):
+                self._logger.info('Removing tile ' + key + ' because we could not generate point pairs!')
+                del self._tileDict[key]
 
         # Now compute the actual transforms
         # - This is pretty fast so the thread pool is not as important

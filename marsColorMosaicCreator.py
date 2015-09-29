@@ -268,6 +268,10 @@ def updateTilesContainingHrscImage(basemapInstance, hrscInstance, pool=None):
         (smallTilePath, largeTilePath, grayTilePath, outputTilePath, tileLogPath, tileBackupPath) = \
             basemapInstance.getPathsForTile(tileIndex) 
     
+        if not os.path.exists(tileBackupPath):
+            print 'Skipping non-existant output tile ' + str(tileIndex)
+            continue  # Skip non-existant basemap tiles
+    
         # Have we already written this HRSC image to this tile?
         comboAlreadyWritten = basemapInstance.checkLog(tileLogPath, hrscSetName)
         if comboAlreadyWritten: #Don't want to double-write the same image.
@@ -419,7 +423,7 @@ def mainProcessingFunction(options):
             logger.info('Have already completed adding HRSC image ' + hrscSetName + ',  skipping it.')
         else:
             hrscImageList.append(hrscSetName)
-    hrscImageList = ['h1167_0000'] # DEBUG
+    #hrscImageList = ['h1167_0000'] # DEBUG
 
     numDataSetsRemainingToProcess = len(hrscImageList)
     logger.info('Num data sets remaining to process = ' + str(numDataSetsRemainingToProcess))
@@ -612,7 +616,7 @@ def generateTreeAndEmail(startTime, numHrscImagesProcessed, setProcessTimes,
                     # -- gsutil also needs to be configured to upload to the correct bucket
                     # --gsutil-path /byss/smcmich1/programs/gsutil_install/gsutil
                     cmd = ('python sendToGoogleBucket.py sync-parallel  --dir '+KML_PYRAMID_FOLDER+
-                              ' -p 1 --chunk-size 200')
+                              ' -p 1 --chunk-size 200 --gsutil-path /home/scott_mcmichael/MOUNT_POINT/programs/gsutil/gsutil')
                     if options.bucketPrefix:
                         cmd += (' --prepend-path '+options.bucketPrefix)
                     print cmd
@@ -799,10 +803,10 @@ def setGlobalConfigs(argsIn):
     # These are the full ROI's for the north and south pole images
     if options.mapType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
         HRSC_FETCH_PROJ_ROI = MosaicUtilities.Rectangle(-1959288.087, 1958410.536, -1958437.302, 1959261.357)
-        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, 45, 90)
+        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, 60, 90)
     if options.mapType == MosaicUtilities.PROJ_TYPE_SOUTH_POLE:
         HRSC_FETCH_PROJ_ROI = MosaicUtilities.Rectangle(-1959439.740, 1958258.882, -1958280.029, 1959418.630)
-        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, -90, -45)
+        HRSC_FETCH_DEG_ROI  = MosaicUtilities.Rectangle(-180, 180, -90, -60)
     
     if options.nodeIndex > 0:
         # Then this is a specified Google Compute node, and has a designated processing 
@@ -838,14 +842,12 @@ def setGlobalConfigs(argsIn):
         if (options.nodeIndex == 20) or (options.nodeIndex == 24):
             HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 3)
             HRSC_FETCH_DEG_ROI  = grabLonSlice(HRSC_FETCH_DEG_ROI,  3)
-        
-        
-        print 'Using fetch ROI ' + str(HRSC_FETCH_DEG_ROI)
     
         options.bucketPrefix = 'node_' + str(options.nodeIndex)
         options.uploadBucket = 'hrsc_map_storage'
     
-    
+    print 'Using fetch ROI ' + str(HRSC_FETCH_DEG_ROI)
+    print HRSC_FETCH_PROJ_ROI
     
     # Also set up logging here.
     # - Log tiles are timestamped as is each line in the log file

@@ -61,7 +61,7 @@ class KmlTreeMaker:
             os.mkdir(outputFolder)
         
         # TODO: Accept flexible boundaries
-        self._bounds = MosaicUtilities.Rectangle(-180, 180, -90, 90)
+        self._bounds = MosaicUtilities.Rectangle(-180, 180, -50, 50) # Hack to make polar readable!
         self._layerTilings = []
         self._addTileLayer(0) # Go ahead and set up the first tile layer
         # Other layers are added as they are requested

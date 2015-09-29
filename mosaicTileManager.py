@@ -86,7 +86,7 @@ class MarsBasemap:
     def _makeGrayBasemap(self):
         '''Creates a grayscale version of the basemap if it does not already exist'''
         if not os.path.exists(self.fullBasemapGrayPath):
-            cmd = 'gdal_translate -b 1 ' + self.fullBasemapPath +' '+ self.fullBasemapGrayPath
+            cmd = MosaicUtilities.GDAL_TRANSLATE_PATH+' -b 1 ' + self.fullBasemapPath +' '+ self.fullBasemapGrayPath
             MosaicUtilities.cmdRunner(cmd, self.fullBasemapGrayPath, False)
 
     #------------------------------------------------------------
@@ -146,7 +146,7 @@ class MarsBasemap:
             minX -= 10669477.100
             maxX -= 10669477.100
         projCoordString = '%f %f %f %f' % (minX, maxY, maxX, minY)
-        cmd = ('gdal_translate ' + self.fullBasemapPath +' '+ outputPath
+        cmd = (MosaicUtilities.GDAL_TRANSLATE_PATH+' '+ self.fullBasemapPath +' '+ outputPath
                                  +' -projwin '+ projCoordString)
         MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
@@ -261,7 +261,7 @@ class MarsBasemap:
         self.makeCroppedRegionDegrees(degreeRoi, smallTilePath)
 
         # Generate a grayscale version of the small copy of this tile
-        cmd1 = ('gdal_translate -b 1 ' + smallTilePath +' '+ grayTilePath)
+        cmd1 = (MosaicUtilities.GDAL_TRANSLATE_PATH+' -b 1 ' + smallTilePath +' '+ grayTilePath)
 
         # Generate a copy of this tile at the full output resolution
         # - The image is blurred as it is upsampled so it does not look pixelated

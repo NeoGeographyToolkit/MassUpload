@@ -26,7 +26,7 @@ def downloadHrscFile(remoteURL, localFilePath):
       MosaicUtilities.cmdRunner(cmd, downloadPath, force)
 
     # Convert to GTiff format
-    cmd = 'gdal_translate -of GTiff ' + downloadPath + ' ' + localFilePath
+    cmd = GDAL_TRANSLATE_PATH + ' -of GTiff ' + downloadPath + ' ' + localFilePath
     MosaicUtilities.cmdRunner(cmd, localFilePath, force)
     
     # Clean up the download file
@@ -294,7 +294,7 @@ class HrscFileCacher():
         MosaicUtilities.cmdRunner(cmd, downloadPath)
     
         # Convert to GTiff format
-        cmd = 'gdal_translate -of GTiff ' + downloadPath + ' ' + localFilePath
+        cmd = GDAL_TRANSLATE_PATH+' -of GTiff ' + downloadPath + ' ' + localFilePath
         MosaicUtilities.cmdRunner(cmd, localFilePathPath)
         
         # Clean up the download file

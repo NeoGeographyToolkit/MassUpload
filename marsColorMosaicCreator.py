@@ -821,14 +821,24 @@ def setGlobalConfigs(argsIn):
             if quadrant==3: return MosaicUtilities.Rectangle(rect.minX, 0.0, rect.minY, 0.0) # BL
             raise Exception('Illegal quadrant!')
         
-        def grabLonSlice(rect, quadrant):
-            '''Similar function specialized for longitude.'''
-            center = rect.getCenterCoord()
-            if quadrant==0: return MosaicUtilities.Rectangle(-180, -90, rect.minY, rect.maxY) # TL
-            if quadrant==1: return MosaicUtilities.Rectangle(  90, 180, rect.minY, rect.maxY) # TR
-            if quadrant==2: return MosaicUtilities.Rectangle(   0,  90, rect.minY, rect.maxY) # BR
-            if quadrant==3: return MosaicUtilities.Rectangle( -90,   0, rect.minY, rect.maxY) # BL
-            raise Exception('Illegal quadrant!')
+        if options.mapType == MosaicUtilities.PROJ_TYPE_NORTH_POLE:
+            def grabLonSlice(rect, quadrant):
+                '''Similar function specialized for longitude -> NORTH.'''
+                center = rect.getCenterCoord()
+                if quadrant==0: return MosaicUtilities.Rectangle(-180, -90, rect.minY, rect.maxY) # TL
+                if quadrant==1: return MosaicUtilities.Rectangle(  90, 180, rect.minY, rect.maxY) # TR
+                if quadrant==2: return MosaicUtilities.Rectangle(   0,  90, rect.minY, rect.maxY) # BR
+                if quadrant==3: return MosaicUtilities.Rectangle( -90,   0, rect.minY, rect.maxY) # BL
+                raise Exception('Illegal quadrant!')
+        else:
+            def grabLonSlice(rect, quadrant):
+                '''Similar function specialized for longitude -> SOUTH.'''
+                center = rect.getCenterCoord()
+                if quadrant==0: return MosaicUtilities.Rectangle( -90,   0, rect.minY, rect.maxY) # TL
+                if quadrant==1: return MosaicUtilities.Rectangle(   0,  90, rect.minY, rect.maxY) # TR
+                if quadrant==2: return MosaicUtilities.Rectangle(  90, 180, rect.minY, rect.maxY) # BR
+                if quadrant==3: return MosaicUtilities.Rectangle(-180, -90, rect.minY, rect.maxY) # BL
+                raise Exception('Illegal quadrant!')
         
         if (options.nodeIndex == 17) or (options.nodeIndex == 21):
             HRSC_FETCH_PROJ_ROI = grabQuadrant(HRSC_FETCH_PROJ_ROI, 0)

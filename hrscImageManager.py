@@ -398,7 +398,7 @@ class HrscImage():
     def _makeGrayscaleImage(self, inputPath, outputPath, force=False):
         '''Convert an image on disk to grayscale'''
         # Currently we just take the red channel, later we should experiment.
-        cmd = MosaicUtilities.GDAL+' -b 1 ' + inputPath +' '+ outputPath
+        cmd = MosaicUtilities.GDAL_TRANSLATE_PATH+' -b 1 ' + inputPath +' '+ outputPath
         MosaicUtilities.cmdRunner(cmd, outputPath, force)
         
         
